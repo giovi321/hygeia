@@ -6,7 +6,7 @@
 
 static const char *TAG = "ui_toast";
 
-#define TOAST_MS 5000
+#define TOAST_MS (HY_UNDO_WINDOW_S * 1000)
 #define ICON 44
 #define UNDO_W 140
 
@@ -108,7 +108,7 @@ void toast_create(lv_obj_t *parent)
     s_undo_lbl = lv_label_create(s_undo_area);
     lv_obj_set_style_text_font(s_undo_lbl, hy_type.body_bold, 0);
     lv_obj_set_style_text_color(s_undo_lbl, lv_color_hex(HY_C_AMBER), 0);
-    lv_label_set_text(s_undo_lbl, "Undo 5");
+    lv_label_set_text_fmt(s_undo_lbl, "Undo %d", HY_UNDO_WINDOW_S);
     lv_obj_align(s_undo_lbl, LV_ALIGN_RIGHT_MID, -22, 0);
 
     s_timer = lv_timer_create(tick_cb, 100, NULL);
@@ -134,7 +134,7 @@ void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id)
     lv_label_set_text_fmt(s_text, "%s logged %s", code, hhmm);
     lv_obj_set_width(s_text, HY_TOAST_W - 22 - ICON - 16 - UNDO_W);
     lv_obj_align(s_text, LV_ALIGN_LEFT_MID, 22 + ICON + 16, 0);
-    lv_label_set_text(s_undo_lbl, "Undo 5");
+    lv_label_set_text_fmt(s_undo_lbl, "Undo %d", HY_UNDO_WINDOW_S);
     lv_obj_set_hidden(s_undo_area, false);
     lv_obj_set_hidden(s_scrim, false);
     lv_obj_move_foreground(s_scrim);

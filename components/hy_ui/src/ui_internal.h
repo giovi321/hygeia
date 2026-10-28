@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "lvgl.h"
+#include "hy/actions.h"
 
 /* colours (global constraints) */
 #define HY_C_BG        0x000000
@@ -42,7 +43,7 @@ lv_color_t hy_med_color(uint8_t idx);
 #define HY_TOAST_W      432
 #define HY_TOAST_H      88
 #define HY_TOAST_Y      358
-#define HY_TOO_SOON_WINDOW_MS 5000
+#define HY_TOO_SOON_WINDOW_MS (HY_UNDO_WINDOW_S * 1000)
 
 /* home.c */
 void home_create(lv_obj_t *parent);

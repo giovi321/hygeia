@@ -159,7 +159,7 @@ static void compute(const hy_med_t *m, int64_t now, const char *tz, view_t *v)
     }
 
     static int64_t prev_occ[OCC_MAX], next_occ[OCC_MAX];
-    size_t np = hy_occurrences(m, now - 8 * DAY_S, now + 1, tz, prev_occ, OCC_MAX);
+    size_t np = hy_occurrences(m, now - (DAY_S + (int64_t)m->early_window_min * 60), now + 1, tz, prev_occ, OCC_MAX);
     size_t nn = hy_occurrences(m, now + 1, now + 8 * DAY_S, tz, next_occ, OCC_MAX);
     int64_t prev = np ? prev_occ[np - 1] : 0;
     int64_t next = nn ? next_occ[0] : 0;
@@ -427,6 +427,17 @@ void home_create(lv_obj_t *parent)
 
 /* ---- tapping ---- */
 
+static const char *log_error_text(hy_err_t err)
+{
+    switch (err) {
+    case HY_E_CLOCK:     return "Set the time first";
+    case HY_E_NOT_FOUND: return "Medicine not found";
+    case HY_E_IO:        return "Storage error";
+    case HY_E_FULL:      return "Too many entries";
+    default:             return "Could not log";
+    }
+}
+
 void home_tap_med(uint32_t med_id)
 {
     if (toast_logged_visible()) {
@@ -467,18 +478,14 @@ void home_tap_med(uint32_t med_id)
     snprintf(code, sizeof code, "%s", m->code);   /* m is invalid after an action */
     uint32_t log_id = 0;
     hy_err_t err = hy_act_log_taken(med_id, 0, NULL, HY_SRC_SCREEN, &log_id);
-    ESP_LOGI(TAG, "log_taken med %s: err %d, log id %u", code, (int)err, (unsigned)log_id);
+    ESP_LOGI(TAG, "log_taken med %s: %s (%d), log id %u", code, hy_err_str(err), (int)err, (unsigned)log_id);
     if (err == HY_OK) {
         char hhmm[8];
         fmt_hhmm(now, tz, hhmm, sizeof hhmm);
         toast_show_logged(code, hhmm, log_id);
         ui_log_hwm("log");
-    } else if (err == HY_E_CLOCK) {
-        toast_show_info("Set the time first");
     } else {
-        char msg[48];
-        snprintf(msg, sizeof msg, "Could not log (error %d)", (int)err);
-        toast_show_info(msg);
+        toast_show_info(log_error_text(err));
     }
 }
 
