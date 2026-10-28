@@ -6,7 +6,7 @@ tmp=$(mktemp -d)
 (cd "$tmp" && npm pack @fontsource/inter@5.3.0 >/dev/null && tar xzf fontsource-inter-5.3.0.tgz)
 R="0x20-0x7F,0xA0-0xFF,0x2014"
 gen() { # name weight size
-  npx --yes lv_font_conv@1 --font "$tmp/package/files/inter-latin-$2-normal.woff" -r "$R" \
+  npx --yes lv_font_conv@1.5.3 --font "$tmp/package/files/inter-latin-$2-normal.woff" -r "$R" \
     --size "$3" --bpp 4 --format lvgl --lv-include lvgl.h --no-compress \
     --lv-font-name "$1" -o "$1.c"
   sed -i "s|--font [^ ]*|--font Inter-$2.woff|" "$1.c" # keep temp paths out of the sources
