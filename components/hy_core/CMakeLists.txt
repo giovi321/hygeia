@@ -6,6 +6,7 @@ idf_component_register(
         "src/actions.c"
         "src/codec.c"
         "src/power.c"
+        "src/types.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

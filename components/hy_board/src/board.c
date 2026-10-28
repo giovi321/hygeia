@@ -145,7 +145,7 @@ static void power_gate(void)
     s_boot_pwron = st;
     s_boot_reset = (int)rr;
     s_boot_would_off = allowed ? 0 : 1;
-    ESP_LOGI(TAG, "axp2101 ic_type=0x%02x (%s)", ic, ic == AXP_IC_TYPE_ID ? "matches AXP2101" : "UNEXPECTED");
+    ESP_LOGI(TAG, "axp2101 ic_type=0x%02x (matches AXP2101)", ic);
     ESP_LOGI(TAG, "pwron_status=0x%02x reset_reason=%d (%s) power off: %s", st, (int)rr,
              kind == HY_RST_POWERON ? "power-on" : "other", allowed ? "no" : "yes");
     if (!allowed && boot_held) {
@@ -163,6 +163,10 @@ void hy_board_power_report(void)
     uint8_t now = 0xFF;
     if (s_axp) {
         axp_read(AXP_REG_PWRON, &now);
+    }
+    if (s_boot_would_off < 0) {
+        ESP_LOGI(TAG, "power report: boot gate skipped (no AXP2101 match); now pwron_status=0x%02x", now);
+        return;
     }
     ESP_LOGI(TAG, "power report: boot pwron_status=0x%02x reset_reason=%d power_off=%d; now pwron_status=0x%02x",
              s_boot_pwron, s_boot_reset, s_boot_would_off, now);

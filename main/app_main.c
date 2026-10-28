@@ -126,7 +126,7 @@ static void seed_example_meds(void)
             m.min_interval_min = seed[i].min_interval;
         }
         hy_err_t e = hy_act_med_upsert(&m);
-        ESP_LOGI(TAG, "seed %s: err %d", seed[i].code, (int)e);
+        ESP_LOGI(TAG, "seed %s: %s", seed[i].code, hy_err_str(e));
     }
 }
 
@@ -137,15 +137,15 @@ static void init_storage(void)
         ESP_LOGE(TAG, "storage unavailable, no persistence: %s", esp_err_to_name(err));
         return;
     }
-    err = hy_store_open("/data");
-    ESP_LOGI(TAG, "hy_store_open: %s", esp_err_to_name(err));
-    if (err != ESP_OK) {
+    hy_err_t oerr = hy_store_open("/data");
+    ESP_LOGI(TAG, "hy_store_open: %s", hy_err_str(oerr));
+    if (oerr != HY_OK) {
         return;
     }
     struct stat st;
     bool first_boot = stat(MEDS_FILE, &st) != 0;
     hy_err_t e = hy_actions_init(hy_store_port(), NULL, hy_clock_port(), NULL);
-    ESP_LOGI(TAG, "hy_actions_init: err %d", (int)e);
+    ESP_LOGI(TAG, "hy_actions_init: %s", hy_err_str(e));
     if (first_boot) {
         ESP_LOGI(TAG, "%s not found: seeding the example medicines", MEDS_FILE);
         seed_example_meds();
