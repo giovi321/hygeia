@@ -47,8 +47,11 @@ static void flush_wrap(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 {
     int w = area->x2 - area->x1 + 1;
     int h = area->y2 - area->y1 + 1;
+    /* CO5300 needs even x1/y1 and odd x2/y2 (inclusive coordinates), so even widths and heights.
+     * A partial flush may be taller than HY_BUF_LINES when it is narrower than the screen (LVGL fits
+     * rows into the same buffer, e.g. 210 px wide -> 108 rows); the size limit is pixels, not rows. */
     bool odd = (area->x1 & 1) || (area->y1 & 1) || !(area->x2 & 1) || !(area->y2 & 1) || w > 480 ||
-               h > HY_BUF_LINES + 2;
+               (w * h) > (480 * HY_BUF_LINES);
     if (s_flush_count < HY_FLUSH_LOG_FIRST || odd || esp_timer_get_time() < s_verbose_until_us) {
         ESP_LOGI(TAG, "flush #%" PRIu32 " x=%d..%d y=%d..%d (%dx%d)%s", s_flush_count, (int)area->x1,
                  (int)area->x2, (int)area->y1, (int)area->y2, w, h, odd ? " ODD" : "");
