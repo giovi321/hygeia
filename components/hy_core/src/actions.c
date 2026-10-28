@@ -12,6 +12,7 @@ typedef struct {
     bool used;
     uint32_t log_id, med_id;
     int64_t ts;          /* ts of the entry as written (locates the month) */
+    int64_t slot;        /* slot of the entry, 0 for a free log */
     int64_t created;     /* clock now at creation */
     bool pill_dec;       /* a pill was taken off pills_left */
     bool converted;      /* a MISSED entry was updated in place */
@@ -31,10 +32,10 @@ static size_t undo_next;
 static bool inited;
 static hy_log_t qbuf[QUERY_MAX];
 
-static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id)
+static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id, int64_t slot)
 {
     hy_event_t ev;
-    ev.type = type; ev.ts = ts; ev.med_id = med_id; ev.log_id = log_id;
+    ev.type = type; ev.ts = ts; ev.med_id = med_id; ev.log_id = log_id; ev.slot = slot;
     hy_ev_publish(&ev);
 }
 
@@ -111,6 +112,10 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
         for (i = 0; i < n; i++)
             if (scratch[i].id == m->id) break;
         if (i == n) return HY_E_NOT_FOUND;
+        /* The caller's copy may be stale: the pill count is owned by this module, unless
+         * the caller turns counting on, when its value is the starting count. */
+        if (!(m->pills_enabled && !scratch[i].pills_enabled))
+            entry.pills_left = scratch[i].pills_left;
         scratch[i] = entry;
     }
     sort_meds(scratch, n);
@@ -119,7 +124,22 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
     memcpy(meds, scratch, n * sizeof meds[0]);
     n_meds = n;
     m->id = entry.id;
-    publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, entry.id, 0);
+    publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, entry.id, 0, 0);
+    return HY_OK;
+}
+
+hy_err_t hy_act_pills_set(uint32_t med_id, int16_t left)
+{
+    if (!inited) return HY_E_INVALID;
+    if (left < 0 || left > 9999) return HY_E_INVALID;
+    hy_med_t *cur = find_med(med_id);
+    if (!cur) return HY_E_NOT_FOUND;
+    memcpy(scratch, meds, n_meds * sizeof meds[0]);
+    for (size_t i = 0; i < n_meds; i++)
+        if (scratch[i].id == med_id) scratch[i].pills_left = left;
+    if (store->save_meds(store_ctx, scratch, n_meds) != HY_OK) return HY_E_IO;
+    cur->pills_left = left;
+    publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, med_id, 0, 0);
     return HY_OK;
 }
 
@@ -239,10 +259,11 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
     r->log_id = e.id;
     r->med_id = med_id;
     r->ts = ts;
+    r->slot = slot;
     r->created = now;
 
     if (out_log_id) *out_log_id = e.id;
-    publish(status == HY_TAKEN ? HY_EV_TAKEN : HY_EV_SKIPPED, ts, med_id, e.id);
+    publish(status == HY_TAKEN ? HY_EV_TAKEN : HY_EV_SKIPPED, ts, med_id, e.id, slot);
     return HY_OK;
 }
 
@@ -275,6 +296,7 @@ hy_err_t hy_act_undo(uint32_t log_id)
 
     uint32_t med_id = r->med_id;
     int64_t ts = r->ts;
+    int64_t slot = r->slot;
     bool dec = r->pill_dec;
     r->used = false;
 
@@ -287,7 +309,7 @@ hy_err_t hy_act_undo(uint32_t log_id)
             (void)store->save_meds(store_ctx, meds, n_meds);
         }
     }
-    publish(HY_EV_UNDONE, ts, med_id, log_id);
+    publish(HY_EV_UNDONE, ts, med_id, log_id, slot);
     return HY_OK;
 }
 
@@ -300,7 +322,7 @@ hy_err_t hy_act_log_edit(const hy_log_t *e)
     upd.edited = true;
     if (store->update_log(store_ctx, &upd) != HY_OK) return HY_E_IO;
     undo_forget(upd.id);
-    publish(HY_EV_LOG_EDITED, upd.ts, upd.med_id, upd.id);
+    publish(HY_EV_LOG_EDITED, upd.ts, upd.med_id, upd.id, upd.slot);
     return HY_OK;
 }
 
@@ -309,6 +331,6 @@ hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts)
     if (!inited) return HY_E_INVALID;
     if (store->delete_log(store_ctx, log_id, ts) != HY_OK) return HY_E_IO;
     undo_forget(log_id);
-    publish(HY_EV_LOG_EDITED, ts, 0, log_id);
+    publish(HY_EV_LOG_EDITED, ts, 0, log_id, 0);
     return HY_OK;
 }

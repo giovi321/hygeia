@@ -45,9 +45,15 @@ size_t   hy_meds(const hy_med_t **out);
  * at HY_MAX_MEDS. A nonzero unknown id gives HY_E_NOT_FOUND. Validation errors
  * come from hy_med_validate against all current medicines. The whole array is
  * saved; on a save failure (HY_E_IO) the in-memory state is unchanged.
+ * For an existing id the in-memory pills_left is kept and the caller's value is ignored
+ * (the caller's copy may be stale), except when the caller turns pills_enabled from false
+ * to true: then the caller's value is the starting count. A new medicine takes the caller's value.
  * Publishes HY_EV_MEDS_CHANGED on success.
  */
 hy_err_t hy_act_med_upsert(hy_med_t *m);
+/* Sets pills_left (0..9999, else HY_E_INVALID; unknown id HY_E_NOT_FOUND), saves the
+ * medicines (HY_E_IO, state unchanged on failure) and publishes HY_EV_MEDS_CHANGED. */
+hy_err_t hy_act_pills_set(uint32_t med_id, int16_t left);
 /* Unarchiving re-validates (code uniqueness). Same save and event rules as upsert. */
 hy_err_t hy_act_med_archive(uint32_t id, bool archived);
 

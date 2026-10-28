@@ -20,7 +20,7 @@
 
 static char s_base[BASE_MAX];
 static bool s_open;
-static uint32_t s_next_id = 1;
+static uint64_t s_next_id = 1;   /* 64 bit: max id 0xFFFFFFFF must not wrap */
 static size_t s_skipped;
 static char s_line[LINE_MAX_];      /* single-threaded by contract */
 static char s_wbuf[LINE_MAX_];
@@ -76,23 +76,63 @@ static int parse_month_name(const char *name)
     return y * 12 + (m - 1);
 }
 
-/* Smallest existing month index strictly greater than `after`, or -1. */
-static int dir_month_next(int after)
+/* ---- month index: sorted month indexes of the existing log files, built once at open ---- */
+
+#define MONTHS_MAX 1200
+
+static int s_months[MONTHS_MAX];
+static size_t s_n_months;
+
+/* First position whose month index is >= idx. */
+static size_t months_lower(int idx)
 {
+    size_t lo = 0, hi = s_n_months;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (s_months[mid] < idx) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+static bool months_has(int idx)
+{
+    size_t p = months_lower(idx);
+    return p < s_n_months && s_months[p] == idx;
+}
+
+/* Inserts keeping order; false when full. A present index is a no-op. */
+static bool months_add(int idx)
+{
+    size_t p = months_lower(idx);
+    if (p < s_n_months && s_months[p] == idx) return true;
+    if (s_n_months >= MONTHS_MAX) return false;
+    memmove(&s_months[p + 1], &s_months[p], (s_n_months - p) * sizeof s_months[0]);
+    s_months[p] = idx;
+    s_n_months++;
+    return true;
+}
+
+/* Lists the directory once. HY_E_FULL when there are more than MONTHS_MAX month files. */
+static hy_err_t months_load(void)
+{
+    s_n_months = 0;
     char p[PATH_MAX_];
-    if (!make_path(p, "log")) return -1;
+    if (!make_path(p, "log")) return HY_E_IO;
     DIR *d = opendir(p);
-    if (!d) return -1;
-    int best = -1;
+    if (!d) return HY_E_IO;
+    hy_err_t r = HY_OK;
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
         int idx = parse_month_name(de->d_name);
-        if (idx > after && (best < 0 || idx < best)) best = idx;
+        if (idx >= 0 && !months_add(idx)) {
+            r = HY_E_FULL;
+            break;
+        }
     }
     closedir(d);
-    return best;
+    return r;
 }
-
 
 /* ---- line reading ---- */
 
@@ -309,9 +349,11 @@ hy_err_t hy_store_open(const char *base_dir)
     /* next id = max id over all month files + 1 (ids are global; entries can be
      * backdated into older months or moved between months) */
     uint32_t max = 0;
-    for (int idx = dir_month_next(-1); idx >= 0; idx = dir_month_next(idx)) {
+    hy_err_t lr = months_load();
+    if (lr != HY_OK) return lr;
+    for (size_t k = 0; k < s_n_months; k++) {
         char rel[32], fp[PATH_MAX_];
-        month_name(idx, rel, sizeof rel);
+        month_name(s_months[k], rel, sizeof rel);
         if (!make_path(fp, rel)) return HY_E_IO;
         probe_ctx pc = { 0, false, 0 };
         scan_file(fp, probe_cb, &pc);
@@ -392,16 +434,19 @@ static hy_err_t st_append_log(void *ctx, hy_log_t *e)
     (void)ctx;
     if (!s_open || !e) return HY_E_IO;
     if (!ts_in_range(e->ts)) return HY_E_INVALID;
+    if (s_next_id > 0xFFFFFFFEULL) return HY_E_FULL;
     hy_log_t tmp = *e;
-    tmp.id = s_next_id;
+    tmp.id = (uint32_t)s_next_id;
     char line[LINE_MAX_];
     if (hy_log_to_jsonl(&tmp, line, sizeof line) < 0) return HY_E_INVALID;
     char rel[32], p[PATH_MAX_];
-    month_name(month_index(e->ts), rel, sizeof rel);
+    int idx = month_index(e->ts);
+    month_name(idx, rel, sizeof rel);
     if (!make_path(p, rel)) return HY_E_IO;
     hy_err_t r = append_line(p, line);
     if (r != HY_OK) return r;
-    e->id = s_next_id++;
+    months_add(idx);   /* cannot fail for a file that did not exist: open reported HY_E_FULL */
+    e->id = (uint32_t)s_next_id++;
     return HY_OK;
 }
 
@@ -415,11 +460,12 @@ static hy_err_t st_update_log(void *ctx, const hy_log_t *e)
     month_name(target, rel, sizeof rel);
     if (!make_path(tp, rel)) return HY_E_IO;
 
-    hy_err_t r = rewrite_month(tp, e->id, RW_UPDATE, e);
+    hy_err_t r = months_has(target) ? rewrite_month(tp, e->id, RW_UPDATE, e) : HY_E_NOT_FOUND;
     if (r != HY_E_NOT_FOUND) return r;
 
     /* Not in the month of the new ts: look in the other month files (ruling R7). */
-    for (int idx = dir_month_next(-1); idx >= 0; idx = dir_month_next(idx)) {
+    for (size_t k = 0; k < s_n_months; k++) {
+        int idx = s_months[k];
         if (idx == target) continue;
         char op[PATH_MAX_];
         month_name(idx, rel, sizeof rel);
@@ -432,6 +478,7 @@ static hy_err_t st_update_log(void *ctx, const hy_log_t *e)
         if (hy_log_to_jsonl(e, line, sizeof line) < 0) return HY_E_INVALID;
         r = append_line(tp, line);
         if (r != HY_OK) return r;
+        if (!months_add(target)) return HY_E_FULL;
         r = rewrite_month(op, e->id, RW_DELETE, NULL);
         return r == HY_OK ? HY_OK : HY_E_IO;
     }
@@ -444,7 +491,9 @@ static hy_err_t st_delete_log(void *ctx, uint32_t id, int64_t ts)
     if (!s_open) return HY_E_IO;
     if (!ts_in_range(ts)) return HY_E_NOT_FOUND;
     char rel[32], p[PATH_MAX_];
-    month_name(month_index(ts), rel, sizeof rel);
+    int idx = month_index(ts);
+    if (!months_has(idx)) return HY_E_NOT_FOUND;
+    month_name(idx, rel, sizeof rel);
     if (!make_path(p, rel)) return HY_E_IO;
     return rewrite_month(p, id, RW_DELETE, NULL);
 }
@@ -491,7 +540,8 @@ static size_t st_query_log(void *ctx, int64_t from, int64_t to, uint32_t med_id,
     int first = month_index(from);
     int last = month_index(to - 1);
     query_ctx c = { from, to, med_id, out, max, 0 };
-    for (int idx = dir_month_next(first - 1); idx >= 0 && idx <= last; idx = dir_month_next(idx)) {
+    for (size_t k = months_lower(first); k < s_n_months && s_months[k] <= last; k++) {
+        int idx = s_months[k];
         char rel[32], p[PATH_MAX_];
         month_name(idx, rel, sizeof rel);
         if (!make_path(p, rel)) break;

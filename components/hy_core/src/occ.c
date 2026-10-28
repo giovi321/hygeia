@@ -334,6 +334,15 @@ static bool slot_skipped(const hy_med_t *m, int64_t slot, const hy_log_t *logs, 
     return false;
 }
 
+static bool slot_missed_logged(const hy_med_t *m, int64_t slot, const hy_log_t *logs, size_t n_logs)
+{
+    for (size_t i = 0; i < n_logs; i++) {
+        const hy_log_t *l = &logs[i];
+        if (l->med_id == m->id && l->status == HY_MISSED && l->slot == slot) return true;
+    }
+    return false;
+}
+
 /* East rule: the instant the state clock counts from. */
 static int64_t state_base(int64_t slot, const char *posix_tz, const hy_tzchange_t *ch)
 {
@@ -360,6 +369,7 @@ hy_occ_state_t hy_occ_state(const hy_med_t *m, int64_t slot, int64_t next_slot, 
 
     if (slot_taken(m, slot, posix_tz, logs, n_logs)) return HY_OCC_TAKEN;
     if (slot_skipped(m, slot, logs, n_logs)) return HY_OCC_SKIPPED;
+    if (slot_missed_logged(m, slot, logs, n_logs)) return HY_OCC_MISSED;
 
     int64_t base = state_base(slot, posix_tz, last_change);
     int64_t late = base + (int64_t)m->late_after_min * 60;

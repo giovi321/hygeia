@@ -124,7 +124,7 @@ static void test_events_subscribe_unsubscribe(void)
     hy_ev_unsubscribe(h[3]);
     extra = hy_ev_subscribe(on_ev, NULL);
     TEST_ASSERT_EQUAL_INT(h[3], extra);
-    hy_event_t e = { HY_EV_DUE, 1, 2, 3 };
+    hy_event_t e = { HY_EV_DUE, 1, 2, 3, 0 };
     n_evs = 0;
     hy_ev_publish(&e);
     TEST_ASSERT_EQUAL_INT(HY_EV_MAX_SUBSCRIBERS, n_evs);
@@ -619,6 +619,72 @@ static void test_log_edit_and_delete(void)
     TEST_ASSERT_EQUAL_INT(2, n_evs);
 }
 
+static void test_upsert_keeps_decremented_pills(void)
+{
+    hy_med_t stale = *med_by_id(2);                    /* pills_left 12 */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(2, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT16(11, med_by_id(2)->pills_left);
+    strcpy(stale.name, "Vitamin D3");
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&stale));
+    TEST_ASSERT_EQUAL_STRING("Vitamin D3", med_by_id(2)->name);
+    TEST_ASSERT_EQUAL_INT16(11, med_by_id(2)->pills_left);
+    TEST_ASSERT_EQUAL_INT16(11, st.meds[1].pills_left); /* saved */
+}
+
+static void test_upsert_enabling_pills_takes_caller_count(void)
+{
+    hy_med_t m = *med_by_id(1);                        /* pills disabled */
+    TEST_ASSERT_FALSE(m.pills_enabled);
+    m.pills_enabled = true; m.pills_left = 30; m.pills_alert = 5;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&m));
+    TEST_ASSERT_EQUAL_INT16(30, med_by_id(1)->pills_left);
+}
+
+static void test_pills_set(void)
+{
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(2, 0, NULL, HY_SRC_SCREEN, NULL));
+    n_evs = 0; st.saves = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_pills_set(2, 40));
+    TEST_ASSERT_EQUAL_INT16(40, med_by_id(2)->pills_left);
+    TEST_ASSERT_EQUAL_INT16(40, st.meds[1].pills_left);
+    TEST_ASSERT_EQUAL_INT(1, st.saves);
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL_INT(HY_EV_MEDS_CHANGED, evs[0].type);
+    TEST_ASSERT_EQUAL_UINT32(2, evs[0].med_id);
+    n_evs = 0;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_pills_set(2, -1));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_pills_set(2, 10000));
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_pills_set(99, 5));
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+    TEST_ASSERT_EQUAL_INT16(40, med_by_id(2)->pills_left);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_pills_set(2, 9999));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_pills_set(2, 0));
+    st.fail_save = true;
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_pills_set(2, 7));
+    TEST_ASSERT_EQUAL_INT16(0, med_by_id(2)->pills_left);
+}
+
+static void test_events_carry_slot(void)
+{
+    uint32_t id;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, &id));
+    TEST_ASSERT_EQUAL_INT(HY_EV_TAKEN, evs[0].type);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), evs[0].slot);
+    TEST_ASSERT_EQUAL_INT64(st.logs[0].slot, evs[0].slot);
+    n_evs = 0;
+    clk.now += 2;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
+    TEST_ASSERT_EQUAL_INT(HY_EV_UNDONE, evs[0].type);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), evs[0].slot);
+
+    st.meds[2].type = HY_SCHED_AS_NEEDED; st.meds[2].n_times = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    n_evs = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(3, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_EV_TAKEN, evs[0].type);
+    TEST_ASSERT_EQUAL_INT64(0, evs[0].slot);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -655,5 +721,9 @@ int main(void)
     RUN_TEST(test_undo_log_failure_keeps_record);
     RUN_TEST(test_undo_ring_keeps_eight);
     RUN_TEST(test_log_edit_and_delete);
+    RUN_TEST(test_upsert_keeps_decremented_pills);
+    RUN_TEST(test_upsert_enabling_pills_takes_caller_count);
+    RUN_TEST(test_pills_set);
+    RUN_TEST(test_events_carry_slot);
     return UNITY_END();
 }
