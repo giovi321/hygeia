@@ -173,7 +173,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - An occurrence becomes `due` at its time, `late` after `late_after_min`, `missed` after `missed_after_min`. When it becomes missed, a `missed` log entry with source `auto` is written and an event sent
 - Dose window: from `early_window_min` before the occurrence (per medicine, default 60) until the next occurrence of the same medicine. A `taken` log in that window satisfies the earliest unsatisfied occurrence; `delta_min` is negative for early doses. A log outside any window is a free log
 - Taken after missed: if a dose is logged after its occurrence was marked missed, but still before the next occurrence, the `missed` entry is converted to `taken` (with its real time and lateness) and a `taken` event is sent. The original missed event is not retracted
-- Untracked periods: while the device is off, the battery is flat, or the clock is invalid, occurrences cannot be observed. On return, occurrences in that gap are not marked missed. Until plan 3 adds the `untracked` interval, slots that fall while the device was off are untracked, never missed. The store records the gap as an `untracked` interval; history draws it grey, adherence excludes it, and a single `untracked` event (start, end) is sent instead of one per occurrence. Occurrences still within their window when the device returns become due normally
+- Untracked periods: while the device is off, the battery is flat, or the clock is invalid, occurrences cannot be observed. On return, occurrences in that gap are not marked missed. The store records the gap as an `untracked` interval; history draws it grey, adherence excludes it, and a single `untracked` event (start, end) is sent instead of one per occurrence. Occurrences still within their window when the device returns become due normally. Interim behaviour, until untracked intervals are persisted: slots that fall while the device was off show as untracked and are never marked missed.
 - Snooze defaults to 15 minutes, configurable; snoozing does not extend the missed deadline
 - As-needed: logging sooner than `min_interval_min` after the previous dose shows a warning with the time since the last dose; the user can still confirm
 - The scheduler exposes the next wake time (next occurrence or deadline) to `power`, which sets the RTC alarm
@@ -230,7 +230,7 @@ Screens: Home (grid of rings, "+" tile shows a QR to the web UI's add page), Qui
 
 Several due at once: the due card shows the first, with "+2 more" and a swipe up to step through them. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
 
-History: a dose taken late gets an amber dot, so it differs from today's partial cell. The device cannot edit or delete log entries; edits are made only in the web UI.
+History: a dose taken late gets an amber dot, so it differs from today's partial cell. The device cannot edit log entries, apart from undo within the 5 s toast; edits and deletes happen only in the web UI.
 
 Text entry: the on-screen keyboard is used for notes only (log with note). Nothing else on the device takes typed input.
 
@@ -245,7 +245,7 @@ Do-not-disturb and quiet hours: the card still appears, the chime is silent. Qui
 ## Network
 
 - Modes: client, access point, off. Selected on the device (quick settings) and in the web UI; persisted
-- Networks are added only in the web UI (decided: no on-device keyboard or scan). On the device you pick client, AP or off, and choose among saved networks. On a trip, a new network is added by turning on AP mode and opening the web UI from a phone
+- Networks are added only in the web UI (decided: no on-device keyboard for network credentials, and no scan). On the device you pick client, AP or off, and choose among saved networks. On a trip, a new network is added by turning on AP mode and opening the web UI from a phone
 - Client mode: list of known networks, tries them in order of last success; on failure for 2 min, stays in client mode retrying with backoff (never silently switches to AP). The device shows a hint to start AP mode
 - AP mode: SSID `hygeia-XXXX` (last 4 hex of the MAC), WPA2 with a random 10-character password generated on first boot, changeable. Device shows a Wi-Fi QR code that includes the password, then a QR to `http://192.168.4.1`. Captive-portal DNS redirects to the web UI
 - mDNS name `hygeia.local` in client mode (configurable)
