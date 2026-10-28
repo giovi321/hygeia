@@ -342,7 +342,8 @@ void home_refresh(bool animate)
     const hy_clock_port_t *ck = hy_clock_port();
     bool valid = ck->valid(NULL);
     int64_t now = valid ? ck->now(NULL) : 0;
-    const char *tz = ck->tz(NULL);
+    char tz[HY_TZ_LEN];
+    hy_clock_tz_copy(tz, sizeof tz); /* the port pointer may be replaced by a zone change */
     update_time(now, valid, tz);
     s_last_minute = valid ? now / 60 : -1;
 
@@ -456,7 +457,8 @@ void home_tap_med(uint32_t med_id)
     const hy_clock_port_t *ck = hy_clock_port();
     bool valid = ck->valid(NULL);
     int64_t now = valid ? ck->now(NULL) : 0;
-    const char *tz = ck->tz(NULL);
+    char tz[HY_TZ_LEN];
+    hy_clock_tz_copy(tz, sizeof tz); /* the port pointer may be replaced by a zone change */
     bool second = s_pending && s_pending_id == med_id && lv_tick_elaps(s_pending_tick) <= HY_TOO_SOON_WINDOW_MS;
 
     if (valid && m->type == HY_SCHED_AS_NEEDED && !second) {

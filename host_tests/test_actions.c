@@ -74,7 +74,7 @@ static struct { int64_t now; bool valid; } clk;
 static int64_t c_now(void *c) { (void)c; return clk.now; }
 static const char *c_tz(void *c) { (void)c; return "UTC0"; }
 static bool c_valid(void *c) { (void)c; return clk.valid; }
-static const hy_clock_port_t clock_port = { c_now, c_tz, c_valid };
+static const hy_clock_port_t clock_port = { c_now, c_tz, c_valid, NULL };
 
 /* ---- event recorder ---- */
 static hy_event_t evs[32]; static int n_evs; static int sub;
@@ -563,7 +563,7 @@ static const char *c_tz_null(void *c) { (void)c; return NULL; }
 
 static void test_null_tz_is_utc(void)
 {
-    hy_clock_port_t cp = { c_now, c_tz_null, c_valid };
+    hy_clock_port_t cp = { c_now, c_tz_null, c_valid, NULL };
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &cp, NULL));
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
     TEST_ASSERT_EQUAL_STRING("UTC0", st.logs[0].tz);

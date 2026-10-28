@@ -170,8 +170,11 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
 
     int64_t now = clk->now(clk_ctx);
     if (ts == 0) ts = now;
-    const char *tz = clk->tz(clk_ctx);
-    if (!tz) tz = "UTC0";
+    /* Copied once: the port's pointer may be replaced by a zone change in another task. */
+    char tz[HY_TZ_LEN];
+    const char *ptz = clk->tz(clk_ctx);
+    strncpy(tz, ptz ? ptz : "UTC0", sizeof tz - 1);
+    tz[sizeof tz - 1] = '\0';
 
     /* As-needed medicines have no slots: hy_match_slot gives 0, so the log is not queried
      * (a long history could otherwise hit the query cap and block logging). */
@@ -211,8 +214,7 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
         e.med_id = med_id;
     }
     e.ts = ts;
-    strncpy(e.tz, tz ? tz : "", HY_TZ_LEN - 1);
-    e.tz[HY_TZ_LEN - 1] = '\0';
+    memcpy(e.tz, tz, sizeof e.tz);
     e.status = status;
     e.slot = slot;
     e.delta_min = slot ? (int32_t)((ts - slot) / 60) : 0;

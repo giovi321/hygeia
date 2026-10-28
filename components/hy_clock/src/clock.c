@@ -7,6 +7,8 @@
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "hy/tzlock.h"
 #include "nvs.h"
 #include "pcf85063.h"
 
@@ -16,6 +18,10 @@
 
 #define NVS_NS "clock"
 #define NVS_KEY_TZ "tz"
+#define NVS_KEY_ZONE "zone"
+#define NVS_KEY_CHG_AT "chg_at"
+#define NVS_KEY_CHG_OLD "chg_old"
+#define NVS_KEY_CHG_NEW "chg_new"
 #define SRC_LEN 16
 
 static const char *TAG = "clock";
@@ -25,14 +31,35 @@ static const char *TAG = "clock";
  * from the UI task). All state below is read and written inside s_lock. The TZ is double
  * buffered: the writer fills the inactive buffer and swaps the index in one critical section, so
  * the pointer returned by hy_clock_tz() / port tz() always holds a complete string. It stays
- * intact until the second following TZ change.
+ * intact until the second following TZ change; hy_clock_tz_copy() has no such limit.
+ *
+ * The process TZ environment (setenv/tzset/localtime_r/mktime) is guarded separately by the
+ * recursive s_tz_mutex, registered with hy_tz_set_lock so hy_core takes the same lock.
  */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_valid;
 static char s_tzbuf[2][HY_TZ_LEN] = { HY_CLOCK_DEFAULT_TZ, "" };
 static int s_tz_idx;
+static char s_zone[HY_ZONE_LEN] = HY_CLOCK_DEFAULT_ZONE;
 static char s_src[SRC_LEN];
 static int64_t s_sync_at;
+static uint32_t s_sync_seq;
+static int64_t s_sync_jump;
+static bool s_have_chg;
+static hy_tzchange_t s_chg;
+
+static StaticSemaphore_t s_tz_mutex_buf;
+static SemaphoreHandle_t s_tz_mutex;
+
+static void tz_mutex_take(void *ctx)
+{
+    xSemaphoreTakeRecursive((SemaphoreHandle_t)ctx, portMAX_DELAY);
+}
+
+static void tz_mutex_give(void *ctx)
+{
+    xSemaphoreGiveRecursive((SemaphoreHandle_t)ctx);
+}
 
 static void set_valid(bool v)
 {
@@ -58,30 +85,73 @@ static void tz_publish(const char *tz)
     portEXIT_CRITICAL(&s_lock);
 }
 
-static void apply_tz(void)
+static void zone_publish(const char *zone)
 {
-    setenv("TZ", tz_current(), 1);
+    portENTER_CRITICAL(&s_lock);
+    strlcpy(s_zone, zone, sizeof s_zone);
+    portEXIT_CRITICAL(&s_lock);
+}
+
+static void chg_publish(const hy_tzchange_t *ch)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_chg = *ch;
+    s_have_chg = true;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+static void tz_apply(void)
+{
+    char tz[HY_TZ_LEN];
+    hy_clock_tz_copy(tz, sizeof tz);
+    hy_tz_lock();
+    setenv("TZ", tz, 1);
     tzset();
+    hy_tz_unlock();
+}
+
+/* Reads a string key into out; an absent key leaves out untouched (ESP_ERR_NVS_NOT_FOUND) */
+static esp_err_t load_str(nvs_handle_t h, const char *key, char *out, size_t len)
+{
+    char buf[HY_ZONE_LEN > HY_TZ_LEN ? HY_ZONE_LEN : HY_TZ_LEN];
+    size_t n = sizeof buf;
+    esp_err_t err = nvs_get_str(h, key, buf, &n);
+    if (err == ESP_OK) {
+        strlcpy(out, buf, len);
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "reading %s from NVS: %s", key, esp_err_to_name(err));
+    }
+    return err;
 }
 
 static void load_tz(void)
 {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) {
-        return; /* namespace absent: keep the default */
+        return; /* namespace absent: keep the defaults */
     }
-    char buf[HY_TZ_LEN];
-    size_t len = sizeof buf;
-    esp_err_t err = nvs_get_str(h, NVS_KEY_TZ, buf, &len);
+    char tz[HY_TZ_LEN] = "";
+    if (load_str(h, NVS_KEY_TZ, tz, sizeof tz) == ESP_OK && tz[0] != '\0') {
+        tz_publish(tz);
+    }
+    char zone[HY_ZONE_LEN];
+    if (load_str(h, NVS_KEY_ZONE, zone, sizeof zone) == ESP_OK) {
+        zone_publish(zone);
+    } else if (tz[0] != '\0' && strcmp(tz, HY_CLOCK_DEFAULT_TZ) != 0) {
+        zone_publish(""); /* a raw POSIX zone stored before zone names existed */
+    }
+    hy_tzchange_t ch;
+    memset(&ch, 0, sizeof ch);
+    if (nvs_get_i64(h, NVS_KEY_CHG_AT, &ch.at) == ESP_OK &&
+        load_str(h, NVS_KEY_CHG_OLD, ch.old_tz, sizeof ch.old_tz) == ESP_OK &&
+        load_str(h, NVS_KEY_CHG_NEW, ch.new_tz, sizeof ch.new_tz) == ESP_OK) {
+        chg_publish(&ch);
+    }
     nvs_close(h);
-    if (err == ESP_OK && buf[0] != '\0') {
-        tz_publish(buf);
-    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGW(TAG, "reading tz from NVS: %s", esp_err_to_name(err));
-    }
 }
 
-static esp_err_t save_tz(const char *tz)
+/* Persists tz and zone, plus the change record when ch is not NULL, with one commit */
+static esp_err_t save_zone(const char *tz, const char *zone, const hy_tzchange_t *ch)
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
@@ -90,10 +160,55 @@ static esp_err_t save_tz(const char *tz)
     }
     err = nvs_set_str(h, NVS_KEY_TZ, tz);
     if (err == ESP_OK) {
+        err = nvs_set_str(h, NVS_KEY_ZONE, zone);
+    }
+    if (err == ESP_OK && ch) {
+        err = nvs_set_i64(h, NVS_KEY_CHG_AT, ch->at);
+        if (err == ESP_OK) {
+            err = nvs_set_str(h, NVS_KEY_CHG_OLD, ch->old_tz);
+        }
+        if (err == ESP_OK) {
+            err = nvs_set_str(h, NVS_KEY_CHG_NEW, ch->new_tz);
+        }
+    }
+    if (err == ESP_OK) {
         err = nvs_commit(h);
     }
     nvs_close(h);
     return err;
+}
+
+/*
+ * Puts tz in force (RAM and the process TZ) inside the TZ lock, so no reader sees the zone half
+ * switched. When tz differs from the current POSIX string the change {at, old, tz} is recorded
+ * in RAM and copied to *ch. The zone name becomes `zone`; zone NULL keeps the current name when
+ * the POSIX string is unchanged and clears it when it changed. The resulting name is copied to
+ * zone_out. Returns true when a change was recorded.
+ */
+static bool zone_switch(const char *tz, const char *zone, int64_t at, hy_tzchange_t *ch,
+                        char *zone_out, size_t zone_out_len)
+{
+    hy_tz_lock();
+    char old[HY_TZ_LEN];
+    hy_clock_tz_copy(old, sizeof old);
+    bool changed = strcmp(old, tz) != 0;
+    if (changed) {
+        memset(ch, 0, sizeof *ch);
+        ch->at = at;
+        strlcpy(ch->old_tz, old, sizeof ch->old_tz);
+        strlcpy(ch->new_tz, tz, sizeof ch->new_tz);
+        chg_publish(ch);
+    }
+    if (zone) {
+        zone_publish(zone);
+    } else if (changed) {
+        zone_publish("");
+    }
+    tz_publish(tz);
+    tz_apply();
+    hy_clock_zone_copy(zone_out, zone_out_len);
+    hy_tz_unlock();
+    return changed;
 }
 
 static void set_system_time(int64_t utc)
@@ -104,8 +219,12 @@ static void set_system_time(int64_t utc)
 
 esp_err_t hy_clock_init(i2c_master_bus_handle_t bus)
 {
+    if (!s_tz_mutex) {
+        s_tz_mutex = xSemaphoreCreateRecursiveMutexStatic(&s_tz_mutex_buf);
+        hy_tz_set_lock(tz_mutex_take, tz_mutex_give, s_tz_mutex);
+    }
     load_tz();
-    apply_tz();
+    tz_apply();
 
     esp_err_t err = pcf85063_init(bus);
     if (err != ESP_OK) {
@@ -143,31 +262,69 @@ bool hy_clock_valid(void)
 
 esp_err_t hy_clock_set(int64_t utc, const char *posix_tz, const char *source)
 {
-    const char *tz = posix_tz ? posix_tz : tz_current();
-    size_t n = strlen(tz);
-    if (n == 0 || n >= HY_TZ_LEN || !hy_clock_is_plausible(utc, false, HY_BUILD_EPOCH)) {
+    char tzcopy[HY_TZ_LEN];
+    if (posix_tz) {
+        size_t n = strlen(posix_tz);
+        if (n == 0 || n >= HY_TZ_LEN) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        memcpy(tzcopy, posix_tz, n + 1);
+    } else {
+        hy_clock_tz_copy(tzcopy, sizeof tzcopy);
+    }
+    if (!hy_clock_is_plausible(utc, false, HY_BUILD_EPOCH)) {
         return ESP_ERR_INVALID_ARG;
     }
-    char tzcopy[HY_TZ_LEN];
-    strlcpy(tzcopy, tz, sizeof tzcopy); /* tz may point at the buffer that is about to be replaced */
     esp_err_t err = pcf85063_write(utc);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC write: %s", esp_err_to_name(err));
         return err;
     }
+    int64_t jump = utc - (int64_t)time(NULL);
     set_system_time(utc);
-    /* The zone is in force even if persisting it fails */
-    tz_publish(tzcopy);
-    apply_tz();
-    esp_err_t nvs_err = save_tz(tzcopy);
+    /* The zone is in force even if persisting it fails. A differing POSIX string records a
+     * change and clears the IANA name; an unchanged one keeps the name. */
+    hy_tzchange_t ch;
+    char zone[HY_ZONE_LEN];
+    bool changed = zone_switch(tzcopy, NULL, utc, &ch, zone, sizeof zone);
+    esp_err_t nvs_err = save_zone(tzcopy, zone, changed ? &ch : NULL);
     portENTER_CRITICAL(&s_lock);
     s_valid = true;
     strlcpy(s_src, source ? source : "", sizeof s_src);
     s_sync_at = utc;
+    s_sync_jump = jump;
+    s_sync_seq++;
     portEXIT_CRITICAL(&s_lock);
-    ESP_LOGI(TAG, "clock set via %s: utc %lld, tz %s", source ? source : "", (long long)utc, tzcopy);
+    ESP_LOGI(TAG, "clock set via %s: utc %lld, jump %lld s, tz %s%s", source ? source : "",
+             (long long)utc, (long long)jump, tzcopy, changed ? ", zone change recorded" : "");
     if (nvs_err != ESP_OK) {
         ESP_LOGE(TAG, "tz in force but not persisted, NVS: %s", esp_err_to_name(nvs_err));
+    }
+    return nvs_err;
+}
+
+esp_err_t hy_clock_set_zone(const char *iana, const char *posix_tz)
+{
+    if (!posix_tz) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t n = strlen(posix_tz);
+    if (n == 0 || n >= HY_TZ_LEN || (iana && strlen(iana) >= HY_ZONE_LEN)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!hy_clock_valid()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    char tzcopy[HY_TZ_LEN];
+    memcpy(tzcopy, posix_tz, n + 1);
+    hy_tzchange_t ch;
+    char zone[HY_ZONE_LEN];
+    bool changed = zone_switch(tzcopy, iana ? iana : "", (int64_t)time(NULL), &ch, zone, sizeof zone);
+    esp_err_t nvs_err = save_zone(tzcopy, zone, changed ? &ch : NULL);
+    ESP_LOGI(TAG, "zone set: %s, tz %s%s", zone[0] ? zone : "(none)", tzcopy,
+             changed ? ", zone change recorded" : "");
+    if (nvs_err != ESP_OK) {
+        ESP_LOGE(TAG, "zone in force but not persisted, NVS: %s", esp_err_to_name(nvs_err));
     }
     return nvs_err;
 }
@@ -175,6 +332,48 @@ esp_err_t hy_clock_set(int64_t utc, const char *posix_tz, const char *source)
 const char *hy_clock_tz(void)
 {
     return tz_current();
+}
+
+void hy_clock_tz_copy(char *out, size_t len)
+{
+    if (!out || len == 0) {
+        return;
+    }
+    portENTER_CRITICAL(&s_lock);
+    strlcpy(out, s_tzbuf[s_tz_idx], len);
+    portEXIT_CRITICAL(&s_lock);
+}
+
+void hy_clock_zone_copy(char *out, size_t len)
+{
+    if (!out || len == 0) {
+        return;
+    }
+    portENTER_CRITICAL(&s_lock);
+    strlcpy(out, s_zone, len);
+    portEXIT_CRITICAL(&s_lock);
+}
+
+bool hy_clock_last_tzchange(hy_tzchange_t *out)
+{
+    portENTER_CRITICAL(&s_lock);
+    bool have = s_have_chg;
+    if (have && out) {
+        *out = s_chg;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    return have;
+}
+
+uint32_t hy_clock_sync_seq(int64_t *jump_s)
+{
+    portENTER_CRITICAL(&s_lock);
+    uint32_t seq = s_sync_seq;
+    if (jump_s) {
+        *jump_s = s_sync_jump;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    return seq;
 }
 
 void hy_clock_last_sync(char *src, size_t src_len, int64_t *at)
@@ -204,14 +403,28 @@ void hy_clock_report(void)
     struct tm u, l;
     char us[24], ls[24];
     gmtime_r(&now, &u);
+    hy_tz_lock();
     localtime_r(&now, &l);
+    hy_tz_unlock();
     strftime(us, sizeof us, "%Y-%m-%d %H:%M:%S", &u);
     strftime(ls, sizeof ls, "%Y-%m-%d %H:%M:%S", &l);
-    ESP_LOGI(TAG, "system utc=%lld (%s) local=%s tz=%s", (long long)now, us, ls, tz_current());
-    int64_t at;
+    char tz[HY_TZ_LEN], zone[HY_ZONE_LEN];
+    hy_clock_tz_copy(tz, sizeof tz);
+    hy_clock_zone_copy(zone, sizeof zone);
+    ESP_LOGI(TAG, "system utc=%lld (%s) local=%s tz=%s zone=%s", (long long)now, us, ls, tz,
+             zone[0] ? zone : "(none)");
+    int64_t at, jump;
     char src[SRC_LEN];
     hy_clock_last_sync(src, sizeof src, &at);
-    ESP_LOGI(TAG, "valid=%d last_sync_source=%s last_sync_utc=%lld", hy_clock_valid(), src[0] ? src : "none", (long long)at);
+    uint32_t seq = hy_clock_sync_seq(&jump);
+    ESP_LOGI(TAG, "valid=%d last_sync_source=%s last_sync_utc=%lld sync_seq=%u jump=%lld",
+             hy_clock_valid(), src[0] ? src : "none", (long long)at, (unsigned)seq, (long long)jump);
+    hy_tzchange_t ch;
+    if (hy_clock_last_tzchange(&ch)) {
+        ESP_LOGI(TAG, "tz change at=%lld old=%s new=%s", (long long)ch.at, ch.old_tz, ch.new_tz);
+    } else {
+        ESP_LOGI(TAG, "tz change none");
+    }
 }
 
 static int64_t port_now(void *ctx)
@@ -232,8 +445,16 @@ static bool port_valid(void *ctx)
     return hy_clock_valid();
 }
 
+static bool port_last_change(void *ctx, hy_tzchange_t *out)
+{
+    (void)ctx;
+    return hy_clock_last_tzchange(out);
+}
+
 const hy_clock_port_t *hy_clock_port(void)
 {
-    static const hy_clock_port_t port = { .now = port_now, .tz = port_tz, .valid = port_valid };
+    static const hy_clock_port_t port = {
+        .now = port_now, .tz = port_tz, .valid = port_valid, .last_change = port_last_change,
+    };
     return &port;
 }
