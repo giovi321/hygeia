@@ -1,3 +1,7 @@
+#include "sdkconfig.h"
+
+#if CONFIG_HY_DEBUG_CONSOLE
+
 #include "console.h"
 
 #include <stdbool.h>
@@ -89,3 +93,5 @@ void console_start(void)
         ESP_LOGE(TAG, "console task create failed");
     }
 }
+
+#endif /* CONFIG_HY_DEBUG_CONSOLE */

@@ -1,0 +1,10 @@
+menu "Hygeia"
+
+    config HY_DEBUG_CONSOLE
+        bool "Serial debug console"
+        default y
+        help
+            Line commands on the USB console for development (time, tap, shot, ...).
+            Release builds set this to n.
+
+endmenu

@@ -12,8 +12,19 @@ jobs:
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v6.0
+          esp_idf_version: v6.0.2
           target: esp32s3
+
+  firmware-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build firmware without the debug console
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.2
+          target: esp32s3
+          command: idf.py -B build-rel -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
 
   host-tests:
     runs-on: ubuntu-latest

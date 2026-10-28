@@ -12,10 +12,13 @@
 #include "nvs_flash.h"
 #include <sys/stat.h>
 
+#if CONFIG_HY_DEBUG_CONSOLE
 #include "console.h"
+#endif
 
 static const char *TAG = "hygeia";
 
+#if CONFIG_HY_DEBUG_CONSOLE
 static void cmd_boardtest(const char *args)
 {
     (void)args;
@@ -92,6 +95,7 @@ static void cmd_undo(const char *args) { (void)args; hy_ui_debug_undo(); }
 static void cmd_logs(const char *args) { (void)args; hy_ui_debug_logs(); }
 static void cmd_seed4(const char *args) { hy_ui_debug_seed4(args); }
 static void cmd_shot(const char *args) { (void)args; hy_ui_debug_shot(); }
+#endif
 
 #define MEDS_FILE "/data/meds.json"
 
@@ -184,6 +188,7 @@ void app_main(void)
         ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));
     }
 
+#if CONFIG_HY_DEBUG_CONSOLE
     console_register("boardtest", cmd_boardtest);
     console_register("powerstat", cmd_powerstat);
     console_register("time", cmd_time);
@@ -194,4 +199,5 @@ void app_main(void)
     console_register("seed4", cmd_seed4);
     console_register("shot", cmd_shot);
     console_start();
+#endif
 }

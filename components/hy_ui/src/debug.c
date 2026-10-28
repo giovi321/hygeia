@@ -1,3 +1,7 @@
+#include "sdkconfig.h"
+
+#if CONFIG_HY_DEBUG_CONSOLE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -224,3 +228,5 @@ void hy_ui_debug_undo(void) { post(J_UNDO, NULL); }
 void hy_ui_debug_logs(void) { post(J_LOGS, NULL); }
 void hy_ui_debug_seed4(const char *arg) { post(J_SEED4, arg); }
 void hy_ui_debug_shot(void) { post(J_SHOT, NULL); }
+
+#endif /* CONFIG_HY_DEBUG_CONSOLE */
