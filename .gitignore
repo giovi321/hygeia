@@ -1,0 +1,11 @@
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+node_modules/
+docs/dist/
+docs/.astro/
+*.pcap
+secrets*.h
+.env

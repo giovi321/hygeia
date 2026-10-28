@@ -1,0 +1,98 @@
+<style>
+  .dev { width: 480px; height: 480px; background:#000; border-radius: 28px; position: relative; overflow: hidden;
+         font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color:#EDEDF0; transform: scale(.72); transform-origin: top left; margin-bottom:-134px; margin-right:-134px; box-shadow: 0 0 0 6px #222; }
+  .sb { height: 40px; display:flex; align-items:center; justify-content:space-between; padding: 0 22px; font-size: 18px; color:#B8B8C0; }
+  .sb .r { display:flex; gap:12px; align-items:center; }
+  .bat { width: 30px; height: 15px; border:2px solid #B8B8C0; border-radius:4px; position:relative; }
+  .bat:after { content:""; position:absolute; right:-6px; top:3px; width:3px; height:6px; background:#B8B8C0; border-radius:1px; }
+  .bat i { position:absolute; left:2px; top:2px; bottom:2px; width:70%; background:#7CE38B; border-radius:1px; }
+  .ring { border-radius:50%; display:flex; align-items:center; justify-content:center; position:relative; }
+  .ring .in { border-radius:50%; background:#0B0B0E; display:flex; align-items:center; justify-content:center; font-weight:700; }
+  .nav { position:absolute; bottom:0; left:0; right:0; height:62px; display:flex; justify-content:space-around; align-items:center; background:#0B0B0E; border-top:1px solid #1C1C22; font-size:14px; color:#8A8A94; }
+  .nav b { color:#EDEDF0; }
+  .due { outline: 3px solid #F6C453; outline-offset: -3px; }
+  .sub { color:#8A8A94; font-size:15px; }
+  /* A grid */
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; padding: 10px 22px; }
+  .tile { background:#121216; border-radius:24px; height:178px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; }
+  /* B list */
+  .list { display:flex; flex-direction:column; gap:12px; padding: 8px 18px; }
+  .row { background:#121216; border-radius:22px; height:100px; display:flex; align-items:center; gap:18px; padding: 0 18px; }
+  .row .t { flex:1; }
+  .row .n { font-size:22px; font-weight:600; }
+  .bar { height:6px; background:#22222A; border-radius:3px; margin-top:10px; }
+  .bar i { display:block; height:100%; border-radius:3px; }
+  .chip { font-size:14px; padding:6px 12px; border-radius:14px; background:#F6C45322; color:#F6C453; font-weight:600; }
+  /* C carousel */
+  .car { display:flex; flex-direction:column; align-items:center; padding-top:18px; gap:10px; }
+  .dots { display:flex; gap:8px; margin-top:6px; } .dots i { width:9px; height:9px; border-radius:50%; background:#33333B; } .dots i.on { background:#EDEDF0; width:24px; border-radius:5px; }
+</style>
+
+<h2>Home screen: which layout?</h2>
+<p class="subtitle">Real size is 480×480 (shown at 72%). Example medicines A, V, M; V is due now. Ring = time elapsed since last dose towards the next one. Tap a medicine to log, long press for details. Click to pick; you can also combine.</p>
+
+<div class="cards">
+  <div class="card" data-choice="grid" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#111;padding:16px">
+      <div class="dev">
+        <div class="sb"><span>08:42</span><span class="r"><span>⌁ Wi-Fi</span><span>78%</span><span class="bat"><i></i></span></span></div>
+        <div class="grid">
+          <div class="tile">
+            <div class="ring" style="width:108px;height:108px;background:conic-gradient(#4FD1C5 0 62%, #22222A 0)"><div class="in" style="width:90px;height:90px;font-size:46px;color:#4FD1C5">A</div></div>
+            <div class="sub">2 h 14 m ago</div>
+          </div>
+          <div class="tile due">
+            <div class="ring" style="width:108px;height:108px;background:conic-gradient(#F6C453 0 100%, #22222A 0)"><div class="in" style="width:90px;height:90px;font-size:46px;color:#F6C453">V</div></div>
+            <div class="sub" style="color:#F6C453">Due now</div>
+          </div>
+          <div class="tile">
+            <div class="ring" style="width:108px;height:108px;background:conic-gradient(#A78BFA 0 25%, #22222A 0)"><div class="in" style="width:90px;height:90px;font-size:46px;color:#A78BFA">M</div></div>
+            <div class="sub">as needed · ok</div>
+          </div>
+          <div class="tile" style="opacity:.5"><div style="font-size:40px;color:#55555F">+</div><div class="sub">more ↓</div></div>
+        </div>
+        <div class="nav"><b>● Home</b><span>Overview</span><span>History</span><span>Settings</span></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · Grid of rings</h3><p>2 columns, 4 visible, scroll for more. Most graphical, letter code dominant. Name only in details.</p></div>
+  </div>
+
+  <div class="card" data-choice="list" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#111;padding:16px">
+      <div class="dev">
+        <div class="sb"><span>08:42</span><span class="r"><span>⌁ Wi-Fi</span><span>78%</span><span class="bat"><i></i></span></span></div>
+        <div class="list">
+          <div class="row due">
+            <div class="ring" style="width:70px;height:70px;background:conic-gradient(#F6C453 0 100%, #22222A 0)"><div class="in" style="width:58px;height:58px;font-size:30px;color:#F6C453">V</div></div>
+            <div class="t"><div class="n">Vitamin D</div><div class="sub">due 08:30 · 1 tab</div></div><span class="chip">DUE</span>
+          </div>
+          <div class="row">
+            <div class="ring" style="width:70px;height:70px;background:conic-gradient(#4FD1C5 0 62%, #22222A 0)"><div class="in" style="width:58px;height:58px;font-size:30px;color:#4FD1C5">A</div></div>
+            <div class="t"><div class="n">Antibiotic</div><div class="sub">last 06:28 · next 14:00</div></div>
+          </div>
+          <div class="row">
+            <div class="ring" style="width:70px;height:70px;background:conic-gradient(#A78BFA 0 25%, #22222A 0)"><div class="in" style="width:58px;height:58px;font-size:30px;color:#A78BFA">M</div></div>
+            <div class="t"><div class="n">Magnesium</div><div class="sub">as needed · last yesterday</div></div>
+          </div>
+        </div>
+        <div class="nav"><b>● Home</b><span>Overview</span><span>History</span><span>Settings</span></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · List rows</h3><p>3 visible, due items float to the top. Shows name and next time; less glanceable from a distance.</p></div>
+  </div>
+
+  <div class="card" data-choice="carousel" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#111;padding:16px">
+      <div class="dev">
+        <div class="sb"><span>08:42</span><span class="r"><span>⌁ Wi-Fi</span><span>78%</span><span class="bat"><i></i></span></span></div>
+        <div class="car">
+          <div class="ring due" style="width:250px;height:250px;background:conic-gradient(#F6C453 0 100%, #22222A 0)"><div class="in" style="width:222px;height:222px;flex-direction:column;"><span style="font-size:110px;color:#F6C453;line-height:1">V</span><span class="sub" style="font-weight:400">Vitamin D</span></div></div>
+          <div style="font-size:20px;color:#F6C453;font-weight:600">Due now · tap to log</div>
+          <div class="dots"><i></i><i class="on"></i><i></i></div>
+        </div>
+        <div class="nav"><b>● Home</b><span>Overview</span><span>History</span><span>Settings</span></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · One per page</h3><p>Swipe left/right, huge target. Opens on the next due medicine. Slow with many medicines.</p></div>
+  </div>
+</div>

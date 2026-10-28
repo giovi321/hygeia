@@ -1,0 +1,189 @@
+<style>
+  .wrap { display:flex; flex-wrap:wrap; gap:22px; }
+  .item { width:310px; }
+  .item h3 { margin:10px 0 4px; font-size:15px; }
+  .item p { margin:0; font-size:13px; line-height:1.4; color:#888; }
+  .dev { width:480px; height:480px; background:#000; border-radius:28px; position:relative; overflow:hidden;
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif; color:#EDEDF0; transform:scale(.645); transform-origin:top left;
+         margin-bottom:-170px; margin-right:-170px; outline:5px solid #26262C; }
+  /* larger top bar */
+  .sb { height:56px; display:flex; align-items:center; justify-content:space-between; padding:0 24px; }
+  .sb .t { font-size:30px; font-weight:700; letter-spacing:.5px; }
+  .sb .r { display:flex; gap:16px; align-items:center; font-size:22px; font-weight:600; color:#C8C8D0; }
+  .wifi { width:30px; height:22px; position:relative; }
+  .wifi i { position:absolute; left:50%; bottom:0; border:4px solid #C8C8D0; border-color:#C8C8D0 transparent transparent transparent; border-radius:50%; transform:translateX(-50%); }
+  .bat { width:42px; height:22px; border:3px solid #C8C8D0; border-radius:6px; position:relative; }
+  .bat:after { content:""; position:absolute; right:-8px; top:5px; width:4px; height:7px; background:#C8C8D0; border-radius:2px; }
+  .bat i { position:absolute; left:3px; top:3px; bottom:3px; width:62%; background:#7CE38B; border-radius:2px; }
+  .badge { font-size:16px; padding:3px 9px; border-radius:8px; background:#1E1E24; color:#C8C8D0; }
+  .ring { border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  .ring .in { border-radius:50%; background:#0B0B0E; display:flex; align-items:center; justify-content:center; font-weight:700; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:8px 22px; }
+  .tile { background:#121216; border-radius:26px; height:180px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
+  .due { outline:3px solid #F6C453; outline-offset:-3px; }
+  .sub { color:#8A8A94; font-size:17px; }
+  .dots { position:absolute; bottom:12px; left:0; right:0; display:flex; justify-content:center; gap:8px; }
+  .dots i { width:8px; height:8px; border-radius:50%; background:#3A3A42; } .dots i.on { background:#EDEDF0; width:22px; border-radius:4px; }
+  .grab { position:absolute; top:6px; left:50%; width:44px; height:5px; margin-left:-22px; border-radius:3px; background:#2E2E36; }
+  .hdr { font-size:26px; font-weight:700; padding:2px 24px 8px; }
+  .card { background:#121216; border-radius:22px; padding:16px 18px; margin:0 18px 12px; }
+  .qs { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 18px; }
+  .q { background:#1A1A20; border-radius:22px; height:96px; padding:16px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:space-between; }
+  .q.on { background:#24323A; } .q b { font-size:21px; } .q span { font-size:16px; color:#9A9AA4; }
+  .slider { height:30px; background:#1A1A20; border-radius:15px; margin:14px 18px; position:relative; }
+  .slider i { position:absolute; left:0; top:0; bottom:0; width:70%; background:#3A3A44; border-radius:15px; }
+  .cell { width:34px; height:34px; border-radius:9px; }
+  .ok { background:#4FD1C5; } .late { background:#2F7F78; } .miss { background:transparent; outline:2px solid #E5484D; outline-offset:-2px; } .na { background:#1C1C22; }
+  .slide { height:88px; border-radius:44px; background:#1A1A20; margin:0 26px; position:relative; display:flex; align-items:center; justify-content:center; font-size:21px; color:#9A9AA4; }
+  .knob { position:absolute; left:8px; top:8px; width:72px; height:72px; border-radius:50%; background:#F6C453; color:#000; display:flex; align-items:center; justify-content:center; font-size:30px; font-weight:800; }
+  .legend { font-size:13px; color:#888; }
+  .arrow { position:absolute; font-size:15px; color:#9A9AA4; background:#000c; padding:2px 8px; border-radius:8px; border:1px dashed #555; }
+</style>
+
+<h2>Screens v4: icon-only status (Wi-Fi arcs = client, AP badge = own network)</h2>
+<p class="subtitle">480×480 shown at 64%. Top bar enlarged (time, Wi-Fi mode, battery %). Dashed labels show the gestures and are not drawn on the device.</p>
+
+<div class="section">
+  <h3>Gesture map</h3>
+  <p class="legend">Home sits in a horizontal pager: <b>swipe left</b> → Overview, <b>swipe left again</b> → History. <b>Swipe right</b> goes back. <b>Pull down from the top edge</b> → Quick settings from any screen. <b>Swipe up from the bottom edge</b> → back to Home from anywhere. <b>Long press a tile</b> → that medicine's detail page; <b>swipe right from the left edge</b> closes it. The page dots at the bottom show the position. Only scrolling inside the grid uses plain vertical swipes, so the edge gestures never clash with it.</p>
+</div>
+
+<div class="wrap">
+
+  <div class="item">
+    <div class="dev">
+      <div class="grab"></div>
+      <div class="sb"><span class="t">08:42</span><span class="r"><span class="wifi"><i style="width:30px;height:30px"></i><i style="width:16px;height:16px;bottom:-1px"></i></span><span>78%</span></span></div>
+      <div class="grid">
+        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#4FD1C5 0 62%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#4FD1C5">A</div></div><div class="sub">2 h 14 m ago</div></div>
+        <div class="tile due"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#F6C453 0 100%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#F6C453">V</div></div><div class="sub" style="color:#F6C453;font-weight:600">Due now</div></div>
+        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#A78BFA 0 25%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#A78BFA">M</div></div><div class="sub">as needed</div></div>
+        <div class="tile" style="background:#0B0B0E"><div style="font-size:44px;color:#8A8A94">+</div></div>
+      </div>
+      <div class="dots"><i class="on"></i><i></i><i></i></div>
+      <span class="arrow" style="right:6px;top:220px">← Overview</span>
+      <span class="arrow" style="left:170px;top:62px">↓ Quick settings</span>
+    </div>
+    <h3>1 · Home</h3><p>Larger top bar. No menu; page dots only. "+" tile shows how to add a medicine from the web UI (or opens a QR code to it).</p>
+  </div>
+
+  <div class="item">
+    <div class="dev">
+      <div class="sb"><span class="t">08:42</span><span class="r"><span class="wifi"><i style="width:30px;height:30px"></i><i style="width:16px;height:16px;bottom:-1px"></i></span><span>78%</span></span></div>
+      <div class="qs">
+        <div class="q on"><b>Wi-Fi</b><span>Client · HomeNet</span></div>
+        <div class="q"><b>Access point</b><span>Off · tap to start</span></div>
+        <div class="q on"><b>Sound</b><span>Chime on</span></div>
+        <div class="q"><b>Do not disturb</b><span>Off</span></div>
+      </div>
+      <div class="slider"><i></i></div>
+      <div style="display:flex;justify-content:space-between;padding:0 24px;font-size:17px;color:#9A9AA4"><span>Brightness</span><span>Battery 78% · ~2 d</span></div>
+      <div style="display:flex;gap:12px;padding:14px 18px 0">
+        <div class="q" style="flex:1;height:64px;justify-content:center"><b style="font-size:18px">Settings ›</b></div>
+        <div class="q" style="flex:1;height:64px;justify-content:center"><b style="font-size:18px">Web UI QR ›</b></div>
+      </div>
+      <span class="arrow" style="left:170px;bottom:10px">↑ close</span>
+    </div>
+    <h3>2 · Quick settings (pull down)</h3><p>Wi-Fi client / AP toggles, sound, do-not-disturb, brightness, battery estimate. The QR code opens the web UI on a phone.</p>
+  </div>
+
+  <div class="item">
+    <div class="dev">
+      <div class="sb"><span class="t">08:42</span><span class="r"><span class="badge">AP</span><span>78%</span></span></div>
+      <div class="hdr">Today</div>
+      <div style="display:flex;align-items:center;gap:24px;padding:0 24px 10px">
+        <div class="ring" style="width:130px;height:130px;background:conic-gradient(#7CE38B 0 66%,#22222A 0)"><div class="in" style="width:106px;height:106px;flex-direction:column"><span style="font-size:38px">2/3</span><span class="sub" style="font-size:14px;font-weight:400">doses</span></div></div>
+        <div style="font-size:18px;line-height:1.7"><div><span style="color:#4FD1C5">●</span> A 06:28 ✓</div><div><span style="color:#F6C453">●</span> V 08:30 due</div><div><span style="color:#4FD1C5">●</span> A 14:00</div><div style="color:#8A8A94">○ M as needed</div></div>
+      </div>
+      <div style="position:relative;height:60px;margin:6px 24px;border-top:2px solid #22222A">
+        <span style="position:absolute;left:25%;top:-11px;width:20px;height:20px;border-radius:50%;background:#4FD1C5"></span>
+        <span style="position:absolute;left:35%;top:-11px;width:20px;height:20px;border-radius:50%;background:#F6C453"></span>
+        <span style="position:absolute;left:58%;top:-11px;width:20px;height:20px;border-radius:50%;border:3px solid #4FD1C5;box-sizing:border-box"></span>
+        <span style="position:absolute;left:35.5%;top:-30px;width:2px;height:60px;background:#EDEDF0"></span>
+        <span class="sub" style="position:absolute;left:0;top:14px;font-size:14px">00</span><span class="sub" style="position:absolute;left:47%;top:14px;font-size:14px">12</span><span class="sub" style="position:absolute;right:0;top:14px;font-size:14px">24</span>
+      </div>
+      <div class="dots"><i></i><i class="on"></i><i></i></div>
+    </div>
+    <h3>3 · Overview (swipe left)</h3><p>Quick view: today's doses (taken / due / upcoming / as-needed) and a 24 h timeline with a "now" line.</p>
+  </div>
+
+  <div class="item">
+    <div class="dev">
+      <div class="sb"><span class="t">08:42</span><span class="r"><span>78%</span></span></div>
+      <div class="hdr">Last 7 days</div>
+      <div style="display:grid;grid-template-columns:40px repeat(7,34px);gap:10px 14px;padding:0 24px;align-items:center;font-size:20px">
+        <span></span><span class="sub">T</span><span class="sub">F</span><span class="sub">S</span><span class="sub">S</span><span class="sub">M</span><span class="sub">T</span><span class="sub">W</span>
+        <b style="color:#4FD1C5">A</b><i class="cell ok"></i><i class="cell ok"></i><i class="cell late"></i><i class="cell ok"></i><i class="cell ok"></i><i class="cell ok"></i><i class="cell ok" style="opacity:.5"></i>
+        <b style="color:#F6C453">V</b><i class="cell ok" style="background:#F6C453"></i><i class="cell miss"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell na"></i>
+        <b style="color:#A78BFA">M</b><i class="cell na"></i><i class="cell" style="background:#A78BFA"></i><i class="cell na"></i><i class="cell na"></i><i class="cell" style="background:#A78BFA"></i><i class="cell na"></i><i class="cell na"></i>
+      </div>
+      <div style="display:flex;justify-content:space-around;margin:26px 24px 0;font-size:16px;color:#9A9AA4"><span>■ on time</span><span>▪ late</span><span style="color:#E5484D">□ missed</span></div>
+      <div style="text-align:center;margin-top:16px;font-size:24px;font-weight:700">Adherence 95%</div>
+      <div class="dots"><i></i><i></i><i class="on"></i></div>
+    </div>
+    <h3>4 · History (swipe left again)</h3><p>7-day grid per medicine, one row each, scrolls when there are many. Pinch or double tap to switch to 30 days. Tap a row → medicine detail.</p>
+  </div>
+
+  <div class="item">
+    <div class="dev">
+      <div class="sb"><span class="t">08:42</span><span class="r"><span>78%</span></span></div>
+      <div style="display:flex;align-items:center;gap:18px;padding:0 24px 14px">
+        <div class="ring" style="width:96px;height:96px;background:conic-gradient(#4FD1C5 0 62%,#22222A 0)"><div class="in" style="width:80px;height:80px;font-size:44px;color:#4FD1C5">A</div></div>
+        <div><div style="font-size:26px;font-weight:700">Antibiotic</div><div class="sub">1 tab · 06:00, 14:00, 22:00</div><div class="sub">12 tablets left</div></div>
+      </div>
+      <div class="card" style="font-size:19px;line-height:1.75">
+        <div style="display:flex;justify-content:space-between"><span>Today 06:28</span><span class="sub">+28 min</span></div>
+        <div style="display:flex;justify-content:space-between"><span>Yesterday 22:04</span><span class="sub">on time</span></div>
+        <div style="display:flex;justify-content:space-between"><span>Yesterday 14:41</span><span class="sub">+41 min</span></div>
+      </div>
+      <div style="display:flex;gap:12px;padding:0 18px">
+        <div class="q" style="flex:1;height:66px;justify-content:center;align-items:center"><b style="font-size:19px">Log with note</b></div>
+        <div class="q" style="flex:1;height:66px;justify-content:center;align-items:center"><b style="font-size:19px">Log earlier…</b></div>
+      </div>
+      <span class="arrow" style="left:4px;top:230px">→ back</span>
+    </div>
+    <h3>5 · Medicine detail (long press)</h3><p>Name, dose, schedule, pill count, recent log with lateness. Scroll down for the 30-day chart and history edits.</p>
+  </div>
+
+  <div class="item">
+    <div class="dev">
+      <div class="sb"><span class="t">08:30</span><span class="r"><span>78%</span></span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:6px">
+        <div class="ring" style="width:200px;height:200px;background:conic-gradient(#F6C453 0 100%,#22222A 0)"><div class="in" style="width:176px;height:176px;flex-direction:column"><span style="font-size:96px;color:#F6C453;line-height:1">V</span></div></div>
+        <div style="font-size:26px;font-weight:700">Vitamin D · 1 tab</div>
+        <div class="sub">Due 08:30</div>
+      </div>
+      <div class="slide" style="margin-top:16px"><div class="knob">✓</div>Slide to log as taken  ›</div>
+      <div style="display:flex;justify-content:space-between;padding:12px 40px 0;font-size:18px;color:#9A9AA4"><span>‹ swipe left: snooze 15 min</span><span>Skip</span></div>
+    </div>
+    <h3>6 · Dose due (full screen)</h3><p>Chime plays. Slide right = taken (no accidental taps). Swipe left on the screen = snooze. Skip is a small text button. A "missed" event is sent if nothing happens within the set time.</p>
+  </div>
+
+  <div class="item">
+    <div class="dev">
+      <div class="sb"><span class="t">08:43</span><span class="r"><span class="wifi"><i style="width:30px;height:30px"></i><i style="width:16px;height:16px;bottom:-1px"></i></span><span>78%</span></span></div>
+      <div class="grid" style="opacity:.35">
+        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#4FD1C5 0 62%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#4FD1C5">A</div></div><div class="sub">2 h 15 m ago</div></div>
+        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#F6C453 0 2%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#F6C453">V</div></div><div class="sub">just now</div></div>
+      </div>
+      <div style="position:absolute;left:24px;right:24px;bottom:34px;height:88px;background:#1E1E24;border-radius:24px;display:flex;align-items:center;padding:0 22px;gap:16px">
+        <span style="width:44px;height:44px;border-radius:50%;background:#7CE38B;color:#000;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800">✓</span>
+        <span style="flex:1;font-size:21px">V logged 08:43</span>
+        <span style="font-size:21px;font-weight:700;color:#F6C453">Undo 5</span>
+      </div>
+    </div>
+    <h3>7 · Logged (single tap on a tile)</h3><p>Ring resets with an animation, a toast offers undo for 5 s with a countdown. Swipe the toast away to dismiss it.</p>
+  </div>
+
+  <div class="item">
+    <div class="dev">
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px">
+        <div style="font-size:120px;font-weight:200;color:#9A9AA4;letter-spacing:-2px">08:44</div>
+        <div style="font-size:22px;color:#9A9AA4">Next: A at 14:00</div>
+        <div style="font-size:18px;color:#8A8A94;margin-top:8px">78% · Wi-Fi off</div>
+      </div>
+    </div>
+    <h3>8 · Idle / dimmed</h3><p>After 30 s: dim grey clock and next dose, position drifts slowly against burn-in. Tap to wake. On battery the screen turns off after a further delay.</p>
+  </div>
+
+</div>
