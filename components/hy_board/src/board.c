@@ -1,7 +1,8 @@
 /* Board path: registry BSP path (waveshare/esp32_s3_touch_amoled_2_16 2.0.1: panel init, QSPI bus, touch
  * driver, I2C bus). The BSP display start function hardcodes 50-line PSRAM buffers, so this file calls the
  * BSP functions bsp_display_new() and bsp_touch_new() and registers the display with esp_lvgl_adapter
- * itself, to get 2 x 48-line RGB565 buffers in internal DMA RAM. The BSP 2-pixel rounder is kept. */
+ * itself, to get 2 x 48-line RGB565 buffers in internal DMA RAM. Because the BSP start function is bypassed,
+ * its 2-pixel area rounder is re-implemented here (rounder_cb). */
 
 #include "hy/board.h"
 
@@ -21,6 +22,8 @@ static const char *TAG = "hy_board";
 #define HY_FLUSH_LOG_FIRST 6
 
 static lv_display_t *s_disp;
+static bool s_ready;          /* set only at the end of a successful init */
+static esp_err_t s_init_err = ESP_OK; /* first init failure, returned on later calls */
 static lv_indev_t *s_indev;
 static lv_display_flush_cb_t s_orig_flush;
 static uint32_t s_flush_count;
@@ -68,12 +71,27 @@ static void i2c_scan(void)
     ESP_LOGI(TAG, "i2c devices:%s", n ? found : " none");
 }
 
+static esp_err_t board_init_once(void);
+
 esp_err_t hy_board_init(void)
 {
-    if (s_disp) {
+    if (s_ready) {
         return ESP_OK;
     }
+    if (s_init_err != ESP_OK) {
+        return s_init_err; /* a failed init is not retried and not reported as OK */
+    }
+    esp_err_t err = board_init_once();
+    if (err != ESP_OK) {
+        s_init_err = err;
+        return err;
+    }
+    s_ready = true;
+    return ESP_OK;
+}
 
+static esp_err_t board_init_once(void)
+{
     esp_err_t err = bsp_i2c_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "i2c init: %s", esp_err_to_name(err));
@@ -164,7 +182,7 @@ esp_err_t hy_board_init(void)
 
 lv_display_t *hy_board_display(void)
 {
-    return s_disp;
+    return s_ready ? s_disp : NULL;
 }
 
 i2c_master_bus_handle_t hy_board_i2c(void)
