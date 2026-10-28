@@ -66,7 +66,7 @@ To verify on the first hardware session (unconfirmed in the sources):
 
 Decided:
 
-- ESP-IDF v6.0.x (Waveshare CI-tests v5.5.5 and v6.0.2; v6.x chosen because a v6 toolchain is already installed on the development machine). C, with C++ only where a component needs it
+- ESP-IDF v6.0.2 is the build of record, locally and in CI; direct component dependencies are pinned to exact versions and `dependencies.lock` is committed (Waveshare CI-tests v5.5.5 and v6.0.2). C, with C++ only where a component needs it
 - LVGL 9.x through the managed component and `esp_lvgl_port`
 - Board support from the registry component `waveshare/esp32_s3_touch_amoled_2_16` (v2.0.1 at time of writing). If its display init is unsuitable, fall back to the approach in thejimoneil/ESP32-Tetris: custom CO5300 init for the full 480×480, `esp_lcd_touch_cst9220`, double-buffered DMA, rounder callback forcing even x1/y1 and odd x2/y2, software rotation
 - UI written by hand in LVGL C on one shared theme; no generated-code tools
@@ -173,7 +173,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - An occurrence becomes `due` at its time, `late` after `late_after_min`, `missed` after `missed_after_min`. When it becomes missed, a `missed` log entry with source `auto` is written and an event sent
 - Dose window: from `early_window_min` before the occurrence (per medicine, default 60) until the next occurrence of the same medicine. A `taken` log in that window satisfies the earliest unsatisfied occurrence; `delta_min` is negative for early doses. A log outside any window is a free log
 - Taken after missed: if a dose is logged after its occurrence was marked missed, but still before the next occurrence, the `missed` entry is converted to `taken` (with its real time and lateness) and a `taken` event is sent. The original missed event is not retracted
-- Untracked periods: while the device is off, the battery is flat, or the clock is invalid, occurrences cannot be observed. On return, occurrences in that gap are not marked missed. The store records the gap as an `untracked` interval; history draws it grey, adherence excludes it, and a single `untracked` event (start, end) is sent instead of one per occurrence. Occurrences still within their window when the device returns become due normally
+- Untracked periods: while the device is off, the battery is flat, or the clock is invalid, occurrences cannot be observed. On return, occurrences in that gap are not marked missed. Until plan 3 adds the `untracked` interval, slots that fall while the device was off are untracked, never missed. The store records the gap as an `untracked` interval; history draws it grey, adherence excludes it, and a single `untracked` event (start, end) is sent instead of one per occurrence. Occurrences still within their window when the device returns become due normally
 - Snooze defaults to 15 minutes, configurable; snoozing does not extend the missed deadline
 - As-needed: logging sooner than `min_interval_min` after the previous dose shows a warning with the time since the last dose; the user can still confirm
 - The scheduler exposes the next wake time (next occurrence or deadline) to `power`, which sets the RTC alarm
@@ -228,13 +228,17 @@ Gestures:
 
 Screens: Home (grid of rings, "+" tile shows a QR to the web UI's add page), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart), Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
 
-Several due at once: the due card shows the first, with "+2 more" and a swipe up to step through them.
+Several due at once: the due card shows the first, with "+2 more" and a swipe up to step through them. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
 
-Do-not-disturb and quiet hours: the card still appears, the chime is silent.
+History: a dose taken late gets an amber dot, so it differs from today's partial cell. The device cannot edit or delete log entries; edits are made only in the web UI.
+
+Text entry: the on-screen keyboard is used for notes only (log with note). Nothing else on the device takes typed input.
+
+Do-not-disturb and quiet hours: the card still appears, the chime is silent. Quiet hours are a web UI setting; the device has only the do-not-disturb toggle.
 
 ## Notifications
 
-- At an occurrence: wake the screen, show the due card, play the chime (default 3 short tones, repeated every 2 min up to 5 times while unacknowledged, volume from settings), send `due` event
+- At an occurrence: wake the screen, show the due card, play the chime (default 3 short tones, repeated every 2 min, 5 plays in total per sequence, while unacknowledged, volume from settings), send `due` event
 - If the speaker path does not work on hardware, the fallback is a pulsing screen and a gentle brightness flash; the design does not depend on sound
 - At `late_after`: the tile shows "late" and the card stays; at `missed_after`: `missed` log and event, card dismissed, tile shows missed until the next occurrence
 
@@ -342,7 +346,7 @@ These are my calls; flag any you disagree with.
 1. Invalid clock blocks logging and pauses reminders until the time is set
 2. A medicine code can be 1 or 2 characters (you said "typically one letter")
 3. Automatic `missed` log entries written after the missed threshold
-4. Chime repeats every 2 min up to 5 times while unacknowledged
+4. Chime repeats every 2 min, 5 plays in total per sequence, while unacknowledged
 5. Client mode never falls back to AP on its own; it shows a hint instead
 6. Home Assistant discovery is off by default
 7. Retention: keep everything until storage is 80% full, minimum 1 year

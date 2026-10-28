@@ -2,7 +2,6 @@ build/
 sdkconfig
 sdkconfig.old
 managed_components/
-dependencies.lock
 node_modules/
 docs/dist/
 docs/.astro/
@@ -10,3 +9,4 @@ docs/.astro/
 secrets*.h
 .env
 .plans/
+build-rel/
