@@ -103,6 +103,31 @@ static void test_weekdays_mask(void)
     TEST_ASSERT_EQUAL_INT64(T_2026_11_02_0700Z + 6 * DAY, out[0]);
 }
 
+static void test_prev_occurrence_weekly_and_dense(void)
+{
+    hy_med_t m;
+    make_med(&m, 8 * 60, 0xFFFF);
+    m.weekdays = 0x01; /* Monday only */
+    /* Tuesday 2026-11-03 10:00 UTC and Sunday 2026-11-08 12:00 UTC: prev is Monday 2026-11-02 08:00 */
+    TEST_ASSERT_EQUAL_INT64(T_2026_11_02_0700Z,
+                            hy_prev_occurrence(&m, T_2026_11_02_0700Z + DAY + 3 * HOUR, TZ_ZURICH));
+    TEST_ASSERT_EQUAL_INT64(T_2026_11_02_0700Z,
+                            hy_prev_occurrence(&m, T_2026_11_02_0700Z + 6 * DAY + 5 * HOUR, TZ_ZURICH));
+    /* an hour before that Monday slot the previous one is 7 days back */
+    TEST_ASSERT_EQUAL_INT64(T_2026_11_02_0700Z - 7 * DAY,
+                            hy_prev_occurrence(&m, T_2026_11_02_0700Z - HOUR, TZ_ZURICH));
+    m.active_from = 20261102; /* nothing scheduled before it */
+    TEST_ASSERT_EQUAL_INT64(0, hy_prev_occurrence(&m, T_2026_11_02_0700Z - HOUR, TZ_ZURICH));
+    m.active_from = 0;
+    /* 8 times a day: 64 slots in 8 days, the latest is found */
+    make_med(&m, 0, 0xFFFF);
+    m.n_times = 8;
+    for (int i = 0; i < 8; i++) m.times[i] = (uint16_t)(i * 180 + 60);
+    int64_t now = T_2026_11_02_LOCAL_MIDNIGHT + 12 * HOUR;
+    /* times 01:00, 04:00, 07:00, 10:00, ... local; 12:00 local on 2026-11-02 -> 10:00 local */
+    TEST_ASSERT_EQUAL_INT64(T_2026_11_02_LOCAL_MIDNIGHT + 10 * HOUR, hy_prev_occurrence(&m, now, TZ_ZURICH));
+}
+
 static void test_active_range(void)
 {
     hy_med_t m;
@@ -458,6 +483,7 @@ int main(void)
     RUN_TEST(test_unsorted_times_sorted_output);
     RUN_TEST(test_range_is_half_open_and_max);
     RUN_TEST(test_weekdays_mask);
+    RUN_TEST(test_prev_occurrence_weekly_and_dense);
     RUN_TEST(test_active_range);
     RUN_TEST(test_archived_has_none);
     RUN_TEST(test_dst_spring_gap);

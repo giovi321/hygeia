@@ -513,7 +513,7 @@ static void test_as_needed_logs_despite_full_history(void)
     TEST_ASSERT_EQUAL_size_t(131, st.n_logs);
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
     /* the home screen reads [now - max(interval, 1 day), now + 1): 128 cap keeps the newest
-     * dose visible because the window holds at most 72 of these doses */
+     * dose visible because the window holds about 58 of these doses (1 day / 20 min, newest 5 h back) */
     hy_log_t win[128];
     size_t n = s_query(NULL, clk.now - 86400, clk.now + 1, pid, win, 128);
     TEST_ASSERT_TRUE(n < 128);

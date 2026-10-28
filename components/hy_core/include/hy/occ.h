@@ -18,6 +18,13 @@
 size_t hy_occurrences(const hy_med_t *m, int64_t from, int64_t to,
                       const char *posix_tz, int64_t *out, size_t max);
 
+/*
+ * The latest occurrence in [now - 8 days, now], or 0 if there is none. 8 days
+ * covers a weekly schedule. Walks the range in chunks, so any number of daily
+ * times is handled without truncation.
+ */
+int64_t hy_prev_occurrence(const hy_med_t *m, int64_t now, const char *posix_tz);
+
 /* A time-zone change: at UTC instant `at` the zone switched from old_tz to new_tz. */
 typedef struct { int64_t at; char old_tz[HY_TZ_LEN]; char new_tz[HY_TZ_LEN]; } hy_tzchange_t;
 
