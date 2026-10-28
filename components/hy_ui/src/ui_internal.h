@@ -50,7 +50,6 @@ void home_rebuild(void);                 /* meds changed */
 void home_refresh(bool animate);         /* recompute every tile and the clock */
 void home_tap_med(uint32_t med_id);      /* the tile tap handler */
 bool home_med_id_by_code(const char *code, uint32_t *id);
-void home_pending_clear(void);
 void home_minute_tick(void);             /* about once a second: refreshes when the minute changed */
 
 /* toast.c */

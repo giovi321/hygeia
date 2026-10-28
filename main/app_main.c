@@ -29,7 +29,13 @@ static void cmd_boardtest(const char *args)
     }
     /* The test screen cleans the active screen, which would delete the home grid: load a fresh one
      * first. The home screen stays alive but hidden; a reboot returns to it. */
-    lv_screen_load(lv_obj_create(NULL));
+    static lv_obj_t *test_screen;   /* previous test screen, deleted so repeated runs do not leak */
+    lv_obj_t *old = test_screen;
+    test_screen = lv_obj_create(NULL);
+    lv_screen_load(test_screen);
+    if (old) {
+        lv_obj_delete(old);
+    }
     hy_board_selftest();
     hy_board_unlock();
 }
