@@ -7,6 +7,6 @@ idf_component_register(
         "src/codec.c"
     INCLUDE_DIRS
         "include"
-    REQUIRES
+    PRIV_REQUIRES
         espressif__cjson
 )

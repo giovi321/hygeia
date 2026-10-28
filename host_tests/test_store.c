@@ -302,6 +302,21 @@ void test_ids_continue_after_reopen(void)
     TEST_ASSERT_EQUAL_UINT32(6, f);
 }
 
+void test_ids_unique_across_months_after_reopen(void)
+{
+    uint32_t a, b, c, d;
+    TEST_ASSERT_EQUAL(HY_OK, add(NOV, 1, &a));          /* newest month */
+    TEST_ASSERT_EQUAL(HY_OK, add(OCT + 5, 1, &b));      /* backdated: higher id in older month */
+    TEST_ASSERT_EQUAL_UINT32(1, a);
+    TEST_ASSERT_EQUAL_UINT32(2, b);
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    TEST_ASSERT_EQUAL(HY_OK, add(NOV + 1, 1, &c));
+    TEST_ASSERT_EQUAL(HY_OK, add(SEP, 1, &d));
+    TEST_ASSERT_TRUE(c != a && c != b && d != a && d != b && c != d);
+    TEST_ASSERT_EQUAL_UINT32(3, c);
+    TEST_ASSERT_EQUAL_UINT32(4, d);
+}
+
 void test_ids_start_at_one_on_empty_store(void)
 {
     uint32_t a;
@@ -327,6 +342,7 @@ int main(void)
     RUN_TEST(test_corrupt_line_skipped);
     RUN_TEST(test_overlong_line_skipped);
     RUN_TEST(test_ids_continue_after_reopen);
+    RUN_TEST(test_ids_unique_across_months_after_reopen);
     RUN_TEST(test_ids_start_at_one_on_empty_store);
     RUN_TEST(test_open_missing_base_fails);
     return UNITY_END();
