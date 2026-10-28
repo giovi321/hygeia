@@ -1,6 +1,10 @@
 #include "esp_app_desc.h"
+#include <stdlib.h>
+
 #include "esp_log.h"
 #include "hy/board.h"
+#include "hy/clock.h"
+#include "nvs_flash.h"
 
 #include "console.h"
 
@@ -27,6 +31,38 @@ static void cmd_powerstat(const char *args)
     hy_board_power_report();
 }
 
+static void cmd_time(const char *args)
+{
+    char *end;
+    long long epoch = strtoll(args, &end, 10);
+    if (end == args || (*end != '\0' && *end != ' ')) {
+        ESP_LOGE(TAG, "usage: time <epoch> [posix_tz]");
+        return;
+    }
+    while (*end == ' ') {
+        end++;
+    }
+    esp_err_t err = hy_clock_set(epoch, *end ? end : NULL, "serial");
+    ESP_LOGI(TAG, "time: %s", esp_err_to_name(err));
+}
+
+static void cmd_clock(const char *args)
+{
+    (void)args;
+    hy_clock_report();
+}
+
+static void init_nvs(void)
+{
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "nvs: %s, erasing the nvs partition", esp_err_to_name(err));
+        ESP_ERROR_CHECK(nvs_flash_erase()); /* the nvs partition only, never storage */
+        err = nvs_flash_init();
+    }
+    ESP_LOGI(TAG, "nvs_flash_init: %s", esp_err_to_name(err));
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "hygeia %s", esp_app_get_description()->version);
@@ -44,7 +80,15 @@ void app_main(void)
         }
     }
 
+    init_nvs();
+    if (err == ESP_OK) {
+        esp_err_t cerr = hy_clock_init(hy_board_i2c());
+        ESP_LOGI(TAG, "hy_clock_init: %s, clock valid: %s", esp_err_to_name(cerr), hy_clock_valid() ? "yes" : "no");
+    }
+
     console_register("boardtest", cmd_boardtest);
     console_register("powerstat", cmd_powerstat);
+    console_register("time", cmd_time);
+    console_register("clock", cmd_clock);
     console_start();
 }
