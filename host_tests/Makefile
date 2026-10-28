@@ -16,10 +16,14 @@ INCLUDES := -I$(ROOT)/components/hy_core/include -I$(UNITY_DIR) -I$(CJSON_DIR)
 ifneq ($(wildcard $(ROOT)/components/hy_store/include),)
 INCLUDES += -I$(ROOT)/components/hy_store/include
 endif
+ifneq ($(wildcard $(ROOT)/components/hy_clock/include),)
+INCLUDES += -I$(ROOT)/components/hy_clock/include
+endif
 
 CORE_SRCS  := $(wildcard $(ROOT)/components/hy_core/src/*.c)
 STORE_SRCS := $(wildcard $(ROOT)/components/hy_store/src/store.c)
-PROJ_SRCS  := $(CORE_SRCS) $(STORE_SRCS)
+CLOCK_SRCS := $(wildcard $(ROOT)/components/hy_clock/src/clock_valid.c)
+PROJ_SRCS  := $(CORE_SRCS) $(STORE_SRCS) $(CLOCK_SRCS)
 PROJ_OBJS  := $(patsubst $(ROOT)/%.c,$(BUILD)/obj/%.o,$(PROJ_SRCS))
 TP_OBJS    := $(BUILD)/obj/unity.o $(BUILD)/obj/cJSON.o
 

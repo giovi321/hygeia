@@ -65,3 +65,15 @@ To verify on hardware. The BSP default is `swap_xy=1, mirror_x=0, mirror_y=1`, u
 - GPIO 0 is a strapping pin: holding BOOT through the reset (while plugging in or pressing PWR) enters ROM download mode instead of running the app
 - Bypass: press BOOT right after pressing PWR or plugging in (after the reset) and hold it until the log shows `gate bypassed (BOOT held)`
 - Reflash a device that keeps powering off: hold BOOT before the reset (while connecting USB) to enter ROM download mode
+
+## RTC
+
+Verified on the board from the serial log, 2026-10-28.
+
+- PCF85063 at 0x51 on the shared bus; register layout taken from the SensorLib driver (see `components/hy_clock/src/pcf85063.c`): CTRL1 0x00, time registers 0x04..0x0A in BCD, seconds bit 7 = oscillator-stop (OS) flag, year 00..99 read as 2000 + yy, no century bit
+- First boot after the earlier firmware: raw `a0 56 00 01 06 01 00`, OS flag set, decoded 2000-01-01; the firmware reported the clock invalid
+- `time <epoch> [posix_tz]` wrote the RTC; read back 1 to 2 s later with the OS flag clear, weekday register 3 for Wednesday 2026-10-28
+- After an RTS reset (power stays on) the RTC kept running and the firmware reported the clock valid with the correct UTC time; the TZ stored in NVS (namespace "clock", key "tz") was also restored
+- A time before the build epoch is rejected by `time` (ESP_ERR_INVALID_ARG)
+- Time kept without power: to verify on hardware (USB unplugged, no battery, 1 min)
+
