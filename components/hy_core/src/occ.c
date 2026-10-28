@@ -1,6 +1,7 @@
 #include "hy/occ.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -73,8 +74,18 @@ static bool local_exact(int64_t y, int mon, int d, int hour, int min, int64_t *o
             found = true;
         }
     }
-    if (found) *out = best;
-    return found;
+    if (!found) return false;
+    /* Fall-back overlap: the same wall-clock minute may also exist earlier.
+     * Probe instead of trusting the libc to honour both tm_isdst values. */
+    static const int64_t probes[] = { 3600, 1800 };
+    for (size_t i = 0; i < sizeof probes / sizeof probes[0]; i++) {
+        if (wall_matches((time_t)(best - probes[i]), y, mon, d, hour, min)) {
+            best -= probes[i];
+            break;
+        }
+    }
+    *out = best;
+    return true;
 }
 
 /* Local day `day` (days since epoch, local calendar) at `minute` after local
@@ -112,32 +123,53 @@ static int cmp_i64(const void *a, const void *b)
 
 /* ---- TZ save / restore ---- */
 
+/* The previous TZ is saved in a fixed buffer (no allocation that could fail).
+ * A previous TZ that does not fit is never overwritten: tz_enter returns false,
+ * leaves TZ unchanged and the caller must not compute local times. Our own
+ * zones are at most HY_TZ_LEN - 1 characters, so this only guards foreign TZs. */
+#define SAVED_TZ_LEN 64
+
 typedef struct {
     bool had;
-    char *value;
+    char value[SAVED_TZ_LEN];
 } saved_tz_t;
 
-static void tz_enter(saved_tz_t *s, const char *posix_tz)
+static bool tz_enter(saved_tz_t *s, const char *posix_tz)
 {
     const char *cur = getenv("TZ");
     s->had = cur != NULL;
-    s->value = NULL;
+    s->value[0] = '\0';
     if (cur) {
-        size_t n = strlen(cur) + 1;
-        s->value = malloc(n);
-        if (s->value) memcpy(s->value, cur, n);
+        size_t n = strlen(cur);
+        if (n >= sizeof s->value) return false;
+        memcpy(s->value, cur, n + 1);
     }
     setenv("TZ", posix_tz ? posix_tz : "UTC0", 1);
     tzset();
+    return true;
 }
 
-static void tz_leave(saved_tz_t *s)
+static void tz_leave(const saved_tz_t *s)
 {
-    if (s->had && s->value) setenv("TZ", s->value, 1);
+    if (s->had) setenv("TZ", s->value, 1);
     else unsetenv("TZ");
     tzset();
-    free(s->value);
-    s->value = NULL;
+}
+
+/* Local wall-clock time of a UTC instant in posix_tz, as seconds since
+ * 1970-01-01 00:00 of the local calendar. */
+static bool local_wall(int64_t utc, const char *posix_tz, int64_t *out)
+{
+    saved_tz_t saved;
+    if (!tz_enter(&saved, posix_tz)) return false;
+    time_t t = (time_t)utc;
+    struct tm tm;
+    bool ok = localtime_r(&t, &tm) != NULL;
+    tz_leave(&saved);
+    if (!ok) return false;
+    *out = days_from_civil(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday) * 86400 +
+           tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec;
+    return true;
 }
 
 /* ---- public ---- */
@@ -149,7 +181,7 @@ size_t hy_occurrences(const hy_med_t *m, int64_t from, int64_t to,
     if (m->archived || m->type != HY_SCHED_FIXED || m->n_times == 0) return 0;
 
     saved_tz_t saved;
-    tz_enter(&saved, posix_tz);
+    if (!tz_enter(&saved, posix_tz)) return 0;
 
     size_t n = 0;
     int64_t first_day = local_day_of(from) - 1; /* safety margin */
@@ -180,4 +212,179 @@ size_t hy_occurrences(const hy_med_t *m, int64_t from, int64_t to,
 
     tz_leave(&saved);
     return n;
+}
+
+/* ---- dose matching ---- */
+
+#define MATCH_LOOKBACK (8 * 86400LL)
+#define MATCH_CHUNK 64
+
+/* A slot is satisfied by a taken or skipped log for this medicine and slot. */
+static bool slot_satisfied(const hy_med_t *m, int64_t slot, const hy_log_t *logs, size_t n_logs)
+{
+    for (size_t i = 0; i < n_logs; i++) {
+        const hy_log_t *l = &logs[i];
+        if (l->med_id == m->id && l->slot == slot &&
+            (l->status == HY_TAKEN || l->status == HY_SKIPPED))
+            return true;
+    }
+    return false;
+}
+
+/* The first occurrence after `after`, looking up to 8 days ahead; INT64_MAX if none. */
+static int64_t next_occurrence(const hy_med_t *m, int64_t after, const char *posix_tz)
+{
+    int64_t out[1];
+    if (hy_occurrences(m, after + 1, after + 1 + MATCH_LOOKBACK, posix_tz, out, 1) == 1)
+        return out[0];
+    return INT64_MAX;
+}
+
+int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
+                      const hy_log_t *logs, size_t n_logs)
+{
+    if (!m || m->archived || m->type != HY_SCHED_FIXED) return 0;
+    if (!logs) n_logs = 0;
+
+    int64_t early = (int64_t)m->early_window_min * 60;
+    int64_t from = ts - MATCH_LOOKBACK;
+    int64_t to = ts + early + 1; /* the slot at exactly ts + early is included */
+    int64_t occ[MATCH_CHUNK];
+
+    /* Walk the occurrences in ascending chunks so a long range is never truncated. */
+    for (;;) {
+        size_t n = hy_occurrences(m, from, to, posix_tz, occ, MATCH_CHUNK);
+        for (size_t i = 0; i < n; i++) {
+            int64_t s = occ[i];
+            int64_t next = i + 1 < n ? occ[i + 1] : next_occurrence(m, s, posix_tz);
+            if (ts < s - early || ts >= next) continue;
+            if (slot_satisfied(m, s, logs, n_logs)) continue;
+            return s;
+        }
+        if (n < MATCH_CHUNK) break;
+        from = occ[n - 1] + 1;
+    }
+    return 0;
+}
+
+/* ---- slot states ---- */
+
+static bool slot_taken(const hy_med_t *m, int64_t slot, const char *posix_tz,
+                       const hy_log_t *logs, size_t n_logs)
+{
+    int64_t slot_wall = 0;
+    bool have_wall = local_wall(slot, posix_tz, &slot_wall);
+    for (size_t i = 0; i < n_logs; i++) {
+        const hy_log_t *l = &logs[i];
+        if (l->med_id != m->id || l->status != HY_TAKEN || l->slot == 0) continue;
+        if (l->slot == slot) return true;
+        /* West rule: the log's slot, in the log's own zone, is the same local
+         * date and HH:MM as this slot in posix_tz. */
+        int64_t log_wall;
+        if (have_wall && local_wall(l->slot, l->tz, &log_wall) &&
+            log_wall / 60 == slot_wall / 60)
+            return true;
+    }
+    return false;
+}
+
+static bool slot_skipped(const hy_med_t *m, int64_t slot, const hy_log_t *logs, size_t n_logs)
+{
+    for (size_t i = 0; i < n_logs; i++) {
+        const hy_log_t *l = &logs[i];
+        if (l->med_id == m->id && l->status == HY_SKIPPED && l->slot == slot) return true;
+    }
+    return false;
+}
+
+/* East rule: the instant the state clock counts from. */
+static int64_t state_base(int64_t slot, const char *posix_tz, const hy_tzchange_t *ch)
+{
+    if (!ch) return slot;
+    int64_t w_old, w_new, w_slot;
+    if (!local_wall(ch->at, ch->old_tz, &w_old) || !local_wall(ch->at, ch->new_tz, &w_new))
+        return slot;
+    if (w_new <= w_old) return slot; /* not a forward jump */
+    if (!local_wall(slot, posix_tz, &w_slot)) return slot;
+    if (w_slot > w_old && w_slot <= w_new) return ch->at;
+    return slot;
+}
+
+hy_occ_state_t hy_occ_state(const hy_med_t *m, int64_t slot, int64_t next_slot, int64_t now,
+                            const char *posix_tz,
+                            const hy_log_t *logs, size_t n_logs,
+                            const hy_gap_t *gaps, size_t n_gaps,
+                            const hy_tzchange_t *last_change)
+{
+    (void)next_slot; /* see occ.h */
+    if (!m) return HY_OCC_UPCOMING;
+    if (!logs) n_logs = 0;
+    if (!gaps) n_gaps = 0;
+
+    if (slot_taken(m, slot, posix_tz, logs, n_logs)) return HY_OCC_TAKEN;
+    if (slot_skipped(m, slot, logs, n_logs)) return HY_OCC_SKIPPED;
+
+    int64_t base = state_base(slot, posix_tz, last_change);
+    int64_t late = base + (int64_t)m->late_after_min * 60;
+    int64_t missed = base + (int64_t)m->missed_after_min * 60;
+
+    for (size_t i = 0; i < n_gaps; i++) {
+        if (slot >= gaps[i].start && slot < gaps[i].end && missed <= gaps[i].end)
+            return HY_OCC_UNTRACKED;
+    }
+
+    if (now < base) return HY_OCC_UPCOMING;
+    if (now < late) return HY_OCC_DUE;
+    if (now < missed) return HY_OCC_LATE;
+    return HY_OCC_MISSED;
+}
+
+/* ---- as-needed interval ---- */
+
+hy_err_t hy_min_interval_check(const hy_med_t *m, int64_t now,
+                               const hy_log_t *logs, size_t n_logs, int32_t *since_min)
+{
+    if (since_min) *since_min = -1;
+    if (!m) return HY_E_INVALID;
+    if (!logs) n_logs = 0;
+
+    bool found = false;
+    int64_t last = 0;
+    for (size_t i = 0; i < n_logs; i++) {
+        const hy_log_t *l = &logs[i];
+        if (l->med_id != m->id || l->status != HY_TAKEN || l->ts > now) continue;
+        if (!found || l->ts > last) {
+            last = l->ts;
+            found = true;
+        }
+    }
+    if (!found) return HY_OK;
+
+    int64_t since = (now - last) / 60;
+    if (since > INT32_MAX) since = INT32_MAX;
+    if (since_min) *since_min = (int32_t)since;
+    if (m->min_interval_min != 0 && since < m->min_interval_min) return HY_W_TOO_SOON;
+    return HY_OK;
+}
+
+/* ---- formatting ---- */
+
+void hy_format_local(int64_t ts, const char *posix_tz, char *buf, size_t len)
+{
+    static const char *const wday[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    static const char *const mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    if (!buf || len == 0) return;
+    buf[0] = '\0';
+
+    saved_tz_t saved;
+    if (!tz_enter(&saved, posix_tz)) return;
+    time_t t = (time_t)ts;
+    struct tm tm;
+    bool ok = localtime_r(&t, &tm) != NULL;
+    tz_leave(&saved);
+    if (!ok || tm.tm_wday < 0 || tm.tm_wday > 6 || tm.tm_mon < 0 || tm.tm_mon > 11) return;
+
+    snprintf(buf, len, "%s %02d %s %02d:%02d", wday[tm.tm_wday], tm.tm_mday, mon[tm.tm_mon],
+             tm.tm_hour, tm.tm_min);
 }
