@@ -2,6 +2,7 @@
 #define HY_CLOCK_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/i2c_master.h"
@@ -30,13 +31,16 @@ bool hy_clock_valid(void);
  * Set RTC (clears the oscillator-stop flag), system time and TZ (persisted in NVS).
  * posix_tz NULL keeps the current TZ. ESP_ERR_INVALID_ARG if the TZ is empty or at least
  * HY_TZ_LEN long, or utc is before the build epoch. source (e.g. "serial") is logged and kept.
+ * The time and zone are in force on ESP_OK and on an NVS error; an NVS error means the zone was
+ * not persisted. All state is safe to read from other tasks. The pointer from hy_clock_tz() and the
+ * port tz() holds a complete string until the second following TZ change.
  */
 esp_err_t hy_clock_set(int64_t utc, const char *posix_tz, const char *source);
 
 const char *hy_clock_tz(void);
 
-/* Last successful sync: source name (empty if none yet) and UTC time of the sync */
-const char *hy_clock_last_source(int64_t *at);
+/* Copy out the last successful sync: source name (empty if none yet) and the UTC time set */
+void hy_clock_last_sync(char *src, size_t src_len, int64_t *at);
 
 /* Log a fresh RTC read (raw registers, decoded UTC), system time (UTC and local), TZ, validity, last sync */
 void hy_clock_report(void);

@@ -1,5 +1,7 @@
 #include "esp_app_desc.h"
+#include <ctype.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "esp_log.h"
 #include "hy/board.h"
@@ -33,14 +35,24 @@ static void cmd_powerstat(const char *args)
 
 static void cmd_time(const char *args)
 {
+    char buf[96];
+    strlcpy(buf, args, sizeof buf);
+    size_t n = strlen(buf);
+    while (n > 0 && isspace((unsigned char)buf[n - 1])) {
+        buf[--n] = 0;
+    }
     char *end;
-    long long epoch = strtoll(args, &end, 10);
-    if (end == args || (*end != '\0' && *end != ' ')) {
+    long long epoch = strtoll(buf, &end, 10);
+    if (end == buf || (*end != 0 && *end != ' ')) {
         ESP_LOGE(TAG, "usage: time <epoch> [posix_tz]");
         return;
     }
     while (*end == ' ') {
         end++;
+    }
+    if (*end && strchr(end, ' ')) {
+        ESP_LOGE(TAG, "time: posix_tz must not contain spaces");
+        return;
     }
     esp_err_t err = hy_clock_set(epoch, *end ? end : NULL, "serial");
     ESP_LOGI(TAG, "time: %s", esp_err_to_name(err));

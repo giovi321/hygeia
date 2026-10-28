@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "src/clock.c"
         "src/clock_valid.c"
+        "src/rtc_codec.c"
         "src/pcf85063.c"
     INCLUDE_DIRS
         "include"

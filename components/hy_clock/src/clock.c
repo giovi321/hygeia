@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include "nvs.h"
 #include "pcf85063.h"
 
@@ -19,14 +20,47 @@
 
 static const char *TAG = "clock";
 
+/*
+ * Shared between the console task (writer) and others (readers such as the port functions called
+ * from the UI task). All state below is read and written inside s_lock. The TZ is double
+ * buffered: the writer fills the inactive buffer and swaps the index in one critical section, so
+ * the pointer returned by hy_clock_tz() / port tz() always holds a complete string. It stays
+ * intact until the second following TZ change.
+ */
+static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_valid;
-static char s_tz[HY_TZ_LEN] = HY_CLOCK_DEFAULT_TZ;
+static char s_tzbuf[2][HY_TZ_LEN] = { HY_CLOCK_DEFAULT_TZ, "" };
+static int s_tz_idx;
 static char s_src[SRC_LEN];
 static int64_t s_sync_at;
 
+static void set_valid(bool v)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_valid = v;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+static const char *tz_current(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    const char *p = s_tzbuf[s_tz_idx];
+    portEXIT_CRITICAL(&s_lock);
+    return p;
+}
+
+static void tz_publish(const char *tz)
+{
+    portENTER_CRITICAL(&s_lock);
+    int next = 1 - s_tz_idx;
+    strlcpy(s_tzbuf[next], tz, HY_TZ_LEN);
+    s_tz_idx = next;
+    portEXIT_CRITICAL(&s_lock);
+}
+
 static void apply_tz(void)
 {
-    setenv("TZ", s_tz, 1);
+    setenv("TZ", tz_current(), 1);
     tzset();
 }
 
@@ -41,7 +75,7 @@ static void load_tz(void)
     esp_err_t err = nvs_get_str(h, NVS_KEY_TZ, buf, &len);
     nvs_close(h);
     if (err == ESP_OK && buf[0] != '\0') {
-        strcpy(s_tz, buf);
+        tz_publish(buf);
     } else if (err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "reading tz from NVS: %s", esp_err_to_name(err));
     }
@@ -87,10 +121,10 @@ esp_err_t hy_clock_init(i2c_master_bus_handle_t bus)
     bool ok = t.decoded && hy_clock_is_plausible(t.epoch, t.osc_stopped, HY_BUILD_EPOCH);
     if (ok) {
         set_system_time(t.epoch);
-        s_valid = true;
-        ESP_LOGI(TAG, "clock valid: rtc utc %lld, tz %s", (long long)t.epoch, s_tz);
+        set_valid(true);
+        ESP_LOGI(TAG, "clock valid: rtc utc %lld, tz %s", (long long)t.epoch, tz_current());
     } else {
-        s_valid = false;
+        set_valid(false);
         ESP_LOGW(TAG, "clock invalid: osc_stopped=%d decoded=%d rtc_epoch=%lld build_epoch=%lld "
                  "raw=%02x %02x %02x %02x %02x %02x %02x ctrl1=%02x",
                  t.osc_stopped, t.decoded, (long long)t.epoch, (long long)HY_BUILD_EPOCH,
@@ -101,49 +135,58 @@ esp_err_t hy_clock_init(i2c_master_bus_handle_t bus)
 
 bool hy_clock_valid(void)
 {
-    return s_valid;
+    portENTER_CRITICAL(&s_lock);
+    bool v = s_valid;
+    portEXIT_CRITICAL(&s_lock);
+    return v;
 }
 
 esp_err_t hy_clock_set(int64_t utc, const char *posix_tz, const char *source)
 {
-    const char *tz = posix_tz ? posix_tz : s_tz;
+    const char *tz = posix_tz ? posix_tz : tz_current();
     size_t n = strlen(tz);
     if (n == 0 || n >= HY_TZ_LEN || !hy_clock_is_plausible(utc, false, HY_BUILD_EPOCH)) {
         return ESP_ERR_INVALID_ARG;
     }
+    char tzcopy[HY_TZ_LEN];
+    strlcpy(tzcopy, tz, sizeof tzcopy); /* tz may point at the buffer that is about to be replaced */
     esp_err_t err = pcf85063_write(utc);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC write: %s", esp_err_to_name(err));
         return err;
     }
     set_system_time(utc);
-    if (strcmp(tz, s_tz) != 0) {
-        err = save_tz(tz);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "saving tz to NVS: %s", esp_err_to_name(err));
-        } else {
-            strcpy(s_tz, tz);
-        }
-    }
+    /* The zone is in force even if persisting it fails */
+    tz_publish(tzcopy);
     apply_tz();
+    esp_err_t nvs_err = save_tz(tzcopy);
+    portENTER_CRITICAL(&s_lock);
     s_valid = true;
     strlcpy(s_src, source ? source : "", sizeof s_src);
     s_sync_at = utc;
-    ESP_LOGI(TAG, "clock set via %s: utc %lld, tz %s", s_src, (long long)utc, s_tz);
-    return ESP_OK;
+    portEXIT_CRITICAL(&s_lock);
+    ESP_LOGI(TAG, "clock set via %s: utc %lld, tz %s", source ? source : "", (long long)utc, tzcopy);
+    if (nvs_err != ESP_OK) {
+        ESP_LOGE(TAG, "tz in force but not persisted, NVS: %s", esp_err_to_name(nvs_err));
+    }
+    return nvs_err;
 }
 
 const char *hy_clock_tz(void)
 {
-    return s_tz;
+    return tz_current();
 }
 
-const char *hy_clock_last_source(int64_t *at)
+void hy_clock_last_sync(char *src, size_t src_len, int64_t *at)
 {
+    portENTER_CRITICAL(&s_lock);
+    if (src && src_len) {
+        strlcpy(src, s_src, src_len);
+    }
     if (at) {
         *at = s_sync_at;
     }
-    return s_src;
+    portEXIT_CRITICAL(&s_lock);
 }
 
 void hy_clock_report(void)
@@ -164,10 +207,11 @@ void hy_clock_report(void)
     localtime_r(&now, &l);
     strftime(us, sizeof us, "%Y-%m-%d %H:%M:%S", &u);
     strftime(ls, sizeof ls, "%Y-%m-%d %H:%M:%S", &l);
-    ESP_LOGI(TAG, "system utc=%lld (%s) local=%s tz=%s", (long long)now, us, ls, s_tz);
+    ESP_LOGI(TAG, "system utc=%lld (%s) local=%s tz=%s", (long long)now, us, ls, tz_current());
     int64_t at;
-    const char *src = hy_clock_last_source(&at);
-    ESP_LOGI(TAG, "valid=%d last_sync_source=%s last_sync_utc=%lld", s_valid, src[0] ? src : "none", (long long)at);
+    char src[SRC_LEN];
+    hy_clock_last_sync(src, sizeof src, &at);
+    ESP_LOGI(TAG, "valid=%d last_sync_source=%s last_sync_utc=%lld", hy_clock_valid(), src[0] ? src : "none", (long long)at);
 }
 
 static int64_t port_now(void *ctx)
@@ -179,13 +223,13 @@ static int64_t port_now(void *ctx)
 static const char *port_tz(void *ctx)
 {
     (void)ctx;
-    return s_tz;
+    return tz_current();
 }
 
 static bool port_valid(void *ctx)
 {
     (void)ctx;
-    return s_valid;
+    return hy_clock_valid();
 }
 
 const hy_clock_port_t *hy_clock_port(void)
