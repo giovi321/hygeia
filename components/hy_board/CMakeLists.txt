@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/board.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        waveshare__esp32_s3_touch_amoled_2_16
+        espressif__esp_lvgl_adapter
+        lvgl__lvgl
+        esp_lcd
+        esp_driver_i2c
+        esp_driver_gpio
+        esp_timer
+)
