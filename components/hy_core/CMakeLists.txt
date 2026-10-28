@@ -2,6 +2,8 @@ idf_component_register(
     SRCS
         "src/med.c"
         "src/occ.c"
+        "src/events.c"
+        "src/actions.c"
     INCLUDE_DIRS
         "include"
 )
