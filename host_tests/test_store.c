@@ -330,6 +330,117 @@ void test_open_missing_base_fails(void)
     TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
 }
 
+static void put_file(const char *rel, const char *content)
+{
+    char p[160];
+    path(p, sizeof p, rel);
+    FILE *f = fopen(p, "wb");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs(content, f);
+    fclose(f);
+}
+
+#define TS_2026_01 1767225600LL
+#define TS_2026_02 1769904000LL
+#define TS_2026_03 1772323200LL
+#define TS_2026_04 1775001600LL
+#define TS_2026_05 1777593600LL
+
+void test_month_index_ignores_strays(void)
+{
+    uint32_t a;
+    TEST_ASSERT_EQUAL(HY_OK, add(TS_2026_01 + 10, 1, &a));
+    put_file("log/2026-13.jsonl", "{\"id\":50,\"ts\":1767225700}\n");
+    put_file("log/2026-1.jsonl", "{\"id\":51,\"ts\":1767225700}\n");
+    put_file("log/notes.txt", "hello\n");
+    put_file("log/2026-01.jsonl.bak", "{\"id\":52,\"ts\":1767225700}\n");
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(1, q(TS_2026_01, TS_2026_02, 0, out, 8));
+    TEST_ASSERT_EQUAL_UINT32(a, out[0].id);
+    TEST_ASSERT_EQUAL(0, q(TS_2026_02, TS_2026_05, 0, out, 8));
+    /* stray ids do not feed the id counter */
+    uint32_t b;
+    TEST_ASSERT_EQUAL(HY_OK, add(TS_2026_01 + 20, 1, &b));
+    TEST_ASSERT_EQUAL_UINT32(a + 1, b);
+}
+
+void test_query_across_missing_months(void)
+{
+    uint32_t a, b;
+    TEST_ASSERT_EQUAL(HY_OK, add(TS_2026_03 + 5, 1, &b));
+    TEST_ASSERT_EQUAL(HY_OK, add(TS_2026_01 + 5, 1, &a));
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(2, q(TS_2026_01, TS_2026_04, 0, out, 8));
+    TEST_ASSERT_EQUAL_UINT32(a, out[0].id);
+    TEST_ASSERT_EQUAL_UINT32(b, out[1].id);
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    TEST_ASSERT_EQUAL(2, q(TS_2026_01, TS_2026_04, 0, out, 8));
+    TEST_ASSERT_EQUAL_UINT32(a, out[0].id);
+    TEST_ASSERT_EQUAL_UINT32(b, out[1].id);
+}
+
+void test_new_month_after_open_is_indexed(void)
+{
+    uint32_t a, b;
+    TEST_ASSERT_EQUAL(HY_OK, add(TS_2026_01 + 5, 1, &a));
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    TEST_ASSERT_EQUAL(HY_OK, add(TS_2026_05 + 5, 1, &b));
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(1, q(TS_2026_05, TS_2026_05 + DAY, 0, out, 8));
+    TEST_ASSERT_EQUAL_UINT32(b, out[0].id);
+    hy_log_t e = out[0];
+    strcpy(e.note, "edited");
+    TEST_ASSERT_EQUAL(HY_OK, P->update_log(NULL, &e));
+    TEST_ASSERT_EQUAL(1, q(TS_2026_05, TS_2026_05 + DAY, 0, out, 8));
+    TEST_ASSERT_EQUAL_STRING("edited", out[0].note);
+    TEST_ASSERT_EQUAL(HY_OK, P->delete_log(NULL, b, e.ts));
+    TEST_ASSERT_EQUAL(0, q(TS_2026_05, TS_2026_05 + DAY, 0, out, 8));
+}
+
+void test_update_moves_into_month_without_file(void)
+{
+    uint32_t a;
+    TEST_ASSERT_EQUAL(HY_OK, add(TS_2026_01 + 5, 1, &a));
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(1, q(TS_2026_01, TS_2026_02, 0, out, 8));
+    hy_log_t e = out[0];
+    e.ts = TS_2026_02 + 5;
+    TEST_ASSERT_EQUAL(HY_OK, P->update_log(NULL, &e));
+    TEST_ASSERT_EQUAL(0, q(TS_2026_01, TS_2026_02, 0, out, 8));
+    TEST_ASSERT_EQUAL(1, q(TS_2026_02, TS_2026_03, 0, out, 8));
+    TEST_ASSERT_EQUAL_UINT32(a, out[0].id);
+    /* the new month is indexed: a second update and a delete there work */
+    e.ts = TS_2026_02 + 9;
+    TEST_ASSERT_EQUAL(HY_OK, P->update_log(NULL, &e));
+    TEST_ASSERT_EQUAL(HY_OK, P->delete_log(NULL, a, e.ts));
+    TEST_ASSERT_EQUAL(0, q(TS_2026_01, TS_2026_03, 0, out, 8));
+}
+
+void test_id_exhaustion(void)
+{
+    hy_log_t e = mk(TS_2026_01 + 5, 1);
+    e.id = 4294967294u;
+    char line[1024];
+    TEST_ASSERT_TRUE(hy_log_to_jsonl(&e, line, sizeof line) > 0);
+    strcat(line, "\n");
+    put_file("log/2026-01.jsonl", line);
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    uint32_t id = 7;
+    TEST_ASSERT_EQUAL(HY_E_FULL, add(TS_2026_01 + 9, 1, &id));
+    TEST_ASSERT_EQUAL(HY_E_FULL, add(TS_2026_03 + 9, 1, &id));
+    hy_log_t out[4];
+    TEST_ASSERT_EQUAL(1, q(TS_2026_01, TS_2026_04, 0, out, 4));
+    TEST_ASSERT_EQUAL_UINT32(4294967294u, out[0].id);
+    char p[160];
+    path(p, sizeof p, "log/2026-01.jsonl");
+    struct stat sb;
+    TEST_ASSERT_EQUAL(0, stat(p, &sb));
+    TEST_ASSERT_EQUAL((long)strlen(line), (long)sb.st_size);
+    path(p, sizeof p, "log/2026-03.jsonl");
+    TEST_ASSERT_NOT_EQUAL(0, stat(p, &sb));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -345,5 +456,10 @@ int main(void)
     RUN_TEST(test_ids_unique_across_months_after_reopen);
     RUN_TEST(test_ids_start_at_one_on_empty_store);
     RUN_TEST(test_open_missing_base_fails);
+    RUN_TEST(test_month_index_ignores_strays);
+    RUN_TEST(test_query_across_missing_months);
+    RUN_TEST(test_new_month_after_open_is_indexed);
+    RUN_TEST(test_update_moves_into_month_without_file);
+    RUN_TEST(test_id_exhaustion);
     return UNITY_END();
 }

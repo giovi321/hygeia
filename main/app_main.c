@@ -135,6 +135,7 @@ static void seed_example_meds(void)
         strcpy(m.name, seed[i].name);
         m.color = seed[i].color;
         m.order = (uint16_t)i;
+        m.active_from = hy_clock_today_ymd();
         if (seed[i].n_times) {
             m.type = HY_SCHED_FIXED;
             memcpy(m.times, seed[i].times, sizeof m.times);

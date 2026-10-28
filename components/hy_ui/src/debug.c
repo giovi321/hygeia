@@ -87,6 +87,7 @@ static void seed_one(const char *code, const char *name, uint8_t color, uint16_t
     m.times[0] = minute;
     m.n_times = 1;
     m.order = order;
+    m.active_from = hy_clock_today_ymd();
     hy_err_t err = hy_act_med_upsert(&m);
     ESP_LOGI(TAG, "seed4: upsert %s err %d (id %u)", code, (int)err, (unsigned)m.id);
 }

@@ -46,6 +46,9 @@ esp_err_t hy_clock_set(int64_t utc, const char *posix_tz, const char *source);
 
 const char *hy_clock_tz(void);
 
+/* Today's local date as YYYYMMDD (localtime_r under hy_tz_lock), or 0 when the clock is not valid. */
+int32_t   hy_clock_today_ymd(void);
+
 /* Copies the current POSIX TZ under the clock mutex. Always NUL-terminates. */
 void      hy_clock_tz_copy(char *out, size_t len);
 /* Current IANA name ("" when the zone was set as a raw POSIX string). Default "Europe/Zurich". */

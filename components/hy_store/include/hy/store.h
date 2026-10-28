@@ -9,14 +9,19 @@
  * directory on host). Layout: <base>/meds.json and <base>/log/YYYY-MM.jsonl
  * (UTC month of ts). Open creates <base>/log, removes stray *.tmp files,
  * resets the skipped-line counter and sets the next log id to the highest id
- * found in any month file + 1 (ids are global and monotonic).
+ * found in any month file + 1 (ids are global and monotonic). The month files are
+ * listed once at open into a sorted index (at most 1200 months, more gives HY_E_FULL
+ * from open); a write that creates a month file adds it, and every operation iterates
+ * the index instead of reading the directory. Names that are not exactly YYYY-MM.jsonl
+ * are ignored.
  * Single-threaded by contract.
  *
  * Port semantics:
  * - load_meds: no meds.json gives HY_OK with n = 0; a corrupt file gives HY_E_IO
  *   and is left untouched.
  * - save_meds, update_log, delete_log rewrite via <name>.tmp + fsync + rename.
- * - append_log assigns e->id and writes one fsync'd line to the month of e->ts.
+ * - append_log assigns e->id and writes one fsync'd line to the month of e->ts. When the
+ *   next id would pass 0xFFFFFFFE it returns HY_E_FULL and writes nothing.
  * - update_log looks for the id in the month file of e->ts first, then in the
  *   other month files. If found elsewhere, the entry is written into the target
  *   month and then removed from the old one. A crash or IO failure between the

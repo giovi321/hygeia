@@ -476,6 +476,31 @@ static void test_match_earliest_wins_before_missed_deadline(void)
     TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, NULL, 0));
 }
 
+/* A logged miss wins over a gap that would make the slot untracked. */
+static void test_missed_log_wins_over_gap(void)
+{
+    hy_med_t m;
+    hy_log_t l;
+    make_med(&m, 8 * 60, 0xFFFF);
+    int64_t s = T_2026_11_02_0700Z;
+    hy_gap_t g = { 0, s + 3 * HOUR };
+    make_log(&l, 1, m.id, s + 2 * HOUR, TZ_ZURICH, HY_MISSED, s);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_MISSED,
+                          hy_occ_state(&m, s, s + DAY, s + 5 * HOUR, TZ_ZURICH, &l, 1, &g, 1, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OCC_UNTRACKED,
+                          hy_occ_state(&m, s, s + DAY, s + 5 * HOUR, TZ_ZURICH, NULL, 0, &g, 1, NULL));
+    /* a MISSED log for another slot does not count */
+    l.slot = s - DAY;
+    TEST_ASSERT_EQUAL_INT(HY_OCC_UNTRACKED,
+                          hy_occ_state(&m, s, s + DAY, s + 5 * HOUR, TZ_ZURICH, &l, 1, &g, 1, NULL));
+    /* TAKEN still wins over a MISSED log */
+    hy_log_t two[2];
+    make_log(&two[0], 1, m.id, s + 2 * HOUR, TZ_ZURICH, HY_MISSED, s);
+    make_log(&two[1], 2, m.id, s + 3 * HOUR, TZ_ZURICH, HY_TAKEN, s);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_TAKEN,
+                          hy_occ_state(&m, s, s + DAY, s + 5 * HOUR, TZ_ZURICH, two, 2, &g, 1, NULL));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -507,5 +532,6 @@ int main(void)
     RUN_TEST(test_match_prefers_upcoming_over_missed_daily);
     RUN_TEST(test_match_prefers_upcoming_over_missed_same_day);
     RUN_TEST(test_match_earliest_wins_before_missed_deadline);
+    RUN_TEST(test_missed_log_wins_over_gap);
     return UNITY_END();
 }

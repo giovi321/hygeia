@@ -334,6 +334,17 @@ const char *hy_clock_tz(void)
     return tz_current();
 }
 
+int32_t hy_clock_today_ymd(void)
+{
+    if (!hy_clock_valid()) return 0;
+    time_t now = time(NULL);
+    struct tm l;
+    hy_tz_lock();
+    localtime_r(&now, &l);
+    hy_tz_unlock();
+    return (int32_t)((l.tm_year + 1900) * 10000 + (l.tm_mon + 1) * 100 + l.tm_mday);
+}
+
 void hy_clock_tz_copy(char *out, size_t len)
 {
     if (!out || len == 0) {

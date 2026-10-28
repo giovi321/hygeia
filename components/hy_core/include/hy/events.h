@@ -8,7 +8,8 @@ typedef enum { HY_EV_TAKEN = 0, HY_EV_SKIPPED, HY_EV_MISSED, HY_EV_DUE, HY_EV_SN
                HY_EV_UNDONE, HY_EV_LOG_EDITED, HY_EV_MEDS_CHANGED, HY_EV_UNTRACKED,
                HY_EV_BATTERY_LOW, HY_EV_BATTERY_CRITICAL, HY_EV_CLOCK_INVALID } hy_ev_type_t;
 
-typedef struct { hy_ev_type_t type; int64_t ts; uint32_t med_id; uint32_t log_id; } hy_event_t;
+typedef struct { hy_ev_type_t type; int64_t ts; uint32_t med_id; uint32_t log_id;
+               int64_t slot; /* slot of the dose, 0 when none */ } hy_event_t;
 typedef void (*hy_ev_cb_t)(const hy_event_t *ev, void *ctx);
 
 #define HY_EV_MAX_SUBSCRIBERS 16
