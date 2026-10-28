@@ -4,6 +4,9 @@ idf_component_register(
         "src/occ.c"
         "src/events.c"
         "src/actions.c"
+        "src/codec.c"
     INCLUDE_DIRS
         "include"
+    REQUIRES
+        espressif__cjson
 )
