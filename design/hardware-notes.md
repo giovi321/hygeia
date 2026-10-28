@@ -57,6 +57,10 @@ To verify on hardware. The BSP default is `swap_xy=1, mirror_x=0, mirror_y=1`, u
   - after `idf.py -p COM7 flash`: `pwron_status=0x04 reset_reason=11 (other)`
   - after a readlog.py RTS reset: `rst:0x15 (USB_UART_CHIP_RESET)`, `pwron_status=0x04 reset_reason=11 (other)`
   - the VBUS-insert bit stays latched across chip resets; flash and RTS resets report ESP_RST_USB (11), not power-on, so they keep running
-- Decision: enforcement is unconditional. Only `ESP_RST_POWERON` is gated; everything else keeps running. A power-on reset with no known source bit boots (ruling R22)
+- Decision: enforcement is unconditional. Only `ESP_RST_POWERON` is gated; everything else keeps running. The gate fails open: a power-on reset with no known source bit (R22), or with EN mode (bit 5) set (R24), boots; a chip-id register (0x03) other than 0x4A skips the gate and writes nothing to 0x10
 - Not verified on the board: the power-off path itself and the status byte after a real unplug and replug (see the owner checks in the task report)
 
+### Recovery
+
+- Hold BOOT (GPIO 0) while pressing PWR or plugging in: the gate is bypassed and the log shows `gate bypassed (BOOT held)`
+- To reflash a device that keeps powering off, hold BOOT while connecting USB to enter ROM download mode

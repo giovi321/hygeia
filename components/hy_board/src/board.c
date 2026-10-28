@@ -13,6 +13,7 @@
 #include "bsp/esp-bsp.h"
 #include "bsp/touch.h"
 #include "esp_heap_caps.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -77,6 +78,7 @@ static void touch_cb(lv_event_t *e)
 #define AXP_REG_COMMON    0x10
 #define AXP_COMMON_PWROFF 0x01
 #define AXP_REG_PWRON     0x20
+#define BOOT_GPIO         0 /* BOOT key, spec Hardware table: BOOT GPIO 0 */
 
 static i2c_master_dev_handle_t s_axp;
 static uint8_t s_boot_pwron = 0xFF;
@@ -100,7 +102,9 @@ static void axp_power_off(void)
     ESP_LOGW(TAG, "powering off via AXP2101");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200)); /* let the USB Serial/JTAG FIFO drain before the rails drop */
-    i2c_master_transmit(s_axp, buf, sizeof buf, 100);
+    esp_err_t werr = i2c_master_transmit(s_axp, buf, sizeof buf, 100);
+    ESP_LOGI(TAG, "power-off write: %s", esp_err_to_name(werr));
+    fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(2000)); /* power is cut; if not, say so and carry on */
     ESP_LOGE(TAG, "still running after AXP2101 power-off write");
 }
@@ -118,9 +122,21 @@ static void power_gate(void)
         ESP_LOGE(TAG, "axp2101 add device: %s; power gate skipped", esp_err_to_name(err));
         return;
     }
+    gpio_config_t gc = {
+        .pin_bit_mask = 1ULL << BOOT_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&gc);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    bool boot_held = gpio_get_level(BOOT_GPIO) == 0;
     uint8_t ic = 0, st = 0;
     if (axp_read(AXP_REG_IC_TYPE, &ic) != ESP_OK || axp_read(AXP_REG_PWRON, &st) != ESP_OK) {
         ESP_LOGE(TAG, "axp2101 read failed; power gate skipped");
+        return;
+    }
+    if (ic != AXP_IC_TYPE_ID) {
+        ESP_LOGE(TAG, "axp2101 ic_type=0x%02x, expected 0x%02x; power gate skipped (boot)", ic, AXP_IC_TYPE_ID);
         return;
     }
     esp_reset_reason_t rr = esp_reset_reason();
@@ -132,7 +148,9 @@ static void power_gate(void)
     ESP_LOGI(TAG, "axp2101 ic_type=0x%02x (%s)", ic, ic == AXP_IC_TYPE_ID ? "matches AXP2101" : "UNEXPECTED");
     ESP_LOGI(TAG, "pwron_status=0x%02x reset_reason=%d (%s) power off: %s", st, (int)rr,
              kind == HY_RST_POWERON ? "power-on" : "other", allowed ? "no" : "yes");
-    if (!allowed) {
+    if (!allowed && boot_held) {
+        ESP_LOGW(TAG, "gate bypassed (BOOT held)");
+    } else if (!allowed) {
         /* Safe after flash and RTS resets: they report ESP_RST_USB (not power-on), so they keep running
          * even though the VBUS-insert bit stays latched (see design/hardware-notes.md, Power-on source). */
         ESP_LOGW(TAG, "power-on source is not the PWR key");

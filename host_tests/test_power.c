@@ -30,7 +30,14 @@ static void test_battery_insert_on_poweron_stays_off(void)
 static void test_other_sources_on_poweron_stay_off(void)
 {
     TEST_ASSERT_FALSE(hy_power_on_allowed(SRC_IRQ, HY_RST_POWERON));
-    TEST_ASSERT_FALSE(hy_power_on_allowed(SRC_EN, HY_RST_POWERON));
+}
+
+/* Ruling R24: EN mode (PWRON always high) alone or with non-key bits fails open */
+static void test_en_mode_on_poweron_boots(void)
+{
+    TEST_ASSERT_TRUE(hy_power_on_allowed(SRC_EN, HY_RST_POWERON));
+    TEST_ASSERT_TRUE(hy_power_on_allowed(SRC_EN | SRC_VBUS, HY_RST_POWERON));
+    TEST_ASSERT_TRUE(hy_power_on_allowed(SRC_EN | SRC_BATI | SRC_IRQ, HY_RST_POWERON));
 }
 
 static void test_key_with_other_source_boots(void)
@@ -63,6 +70,7 @@ int main(void)
     RUN_TEST(test_vbus_insert_on_poweron_stays_off);
     RUN_TEST(test_battery_insert_on_poweron_stays_off);
     RUN_TEST(test_other_sources_on_poweron_stay_off);
+    RUN_TEST(test_en_mode_on_poweron_boots);
     RUN_TEST(test_key_with_other_source_boots);
     RUN_TEST(test_any_status_on_other_reset_keeps_running);
     RUN_TEST(test_zero_status_on_poweron_boots);
