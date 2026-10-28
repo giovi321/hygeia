@@ -19,6 +19,9 @@ lv_display_t *hy_board_display(void);
 /* Shared I2C master bus (touch, RTC, PMU) */
 i2c_master_bus_handle_t hy_board_i2c(void);
 
+/* Log the power-on status and reset reason captured at boot, plus the live status register */
+void hy_board_power_report(void);
+
 void hy_board_set_brightness(uint8_t pct);
 
 /* Take the LVGL lock. timeout_ms 0 waits forever. Returns true when taken */

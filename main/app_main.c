@@ -21,6 +21,12 @@ static void cmd_boardtest(const char *args)
     hy_board_unlock();
 }
 
+static void cmd_powerstat(const char *args)
+{
+    (void)args;
+    hy_board_power_report();
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "hygeia %s", esp_app_get_description()->version);
@@ -39,5 +45,6 @@ void app_main(void)
     }
 
     console_register("boardtest", cmd_boardtest);
+    console_register("powerstat", cmd_powerstat);
     console_start();
 }

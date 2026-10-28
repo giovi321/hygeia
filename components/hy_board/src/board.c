@@ -5,6 +5,7 @@
  * its 2-pixel area rounder is re-implemented here (rounder_cb). */
 
 #include "hy/board.h"
+#include "hy/power.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -13,6 +14,9 @@
 #include "bsp/touch.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_timer.h"
 #include "esp_lv_adapter.h"
 
@@ -59,6 +63,93 @@ static void touch_cb(lv_event_t *e)
     ESP_LOGI(TAG, "touch x=%d y=%d", (int)p.x, (int)p.y);
 }
 
+/* AXP2101 registers. Source: XPowersLib (github lewisxhe/XPowersLib), commit
+ * d6997586e68f65afd51baa775903df930db39821 (default branch, newer than tag v0.3.3):
+ *   src/REG/AXP2101Constants.h: AXP2101_SLAVE_ADDRESS 0x34, XPOWERS_AXP2101_CHIP_ID 0x4A,
+ *     XPOWERS_AXP2101_IC_TYPE 0x03, XPOWERS_AXP2101_COMMON_CONFIG 0x10, XPOWERS_AXP2101_PWRON_STATUS 0x20
+ *   src/XPowersAXP2101.hpp: PWRON_STATUS bits: 0 PWRON key low, 1 IRQ pin low, 2 VBUS insert and good,
+ *     3 battery voltage > 3.3 V when charged, 4 battery insert and good, 5 EN mode (PWRON always high);
+ *     shutdown() = set bit 0 of COMMON_CONFIG ("turn off all power channels, only VRTC stays").
+ * The library has no call that clears PWRON_STATUS. */
+#define AXP_ADDR          0x34
+#define AXP_REG_IC_TYPE   0x03
+#define AXP_IC_TYPE_ID    0x4A
+#define AXP_REG_COMMON    0x10
+#define AXP_COMMON_PWROFF 0x01
+#define AXP_REG_PWRON     0x20
+
+static i2c_master_dev_handle_t s_axp;
+static uint8_t s_boot_pwron = 0xFF;
+static int s_boot_reset = -1;
+static int s_boot_would_off = -1;
+
+static esp_err_t axp_read(uint8_t reg, uint8_t *v)
+{
+    return i2c_master_transmit_receive(s_axp, &reg, 1, v, 1, 100);
+}
+
+static void axp_power_off(void)
+{
+    uint8_t v = 0;
+    uint8_t buf[2] = {AXP_REG_COMMON, 0};
+    if (axp_read(AXP_REG_COMMON, &v) != ESP_OK) {
+        ESP_LOGE(TAG, "power off: read common config failed");
+        return;
+    }
+    buf[1] = v | AXP_COMMON_PWROFF;
+    ESP_LOGW(TAG, "powering off via AXP2101");
+    fflush(stdout);
+    vTaskDelay(pdMS_TO_TICKS(200)); /* let the USB Serial/JTAG FIFO drain before the rails drop */
+    i2c_master_transmit(s_axp, buf, sizeof buf, 100);
+    vTaskDelay(pdMS_TO_TICKS(2000)); /* power is cut; if not, say so and carry on */
+    ESP_LOGE(TAG, "still running after AXP2101 power-off write");
+}
+
+/* Decide before the display is initialised. Always logs the raw status and the reset reason. */
+static void power_gate(void)
+{
+    i2c_device_config_t dcfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = AXP_ADDR,
+        .scl_speed_hz = 100000,
+    };
+    esp_err_t err = i2c_master_bus_add_device(bsp_i2c_get_handle(), &dcfg, &s_axp);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "axp2101 add device: %s; power gate skipped", esp_err_to_name(err));
+        return;
+    }
+    uint8_t ic = 0, st = 0;
+    if (axp_read(AXP_REG_IC_TYPE, &ic) != ESP_OK || axp_read(AXP_REG_PWRON, &st) != ESP_OK) {
+        ESP_LOGE(TAG, "axp2101 read failed; power gate skipped");
+        return;
+    }
+    esp_reset_reason_t rr = esp_reset_reason();
+    hy_reset_kind_t kind = rr == ESP_RST_POWERON ? HY_RST_POWERON : HY_RST_OTHER;
+    bool allowed = hy_power_on_allowed(st, kind);
+    s_boot_pwron = st;
+    s_boot_reset = (int)rr;
+    s_boot_would_off = allowed ? 0 : 1;
+    ESP_LOGI(TAG, "axp2101 ic_type=0x%02x (%s)", ic, ic == AXP_IC_TYPE_ID ? "matches AXP2101" : "UNEXPECTED");
+    ESP_LOGI(TAG, "pwron_status=0x%02x reset_reason=%d (%s) power off: %s", st, (int)rr,
+             kind == HY_RST_POWERON ? "power-on" : "other", allowed ? "no" : "yes");
+    if (!allowed) {
+        /* Safe after flash and RTS resets: they report ESP_RST_USB (not power-on), so they keep running
+         * even though the VBUS-insert bit stays latched (see design/hardware-notes.md, Power-on source). */
+        ESP_LOGW(TAG, "power-on source is not the PWR key");
+        axp_power_off();
+    }
+}
+
+void hy_board_power_report(void)
+{
+    uint8_t now = 0xFF;
+    if (s_axp) {
+        axp_read(AXP_REG_PWRON, &now);
+    }
+    ESP_LOGI(TAG, "power report: boot pwron_status=0x%02x reset_reason=%d power_off=%d; now pwron_status=0x%02x",
+             s_boot_pwron, s_boot_reset, s_boot_would_off, now);
+}
+
 static void i2c_scan(void)
 {
     char found[160] = "";
@@ -97,6 +188,7 @@ static esp_err_t board_init_once(void)
         ESP_LOGE(TAG, "i2c init: %s", esp_err_to_name(err));
         return err;
     }
+    power_gate();
     i2c_scan();
 
     esp_lv_adapter_config_t acfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
