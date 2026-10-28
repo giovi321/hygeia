@@ -83,9 +83,10 @@ esp_err_t hy_ui_start(void)
     toast_create(s_screen);
     lv_screen_load(s_screen);
     lv_timer_create(tick_cb, 1000, NULL);
+    int sub = hy_ev_subscribe(event_cb, NULL);
     hy_board_unlock();
 
-    if (hy_ev_subscribe(event_cb, NULL) < 0) {
+    if (sub < 0) {
         ESP_LOGE(TAG, "event subscribe failed");
         return ESP_FAIL;
     }

@@ -23,5 +23,6 @@ idf_component_register(
         lvgl__lvgl
     PRIV_REQUIRES
         esp_rom
+        esp_timer
         freertos
 )

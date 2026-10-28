@@ -4,6 +4,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "hy/actions.h"
 #include "hy/clock.h"
 #include "hy/occ.h"
@@ -322,6 +323,7 @@ static void set_status(tile_t *t, const char *text, int style)
 
 void home_refresh(bool animate)
 {
+    int64_t t0 = esp_timer_get_time();
     const hy_clock_port_t *ck = hy_clock_port();
     bool valid = ck->valid(NULL);
     int64_t now = valid ? ck->now(NULL) : 0;
@@ -347,6 +349,11 @@ void home_refresh(bool animate)
         set_status(t, v.text, v.style);
         lv_obj_set_style_border_opa(t->tile, v.due ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     }
+    int64_t us = esp_timer_get_time() - t0;
+    static bool first = true;
+    ESP_LOG_LEVEL(first ? ESP_LOG_INFO : ESP_LOG_DEBUG, TAG, "home_refresh: %u tiles in %u ms",
+                  (unsigned)s_ntiles, (unsigned)((us + 500) / 1000));
+    first = false;
 }
 
 void home_rebuild(void)
@@ -407,11 +414,6 @@ void home_create(lv_obj_t *parent)
 }
 
 /* ---- tapping ---- */
-
-void home_pending_clear(void)
-{
-    s_pending = false;
-}
 
 void home_tap_med(uint32_t med_id)
 {
