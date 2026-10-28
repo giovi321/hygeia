@@ -37,9 +37,10 @@ $(BUILD)/%: $(HERE)/%.c $(PROJ_OBJS) $(TP_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< $(PROJ_OBJS) $(TP_OBJS) -lm
 
+# Project objects emit .d files so header edits rebuild dependents.
 $(BUILD)/obj/%.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP $(INCLUDES) -c -o $@ $<
 
 $(BUILD)/obj/unity.o: $(UNITY_DIR)/unity.c
 	@mkdir -p $(dir $@)
@@ -48,6 +49,8 @@ $(BUILD)/obj/unity.o: $(UNITY_DIR)/unity.c
 $(BUILD)/obj/cJSON.o: $(CJSON_DIR)/cJSON.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TP_CFLAGS) -I$(CJSON_DIR) -c -o $@ $<
+
+-include $(PROJ_OBJS:.o=.d)
 
 clean:
 	rm -rf $(BUILD)
