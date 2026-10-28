@@ -101,9 +101,21 @@ bool home_med_id_by_code(const char *code, uint32_t *id)
     return false;
 }
 
+/* Logs window by medicine kind. As-needed: the last max(minimum interval, 1 day), short enough that
+ * the 128-entry cap (the store keeps the earliest entries) cannot hide the newest dose. Fixed:
+ * from the previous slot (up to 1 day + early window back) to now. */
 static size_t load_logs(const hy_med_t *m, int64_t now)
 {
-    return hy_store_port()->query_log(NULL, now - 8 * DAY_S, now + 1, m->id, s_logs, LOG_MAX);
+    int64_t span = DAY_S;
+    if (m->type == HY_SCHED_AS_NEEDED) {
+        int64_t iv = (int64_t)m->min_interval_min * 60;
+        if (iv > span) {
+            span = iv;
+        }
+    } else {
+        span = DAY_S + (int64_t)m->early_window_min * 60;
+    }
+    return hy_store_port()->query_log(NULL, now - span, now + 1, m->id, s_logs, LOG_MAX);
 }
 
 /* latest taken dose at or before now; 0 if none */
