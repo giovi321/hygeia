@@ -1,8 +1,11 @@
 idf_component_register(
     SRCS
         "src/store.c"
+        "src/store_mount.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         hy_core
+    PRIV_REQUIRES
+        joltwallet__littlefs
 )

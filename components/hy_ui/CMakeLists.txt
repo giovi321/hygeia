@@ -1,0 +1,27 @@
+idf_component_register(
+    SRCS
+        "src/ui.c"
+        "src/theme.c"
+        "src/home.c"
+        "src/toast.c"
+        "src/debug.c"
+        "fonts/hy_inter_17.c"
+        "fonts/hy_inter_22.c"
+        "fonts/hy_inter_b17.c"
+        "fonts/hy_inter_b22.c"
+        "fonts/hy_inter_b30.c"
+        "fonts/hy_inter_b52.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "src"
+    REQUIRES
+        hy_core
+        hy_store
+        hy_clock
+        hy_board
+        lvgl__lvgl
+    PRIV_REQUIRES
+        esp_rom
+        freertos
+)
