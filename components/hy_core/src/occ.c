@@ -240,6 +240,20 @@ static int64_t next_occurrence(const hy_med_t *m, int64_t after, const char *pos
     return INT64_MAX;
 }
 
+int64_t hy_prev_occurrence(const hy_med_t *m, int64_t now, const char *posix_tz)
+{
+    int64_t buf[16];
+    int64_t from = now - MATCH_LOOKBACK, last = 0;
+    for (;;) {
+        size_t n = hy_occurrences(m, from, now + 1, posix_tz, buf, 16);
+        if (n == 0) break;
+        last = buf[n - 1];
+        if (n < 16) break;
+        from = last + 1;
+    }
+    return last;
+}
+
 int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
                       const hy_log_t *logs, size_t n_logs)
 {

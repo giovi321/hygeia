@@ -101,21 +101,22 @@ bool home_med_id_by_code(const char *code, uint32_t *id)
     return false;
 }
 
-/* Logs window by medicine kind. As-needed: the last max(minimum interval, 1 day), short enough that
- * the 128-entry cap (the store keeps the earliest entries) cannot hide the newest dose. Fixed:
- * from the previous slot (up to 1 day + early window back) to now. */
-static size_t load_logs(const hy_med_t *m, int64_t now)
+/* Logs from `from` to now. The caller picks the window so the 128-entry cap (the store keeps the
+ * earliest entries) cannot hide the newest dose. */
+static size_t load_logs(const hy_med_t *m, int64_t from, int64_t now)
+{
+    return hy_store_port()->query_log(NULL, from, now + 1, m->id, s_logs, LOG_MAX);
+}
+
+/* As-needed window: the last max(minimum interval, 1 day). */
+static int64_t as_needed_from(const hy_med_t *m, int64_t now)
 {
     int64_t span = DAY_S;
-    if (m->type == HY_SCHED_AS_NEEDED) {
-        int64_t iv = (int64_t)m->min_interval_min * 60;
-        if (iv > span) {
-            span = iv;
-        }
-    } else {
-        span = DAY_S + (int64_t)m->early_window_min * 60;
+    int64_t iv = (int64_t)m->min_interval_min * 60;
+    if (iv > span) {
+        span = iv;
     }
-    return hy_store_port()->query_log(NULL, now - span, now + 1, m->id, s_logs, LOG_MAX);
+    return now - span;
 }
 
 /* latest taken dose at or before now; 0 if none */
@@ -149,19 +150,21 @@ static int32_t frac(int64_t from, int64_t span_s, int64_t now)
 static void compute(const hy_med_t *m, int64_t now, const char *tz, view_t *v)
 {
     memset(v, 0, sizeof *v);
-    size_t n = load_logs(m, now);
-    int64_t taken = last_taken(n, now);
-
     if (m->type == HY_SCHED_AS_NEEDED) {
+        size_t na = load_logs(m, as_needed_from(m, now), now);
+        int64_t taken = last_taken(na, now);
         v->ring = m->min_interval_min ? frac(taken, (int64_t)m->min_interval_min * 60, now) : 0;
         snprintf(v->text, sizeof v->text, "as needed");
         return;
     }
 
-    static int64_t prev_occ[OCC_MAX], next_occ[OCC_MAX];
-    size_t np = hy_occurrences(m, now - (DAY_S + (int64_t)m->early_window_min * 60), now + 1, tz, prev_occ, OCC_MAX);
+    /* previous slot over 8 days (covers a weekly schedule), logs only from its early window on */
+    static int64_t next_occ[OCC_MAX];
+    int64_t prev = hy_prev_occurrence(m, now, tz);
+    int64_t log_from = prev ? prev - (int64_t)m->early_window_min * 60 : now - DAY_S;
+    size_t n = load_logs(m, log_from, now);
+    int64_t taken = last_taken(n, now);
     size_t nn = hy_occurrences(m, now + 1, now + 8 * DAY_S, tz, next_occ, OCC_MAX);
-    int64_t prev = np ? prev_occ[np - 1] : 0;
     int64_t next = nn ? next_occ[0] : 0;
 
     hy_occ_state_t st = HY_OCC_TAKEN;
@@ -457,7 +460,7 @@ void home_tap_med(uint32_t med_id)
     bool second = s_pending && s_pending_id == med_id && lv_tick_elaps(s_pending_tick) <= HY_TOO_SOON_WINDOW_MS;
 
     if (valid && m->type == HY_SCHED_AS_NEEDED && !second) {
-        size_t n = load_logs(m, now);
+        size_t n = load_logs(m, as_needed_from(m, now), now);
         int32_t since = -1;
         if (hy_min_interval_check(m, now, s_logs, n, &since) == HY_W_TOO_SOON) {
             char a[24], b[24], msg[96];

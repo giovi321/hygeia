@@ -160,7 +160,7 @@ bool toast_undo_pressed(void)
         return false;
     }
     hy_err_t err = hy_act_undo(s_log_id);
-    ESP_LOGI(TAG, "undo log %u: err %d", (unsigned)s_log_id, (int)err);
+    ESP_LOGI(TAG, "undo log %u: %s (%d)", (unsigned)s_log_id, hy_err_str(err), (int)err);
     hide();
     ui_log_hwm("undo");
     if (err == HY_E_UNDO_EXPIRED) {
