@@ -9,3 +9,4 @@ docs/.astro/
 *.pcap
 secrets*.h
 .env
+.plans/
