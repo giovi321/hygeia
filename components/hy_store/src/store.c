@@ -359,7 +359,7 @@ hy_err_t hy_store_open(const char *base_dir)
         scan_file(fp, probe_cb, &pc);
         if (pc.max > max) max = pc.max;
     }
-    s_next_id = max + 1;
+    s_next_id = (uint64_t)max + 1;
     s_skipped = 0;
     s_open = true;
     return HY_OK;
@@ -441,11 +441,13 @@ static hy_err_t st_append_log(void *ctx, hy_log_t *e)
     if (hy_log_to_jsonl(&tmp, line, sizeof line) < 0) return HY_E_INVALID;
     char rel[32], p[PATH_MAX_];
     int idx = month_index(e->ts);
+    /* A new month with a full index would be written but never seen: refuse before writing. */
+    if (!months_has(idx) && s_n_months >= MONTHS_MAX) return HY_E_FULL;
     month_name(idx, rel, sizeof rel);
     if (!make_path(p, rel)) return HY_E_IO;
     hy_err_t r = append_line(p, line);
     if (r != HY_OK) return r;
-    months_add(idx);   /* cannot fail for a file that did not exist: open reported HY_E_FULL */
+    months_add(idx);   /* cannot fail: the index had room or already held this month */
     e->id = (uint32_t)s_next_id++;
     return HY_OK;
 }
@@ -473,12 +475,13 @@ static hy_err_t st_update_log(void *ctx, const hy_log_t *e)
         probe_ctx pc = { e->id, false, 0 };
         scan_file(op, probe_cb, &pc);
         if (!pc.found) continue;
+        if (!months_has(target) && s_n_months >= MONTHS_MAX) return HY_E_FULL;   /* before any write */
         /* Write the new copy first: a crash leaves a duplicate, never a loss. */
         char line[LINE_MAX_];
         if (hy_log_to_jsonl(e, line, sizeof line) < 0) return HY_E_INVALID;
         r = append_line(tp, line);
         if (r != HY_OK) return r;
-        if (!months_add(target)) return HY_E_FULL;
+        months_add(target);   /* room was checked above */
         r = rewrite_month(op, e->id, RW_DELETE, NULL);
         return r == HY_OK ? HY_OK : HY_E_IO;
     }
