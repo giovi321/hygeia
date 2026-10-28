@@ -1,0 +1,194 @@
+<style>
+  .w { --bg:#0B0B0E; --panel:#141418; --line:#24242B; --tx:#EDEDF0; --mut:#9A9AA4; --acc:#D0646B;
+       background:var(--bg); color:var(--tx); border-radius:14px; overflow:hidden; font-family:-apple-system,"Segoe UI",Roboto,sans-serif; font-size:14px; outline:1px solid #2A2A30; margin-bottom:26px; }
+  .bar { display:flex; align-items:center; gap:10px; padding:8px 14px; background:#1A1A1F; color:#8A8A94; font-size:12px; }
+  .bar i { width:10px; height:10px; border-radius:50%; background:#3A3A42; display:inline-block; }
+  .bar span { margin-left:10px; background:#0F0F12; padding:6px 12px; border-radius:6px; flex:1; }
+  .app { display:flex; min-height:420px; }
+  .side { width:180px; background:#0F0F12; border-right:1px solid var(--line); padding:16px 10px; }
+  .side .logo { display:flex; align-items:center; gap:8px; font-weight:700; font-size:17px; padding:0 8px 16px; }
+  .side a { display:block; padding:9px 12px; border-radius:8px; color:var(--mut); text-decoration:none; margin-bottom:2px; }
+  .side a.on { background:#1E1E24; color:var(--tx); }
+  .main { flex:1; padding:20px 24px; }
+  .main h4 { margin:0 0 14px; font-size:20px; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; }
+  .pn { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .k { color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.6px; margin-bottom:6px; }
+  .big { font-size:26px; font-weight:700; }
+  .ring { width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex:none; }
+  .ring b { width:44px; height:44px; border-radius:50%; background:#0B0B0E; display:flex; align-items:center; justify-content:center; font-size:22px; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
+  .btn { display:inline-block; padding:8px 14px; border-radius:8px; background:#24242B; color:var(--tx); font-weight:600; }
+  .btn.p { background:var(--acc); color:#fff; }
+  .in { background:#0B0B0E; border:1px solid #2E2E36; border-radius:8px; padding:8px 10px; color:var(--tx); }
+  .lbl { color:var(--mut); font-size:12px; margin:10px 0 4px; }
+  .tg { display:inline-block; width:34px; height:20px; border-radius:10px; background:#2E2E36; position:relative; vertical-align:middle; }
+  .tg:after { content:""; position:absolute; left:3px; top:3px; width:14px; height:14px; border-radius:50%; background:#9A9AA4; }
+  .tg.on { background:#3B6E4A; } .tg.on:after { left:17px; background:#fff; }
+  .hm { display:grid; grid-template-columns:repeat(30,1fr); gap:3px; }
+  .hm i { height:16px; border-radius:3px; display:block; }
+  .chip { display:inline-block; padding:4px 10px; border-radius:10px; font-size:12px; background:#1E1E24; color:var(--mut); }
+  .dev { width:480px; height:480px; background:#000; border-radius:28px; position:relative; overflow:hidden; color:#EDEDF0;
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif; transform:scale(.645); transform-origin:top left; margin-bottom:-170px; margin-right:-170px; outline:5px solid #26262C; }
+  .sb { height:56px; display:flex; align-items:center; justify-content:space-between; padding:0 24px; }
+  .sb .t { font-size:30px; font-weight:700; } .sb .r { font-size:22px; font-weight:600; color:#C8C8D0; }
+  .li { display:flex; justify-content:space-between; align-items:center; margin:0 18px 10px; background:#121216; border-radius:20px; padding:0 20px; height:66px; font-size:21px; }
+  .li span { color:#9A9AA4; font-size:18px; }
+</style>
+
+<h2>Web UI and on-device settings</h2>
+<p class="subtitle">Served by the device at <code>hygeia.local</code> (client mode) or <code>192.168.4.1</code> (AP mode). Same dark style as the screen. Sidebar collapses into a top menu on a phone. Everything the screen can do has a page here.</p>
+
+<div class="w">
+  <div class="bar"><i></i><i></i><i></i><span>http://hygeia.local/</span></div>
+  <div class="app">
+    <div class="side">
+      <div class="logo"><svg width="22" height="22" viewBox="0 0 256 256"><path d="M173.8 78A82 82 0 1 1 82.2 78" fill="none" stroke="#D9DAD6" stroke-width="32" stroke-linecap="round"/><path fill="#D0646B" fill-rule="evenodd" transform="rotate(-12 128 34)" d="M106 14H150A20 20 0 0 1 150 54H106A20 20 0 0 1 106 14Z M124 14H132V54H124Z"/></svg>hygeia</div>
+      <a class="on">Dashboard</a><a>Medicines</a><a>History</a><a>Schedule</a><a>Settings</a>
+      <div style="margin-top:30px;padding:0 12px;font-size:12px;color:#8A8A94;line-height:1.7">Battery 78% · on USB<br>Wi-Fi client · −58 dBm<br>Clock synced 2 min ago<br>MQTT connected</div>
+    </div>
+    <div class="main">
+      <h4>Dashboard</h4>
+      <div class="row" style="margin-bottom:14px">
+        <div class="pn" style="flex:1"><div class="k">Today</div><div class="big">2 / 3 doses</div><div style="color:#9A9AA4">next: A at 14:00</div></div>
+        <div class="pn" style="flex:1"><div class="k">Adherence · 30 d</div><div class="big">95%</div><div style="color:#9A9AA4">2 missed, 5 late</div></div>
+        <div class="pn" style="flex:1"><div class="k">Device time</div><div class="big">08:42:17</div><div style="color:#9A9AA4">Europe/Zurich · <u>sync from this browser</u></div></div>
+      </div>
+      <div class="row">
+        <div class="pn" style="flex:1;display:flex;gap:14px;align-items:center"><div class="ring" style="background:conic-gradient(#4FD1C5 0 62%,#22222A 0)"><b style="color:#4FD1C5">A</b></div><div style="flex:1"><b>Antibiotic</b><div style="color:#9A9AA4">2 h 14 m ago · 12 left</div></div><span class="btn">Log</span></div>
+        <div class="pn" style="flex:1;display:flex;gap:14px;align-items:center;outline:2px solid #F6C453"><div class="ring" style="background:conic-gradient(#F6C453 0 100%,#22222A 0)"><b style="color:#F6C453">V</b></div><div style="flex:1"><b>Vitamin D</b><div style="color:#F6C453">due 08:30</div></div><span class="btn p">Log</span></div>
+        <div class="pn" style="flex:1;display:flex;gap:14px;align-items:center"><div class="ring" style="background:conic-gradient(#A78BFA 0 25%,#22222A 0)"><b style="color:#A78BFA">M</b></div><div style="flex:1"><b>Magnesium</b><div style="color:#9A9AA4">as needed</div></div><span class="btn">Log</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="w">
+  <div class="bar"><i></i><i></i><i></i><span>http://hygeia.local/medicines/A</span></div>
+  <div class="app">
+    <div class="side"><div class="logo">hygeia</div><a>Dashboard</a><a class="on">Medicines</a><a>History</a><a>Schedule</a><a>Settings</a></div>
+    <div class="main">
+      <h4>Edit medicine</h4>
+      <div class="row">
+        <div class="pn" style="flex:1.2">
+          <div class="row"><div><div class="lbl">Code</div><div class="in" style="width:40px;text-align:center;font-weight:700;color:#4FD1C5">A</div></div><div style="flex:1"><div class="lbl">Name</div><div class="in">Antibiotic</div></div></div>
+          <div class="row"><div style="flex:1"><div class="lbl">Dose</div><div class="in">1 tab</div></div><div><div class="lbl">Colour</div><div style="display:flex;gap:6px"><i style="width:28px;height:28px;border-radius:50%;background:#4FD1C5;outline:2px solid #fff"></i><i style="width:28px;height:28px;border-radius:50%;background:#F6C453"></i><i style="width:28px;height:28px;border-radius:50%;background:#A78BFA"></i><i style="width:28px;height:28px;border-radius:50%;background:#7CE38B"></i><i style="width:28px;height:28px;border-radius:50%;background:#F38BA8"></i></div></div></div>
+          <div class="lbl">Schedule</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip" style="background:#24323A;color:#EDEDF0">Fixed times</span><span class="chip">As needed</span></div>
+          <div style="display:flex;gap:6px;margin-top:8px"><span class="in">06:00</span><span class="in">14:00</span><span class="in">22:00</span><span class="btn">+ time</span></div>
+          <div style="display:flex;gap:4px;margin-top:8px"><span class="chip" style="background:#24323A;color:#fff">M</span><span class="chip" style="background:#24323A;color:#fff">T</span><span class="chip" style="background:#24323A;color:#fff">W</span><span class="chip" style="background:#24323A;color:#fff">T</span><span class="chip" style="background:#24323A;color:#fff">F</span><span class="chip" style="background:#24323A;color:#fff">S</span><span class="chip" style="background:#24323A;color:#fff">S</span></div>
+        </div>
+        <div class="pn" style="flex:1">
+          <div class="lbl">Late after / missed after</div><div style="display:flex;gap:8px"><span class="in">30 min</span><span class="in">2 h</span></div>
+          <div class="lbl">Minimum interval (as needed)</div><div class="in">—</div>
+          <div class="lbl">Pill count <span class="tg on" style="margin-left:6px"></span></div><div style="display:flex;gap:8px"><span class="in">12 left</span><span class="in">alert at 5</span></div>
+          <div class="lbl">Active from / until</div><div style="display:flex;gap:8px"><span class="in">2026-10-25</span><span class="in">2026-11-04</span></div>
+          <div style="margin-top:16px;display:flex;gap:8px"><span class="btn p">Save</span><span class="btn">Archive</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="w">
+  <div class="bar"><i></i><i></i><i></i><span>http://hygeia.local/history</span></div>
+  <div class="app">
+    <div class="side"><div class="logo">hygeia</div><a>Dashboard</a><a>Medicines</a><a class="on">History</a><a>Schedule</a><a>Settings</a></div>
+    <div class="main">
+      <h4>History <span style="float:right;font-size:13px;font-weight:400"><span class="btn">Export CSV</span> <span class="btn">Export JSON</span> <span class="btn">Import</span></span></h4>
+      <div class="pn" style="margin-bottom:14px">
+        <div class="k">Last 30 days</div>
+        <div style="display:grid;grid-template-columns:24px 1fr;gap:6px;align-items:center">
+          <b style="color:#4FD1C5">A</b><div class="hm"><i style="background:#1C1C22"></i><i style="background:#1C1C22"></i><i style="background:#1C1C22"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#2F7F78"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#2F7F78"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#2F7F78"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i><i style="background:#4FD1C5"></i></div>
+          <b style="color:#F6C453">V</b><div class="hm"><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="outline:2px solid #E5484D;outline-offset:-2px"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="outline:2px solid #E5484D;outline-offset:-2px"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#F6C453"></i><i style="background:#1C1C22"></i></div>
+        </div>
+      </div>
+      <div class="pn" style="padding:4px 6px">
+        <table>
+          <tr><th>When</th><th>Medicine</th><th>Status</th><th>Note</th><th></th></tr>
+          <tr><td>Wed 28 Oct 06:28</td><td><b style="color:#4FD1C5">A</b> Antibiotic</td><td>taken · +28 min</td><td style="color:#9A9AA4">—</td><td style="color:#9A9AA4">edit · delete</td></tr>
+          <tr><td>Tue 27 Oct 22:04</td><td><b style="color:#4FD1C5">A</b> Antibiotic</td><td>taken · on time</td><td style="color:#9A9AA4">—</td><td style="color:#9A9AA4">edit · delete</td></tr>
+          <tr><td>Tue 27 Oct 19:10</td><td><b style="color:#A78BFA">M</b> Magnesium</td><td>taken · as needed</td><td>after run</td><td style="color:#9A9AA4">edit · delete</td></tr>
+          <tr><td colspan="5" style="color:#9A9AA4">+ Add entry manually</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="w">
+  <div class="bar"><i></i><i></i><i></i><span>http://hygeia.local/settings</span></div>
+  <div class="app">
+    <div class="side"><div class="logo">hygeia</div><a>Dashboard</a><a>Medicines</a><a>History</a><a>Schedule</a><a class="on">Settings</a></div>
+    <div class="main">
+      <h4>Settings</h4>
+      <div class="row">
+        <div class="pn" style="flex:1;min-width:230px">
+          <div class="k">Wi-Fi</div>
+          <div>Mode: <span class="chip" style="background:#24323A;color:#fff">Client</span> <span class="chip">Access point</span> <span class="chip">Off</span></div>
+          <div class="lbl">Known networks</div><div class="in">HomeNet · Hotel-Guest · + add</div>
+          <div class="lbl">AP name / WPA2 password</div><div style="display:flex;gap:8px"><span class="in">hygeia-setup</span><span class="in">••••••••</span></div>
+          <div class="lbl">Wi-Fi on battery <span class="tg" style="margin-left:6px"></span></div>
+        </div>
+        <div class="pn" style="flex:1;min-width:230px">
+          <div class="k">MQTT</div>
+          <div class="lbl">Broker</div><div class="in">mqtt://broker.lan:1883</div>
+          <div class="lbl">Base topic</div><div class="in">hygeia</div>
+          <div class="lbl">Home Assistant discovery <span class="tg on" style="margin-left:6px"></span></div>
+          <div class="k" style="margin-top:14px">Webhooks</div>
+          <div class="in" style="margin-bottom:6px">POST https://n8n.lan/webhook/… </div>
+          <div><span class="chip" style="background:#24323A;color:#fff">taken</span> <span class="chip" style="background:#24323A;color:#fff">due</span> <span class="chip" style="background:#24323A;color:#fff">missed</span> <span class="chip" style="background:#24323A;color:#fff">snoozed</span> <span class="chip" style="background:#24323A;color:#fff">battery low</span> <span class="btn" style="padding:5px 12px">Test</span></div>
+        </div>
+        <div class="pn" style="flex:1;min-width:230px">
+          <div class="k">Clock</div>
+          <div>08:42:17 · Europe/Zurich</div>
+          <div style="margin:8px 0"><span class="btn p">Sync from this browser</span></div>
+          <div class="lbl">NTP in client mode <span class="tg on" style="margin-left:6px"></span></div>
+          <div class="k" style="margin-top:14px">Screen and sound</div>
+          <div class="lbl">Dim after / off after (battery)</div><div style="display:flex;gap:8px"><span class="in">30 s</span><span class="in">2 min</span></div>
+          <div class="lbl">Chime volume · quiet hours</div><div style="display:flex;gap:8px"><span class="in">60%</span><span class="in">22:30–07:00</span></div>
+          <div class="lbl">Web UI password <span class="tg" style="margin-left:6px"></span></div>
+          <div style="margin-top:12px"><span class="btn">Backup</span> <span class="btn">Restore</span> <span class="btn">Firmware update</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>On-device settings (from Quick settings → Settings)</h3>
+<div style="display:flex;gap:22px;flex-wrap:wrap">
+  <div>
+    <div class="dev">
+      <div class="sb"><span class="t">08:42</span><span class="r">78%</span></div>
+      <div style="font-size:26px;font-weight:700;padding:0 24px 12px">Settings</div>
+      <div class="li">Wi-Fi<span>Client · HomeNet ›</span></div>
+      <div class="li">Time zone<span>Europe/Zurich ›</span></div>
+      <div class="li">Sound<span>Chime 60% ›</span></div>
+      <div class="li">Display<span>Dim 30 s ›</span></div>
+      <div class="li">About<span>v0.1 · IP ›</span></div>
+    </div>
+  </div>
+  <div>
+    <div class="dev">
+      <div class="sb"><span class="t">08:42</span><span class="r">AP · 78%</span></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding-top:4px">
+        <div style="font-size:24px;font-weight:700">Access point on</div>
+        <div style="width:190px;height:190px;background:#fff;border-radius:16px;display:grid;grid-template-columns:repeat(9,1fr);padding:14px;box-sizing:border-box;gap:2px">
+          <i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i>
+          <i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i></i><i></i><i style="background:#000"></i><i></i>
+          <i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i>
+          <i></i><i style="background:#000"></i><i></i><i></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i>
+          <i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i></i><i></i><i style="background:#000"></i>
+          <i></i><i></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i></i>
+          <i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i></i><i style="background:#000"></i><i></i><i style="background:#000"></i>
+          <i></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i>
+          <i style="background:#000"></i><i style="background:#000"></i><i></i><i></i><i style="background:#000"></i><i style="background:#000"></i><i></i><i style="background:#000"></i><i style="background:#000"></i>
+        </div>
+        <div style="font-size:19px;color:#C8C8D0;text-align:center;line-height:1.5">Scan to join <b>hygeia-setup</b><br>then open 192.168.4.1</div>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="subtitle">The AP screen shows a Wi-Fi QR code (scan with the phone camera to join, password included); a second tap shows the web UI link as QR.</p>
