@@ -87,10 +87,12 @@ Verified on the board from the serial log, 2026-10-28.
 - After an RTS reset (power stays on) the RTC kept running and the firmware reported the clock valid with the correct UTC time; the TZ stored in NVS (namespace "clock", key "tz") was also restored
 - A time before the build epoch is rejected by `time` (ESP_ERR_INVALID_ARG)
 - Time is kept over a USB power cycle (`osc_stopped=0`, valid)
-- RTC kept time over 74 s with USB unplugged and, pending owner confirmation, the battery unplugged (`osc_stopped=0` afterwards); this implies a backup supply for the PCF85063
+- RTC kept time over 74 s with USB unplugged and the battery connected, device off (`osc_stopped=0` afterwards)
+- Not tested: time kept with no battery and no USB. Whether the board has a backup supply for the PCF85063 is unknown; the firmware's "Set the time" flow covers the case where it does not
 
 ## Home grid
 
 - Owner-verified on firmware a319c4e: tile tap, Undo by finger, scroll with 5 medicines, and the panel's look against the mockup
 - LVGL task stack minimum free: 6996 bytes
 
+- Owner-verified on firmware 86d1ea6: taps on other tiles while the logged toast shows do not log, Undo still removes the entry, and a second tap within 5 s after the too-soon warning logs the dose (serial log not captured for this check)
