@@ -5,7 +5,7 @@
 #include "hy/occ.h"
 
 #define UNDO_SLOTS 8
-#define QUERY_MAX 256
+#define QUERY_MAX 128
 #define LOOKBACK_S (8 * 86400LL)
 
 typedef struct {
@@ -28,6 +28,7 @@ static hy_med_t scratch[HY_MAX_MEDS];
 static size_t n_meds;
 static undo_rec_t undo[UNDO_SLOTS];
 static size_t undo_next;
+static bool inited;
 static hy_log_t qbuf[QUERY_MAX];
 
 static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id)
@@ -64,7 +65,8 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
     memset(undo, 0, sizeof undo);
     n_meds = 0;
     undo_next = 0;
-    store = s; store_ctx = sctx; clk = c; clk_ctx = cctx;
+    inited = false;
+    store = NULL; clk = NULL; store_ctx = NULL; clk_ctx = NULL;
     if (!s || !c) return HY_E_INVALID;
     size_t n = 0;
     hy_err_t err = s->load_meds(sctx, meds, HY_MAX_MEDS, &n);
@@ -75,6 +77,8 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
     if (n > HY_MAX_MEDS) n = HY_MAX_MEDS;
     n_meds = n;
     sort_meds(meds, n_meds);
+    store = s; store_ctx = sctx; clk = c; clk_ctx = cctx;
+    inited = true;
     return HY_OK;
 }
 
@@ -88,7 +92,7 @@ size_t hy_meds(const hy_med_t **out)
 
 hy_err_t hy_act_med_upsert(hy_med_t *m)
 {
-    if (!m) return HY_E_INVALID;
+    if (!inited || !m) return HY_E_INVALID;
     hy_err_t err = hy_med_validate(m, meds, n_meds);
     if (err != HY_OK) return err;
 
@@ -121,6 +125,7 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
 
 hy_err_t hy_act_med_archive(uint32_t id, bool archived)
 {
+    if (!inited) return HY_E_INVALID;
     hy_med_t *cur = find_med(id);
     if (!cur) return HY_E_NOT_FOUND;
     hy_med_t upd = *cur;
@@ -158,6 +163,7 @@ static undo_rec_t *undo_add(void)
 static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
                             const char *note, hy_source_t src, uint32_t *out_log_id)
 {
+    if (!inited) return HY_E_INVALID;
     if (!clk->valid(clk_ctx)) return HY_E_CLOCK;
     hy_med_t *med = find_med(med_id);
     if (!med || med->archived) return HY_E_NOT_FOUND;
@@ -165,9 +171,15 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
     int64_t now = clk->now(clk_ctx);
     if (ts == 0) ts = now;
     const char *tz = clk->tz(clk_ctx);
+    if (!tz) tz = "UTC0";
 
-    size_t n = store->query_log(store_ctx, ts - LOOKBACK_S, ts + (int64_t)med->early_window_min * 60 + 1,
-                                med_id, qbuf, QUERY_MAX);
+    /* Entries are indexed by their own ts, and a backdated ts can sit before entries
+     * written later (a taken log at 09:30, an auto missed entry at slot + 120 min),
+     * so the upper bound also covers `now`. */
+    int64_t hi = ts + (int64_t)med->early_window_min * 60;
+    if (now > hi) hi = now;
+    size_t n = store->query_log(store_ctx, ts - LOOKBACK_S, hi + 1, med_id, qbuf, QUERY_MAX);
+    if (n >= QUERY_MAX) return HY_E_FULL; /* possibly truncated: do not match on partial data */
     int64_t slot = hy_match_slot(med, ts, tz, qbuf, n);
     if (status == HY_SKIPPED && slot == 0) return HY_E_INVALID;
 
@@ -207,10 +219,9 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
 
     if (status == HY_TAKEN && med->pills_enabled && med->pills_left > 0) {
         med->pills_left--;
-        if (store->save_meds(store_ctx, meds, n_meds) != HY_OK) {
-            med->pills_left++;
-            return HY_E_IO; /* log kept, no undo record, no event */
-        }
+        /* The log write is the commit point: a failed save is not reported. The
+         * decremented count stays in memory and the next successful meds save persists it. */
+        (void)store->save_meds(store_ctx, meds, n_meds);
         rec.pill_dec = true;
     }
 
@@ -240,11 +251,12 @@ hy_err_t hy_act_skip(uint32_t med_id, hy_source_t src, uint32_t *out_log_id)
 
 hy_err_t hy_act_undo(uint32_t log_id)
 {
+    if (!inited) return HY_E_INVALID;
     undo_rec_t *r = undo_find(log_id);
     if (!r) return HY_E_NOT_FOUND;
     if (!clk->valid(clk_ctx)) return HY_E_CLOCK;
     int64_t now = clk->now(clk_ctx);
-    if (now - r->created > HY_UNDO_WINDOW_S) {
+    if (now < r->created || now - r->created > HY_UNDO_WINDOW_S) {
         r->used = false;
         return HY_E_UNDO_EXPIRED;
     }
@@ -258,18 +270,15 @@ hy_err_t hy_act_undo(uint32_t log_id)
     bool dec = r->pill_dec;
     r->used = false;
 
-    hy_err_t result = HY_OK;
     if (dec) {
         hy_med_t *med = find_med(med_id);
         if (med) {
+            /* The log undo is the commit point: a failed pill save is not reported;
+             * the restored count is persisted by the next successful meds save. */
             med->pills_left++;
-            if (store->save_meds(store_ctx, meds, n_meds) != HY_OK) {
-                med->pills_left--;
-                result = HY_E_IO;
-            }
+            (void)store->save_meds(store_ctx, meds, n_meds);
         }
     }
-    if (result != HY_OK) return result;
     publish(HY_EV_UNDONE, ts, med_id, log_id);
     return HY_OK;
 }
@@ -278,7 +287,7 @@ hy_err_t hy_act_undo(uint32_t log_id)
 
 hy_err_t hy_act_log_edit(const hy_log_t *e)
 {
-    if (!e) return HY_E_INVALID;
+    if (!inited || !e) return HY_E_INVALID;
     hy_log_t upd = *e;
     upd.edited = true;
     if (store->update_log(store_ctx, &upd) != HY_OK) return HY_E_IO;
@@ -289,6 +298,7 @@ hy_err_t hy_act_log_edit(const hy_log_t *e)
 
 hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts)
 {
+    if (!inited) return HY_E_INVALID;
     if (store->delete_log(store_ctx, log_id, ts) != HY_OK) return HY_E_IO;
     undo_forget(log_id);
     publish(HY_EV_LOG_EDITED, ts, 0, log_id);
