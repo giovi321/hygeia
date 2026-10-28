@@ -8,17 +8,18 @@
 #define H(h, m) ((int64_t)((h) * 3600 + (m) * 60))
 
 /* ---- in-memory store port that records calls ---- */
-#define MAXLOG 128
+#define MAXLOG 200
 static struct {
     hy_med_t meds[HY_MAX_MEDS]; size_t n_meds;
     hy_log_t logs[MAXLOG]; size_t n_logs; uint32_t next_id;
-    int saves, appends, updates, deletes, loads;
-    bool fail_save, fail_append, fail_update, fail_delete;
+    int saves, appends, append_attempts, updates, deletes, loads;
+    bool fail_load, fail_save, fail_append, fail_update, fail_delete;
 } st;
 
 static hy_err_t s_load(void *c, hy_med_t *out, size_t max, size_t *n)
 {
     (void)c; st.loads++;
+    if (st.fail_load) return HY_E_IO;
     *n = st.n_meds < max ? st.n_meds : max;
     memcpy(out, st.meds, *n * sizeof *out);
     return HY_OK;
@@ -32,7 +33,7 @@ static hy_err_t s_save(void *c, const hy_med_t *m, size_t n)
 }
 static hy_err_t s_append(void *c, hy_log_t *e)
 {
-    (void)c;
+    (void)c; st.append_attempts++;
     if (st.fail_append) return HY_E_IO;
     e->id = st.next_id++;
     st.logs[st.n_logs++] = *e; st.appends++;
@@ -410,18 +411,125 @@ static void test_log_write_failure_changes_nothing(void)
 {
     st.fail_append = true;
     TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_log_taken(2, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(1, st.append_attempts);
+    TEST_ASSERT_EQUAL_INT(0, st.appends);
     TEST_ASSERT_EQUAL_INT16(12, med_by_id(2)->pills_left);
     TEST_ASSERT_EQUAL_INT(0, st.saves);
     TEST_ASSERT_EQUAL_INT(0, n_evs);
 }
 
-static void test_pill_save_failure_keeps_log(void)
+static void test_pill_save_failure_still_succeeds(void)
 {
+    uint32_t id = 0;
     st.fail_save = true;
-    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_log_taken(2, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(2, 0, NULL, HY_SRC_SCREEN, &id));
     TEST_ASSERT_EQUAL_size_t(1, st.n_logs);
+    TEST_ASSERT_EQUAL_INT16(11, med_by_id(2)->pills_left); /* stays decremented in memory */
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL_INT(HY_EV_TAKEN, evs[0].type);
+    st.fail_save = false;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id)); /* undo record exists and restores once */
     TEST_ASSERT_EQUAL_INT16(12, med_by_id(2)->pills_left);
+    TEST_ASSERT_EQUAL_INT16(12, st.meds[1].pills_left);
+}
+
+static void test_undo_pill_save_failure_still_succeeds(void)
+{
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(2, 0, NULL, HY_SRC_SCREEN, &id));
+    st.fail_save = true;
+    n_evs = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
+    TEST_ASSERT_EQUAL_size_t(0, st.n_logs);
+    TEST_ASSERT_EQUAL_INT16(12, med_by_id(2)->pills_left);
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL_INT(HY_EV_UNDONE, evs[0].type);
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_undo(id));
+    TEST_ASSERT_EQUAL_INT16(12, med_by_id(2)->pills_left);
+}
+
+static void test_backdated_does_not_duplicate_taken(void)
+{
+    clk.now = D0 + H(9, 30);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), st.logs[0].slot);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, D0 + H(8, 5), NULL, HY_SRC_WEB, NULL));
+    int for_slot = 0;
+    for (size_t i = 0; i < st.n_logs; i++)
+        if (st.logs[i].slot == D0 + H(8, 0) && st.logs[i].status == HY_TAKEN) for_slot++;
+    TEST_ASSERT_EQUAL_INT(1, for_slot);
+}
+
+static void test_backdated_converts_later_missed(void)
+{
+    hy_log_t m;
+    memset(&m, 0, sizeof m);
+    m.id = 50; m.ts = D0 + H(10, 0); strcpy(m.tz, "UTC0"); m.med_id = 1;
+    m.status = HY_MISSED; m.slot = D0 + H(8, 0); m.source = HY_SRC_AUTO;
+    st.logs[st.n_logs++] = m;
+    clk.now = D0 + H(10, 30);
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, D0 + H(8, 5), NULL, HY_SRC_WEB, &id));
+    TEST_ASSERT_EQUAL_UINT32(50, id);
+    TEST_ASSERT_EQUAL_size_t(1, st.n_logs);
+    TEST_ASSERT_EQUAL_INT(0, st.appends);
+    TEST_ASSERT_EQUAL_INT(HY_TAKEN, st.logs[0].status);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 5), st.logs[0].ts);
+}
+
+static void test_truncated_query_is_full(void)
+{
+    for (int i = 0; i < 128; i++) {
+        hy_log_t f;
+        memset(&f, 0, sizeof f);
+        f.id = 1000 + (uint32_t)i; f.ts = D0 - H(1, 0) - i; f.med_id = 3; f.status = HY_TAKEN;
+        st.logs[st.n_logs++] = f;
+    }
+    size_t before = st.n_logs;
+    TEST_ASSERT_EQUAL_INT(HY_E_FULL, hy_act_log_taken(3, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(0, st.append_attempts + st.updates + st.saves);
+    TEST_ASSERT_EQUAL_size_t(before, st.n_logs);
     TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void test_undo_with_clock_stepped_back(void)
+{
+    uint32_t id;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, &id));
+    clk.now -= 1;
+    TEST_ASSERT_EQUAL_INT(HY_E_UNDO_EXPIRED, hy_act_undo(id));
+    TEST_ASSERT_EQUAL_size_t(1, st.n_logs);
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_undo(id));
+}
+
+static void test_uninitialised_and_failed_init(void)
+{
+    hy_med_t m; fixed_med(&m, 0, "N", "New", 9);
+    st.fail_load = true;
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    const hy_med_t *p;
+    TEST_ASSERT_EQUAL_size_t(0, hy_meds(&p));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_skip(1, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_undo(100));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_upsert(&m));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_archive(1, true));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_edit(&(hy_log_t){0}));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_delete(1, 0));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_actions_init(NULL, NULL, &clock_port, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(0, st.appends + st.saves);
+}
+
+static const char *c_tz_null(void *c) { (void)c; return NULL; }
+
+static void test_null_tz_is_utc(void)
+{
+    hy_clock_port_t cp = { c_now, c_tz_null, c_valid };
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &cp, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_STRING("UTC0", st.logs[0].tz);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
 }
 
 static void test_undo_log_failure_keeps_record(void)
@@ -497,7 +605,14 @@ int main(void)
     RUN_TEST(test_skip_without_slot_is_invalid);
     RUN_TEST(test_skip_converts_missed);
     RUN_TEST(test_log_write_failure_changes_nothing);
-    RUN_TEST(test_pill_save_failure_keeps_log);
+    RUN_TEST(test_pill_save_failure_still_succeeds);
+    RUN_TEST(test_undo_pill_save_failure_still_succeeds);
+    RUN_TEST(test_backdated_does_not_duplicate_taken);
+    RUN_TEST(test_backdated_converts_later_missed);
+    RUN_TEST(test_truncated_query_is_full);
+    RUN_TEST(test_undo_with_clock_stepped_back);
+    RUN_TEST(test_uninitialised_and_failed_init);
+    RUN_TEST(test_null_tz_is_utc);
     RUN_TEST(test_undo_log_failure_keeps_record);
     RUN_TEST(test_undo_ring_keeps_eight);
     RUN_TEST(test_log_edit_and_delete);

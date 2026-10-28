@@ -51,15 +51,21 @@ hy_err_t hy_act_med_archive(uint32_t id, bool archived);
 /*
  * Records a taken dose. ts 0 = now. HY_E_CLOCK if the clock is invalid;
  * HY_E_NOT_FOUND for an unknown or archived medicine. Fills tz (clock port), slot
- * (hy_match_slot over the store's logs for [ts - 8 days, ts + early window]) and
+ * (hy_match_slot over the store's logs for this medicine in
+ * [ts - 8 days, max(ts + early window, now)]; the bound includes now because a backdated
+ * ts can precede entries written later) and
  * delta_min ((ts - slot) / 60 toward zero, 0 for a free log). A HY_MISSED entry for
  * the matched slot is converted in place (same id, status HY_TAKEN, `edited` stays
  * false) instead of appending. When pills_enabled and pills_left > 0 the count is
  * decremented and the medicines saved.
- * Failures: if the log write fails, HY_E_IO and nothing else changes. If saving
- * the medicines fails after the log write, the log is kept, the in-memory pill
- * count is restored, HY_E_IO is returned, and no undo record or event is created.
- * Publishes HY_EV_TAKEN on success only.
+ * The log write is the commit point. If it fails: HY_E_IO, nothing else changes, no
+ * event. Once it succeeds the action succeeds: if the pill save then fails, HY_OK is
+ * still returned, the undo record is created, HY_EV_TAKEN is published, and the
+ * decremented count stays in memory until the next successful meds save persists it.
+ * HY_E_FULL (nothing written) when the store returns 128 logs for the look-back
+ * query, since matching on truncated data could pick the wrong slot.
+ * Every action returns HY_E_INVALID before a successful hy_actions_init.
+ * A NULL tz() from the clock port is treated as "UTC0".
  */
 hy_err_t hy_act_log_taken(uint32_t med_id, int64_t ts /*0 = now*/, const char *note,
                           hy_source_t src, uint32_t *out_log_id);
@@ -78,10 +84,11 @@ hy_err_t hy_act_skip(uint32_t med_id, hy_source_t src, uint32_t *out_log_id);
  * forgotten. No record: HY_E_NOT_FOUND. Older than the window: HY_E_UNDO_EXPIRED and
  * the record is dropped, so later calls give HY_E_NOT_FOUND. Otherwise the entry is
  * deleted (or the converted MISSED entry restored), a decremented pill count is
- * restored and the medicines saved, the record is dropped and HY_EV_UNDONE is
- * published. If the log operation fails: HY_E_IO, record kept. If the pill save
- * fails after the log was undone: pill count restored in memory to its current
- * value, record dropped, HY_E_IO. Needs a valid clock (HY_E_CLOCK otherwise).
+ * restored (+1) and the medicines saved, the record is dropped and HY_EV_UNDONE is
+ * published. If the log operation fails: HY_E_IO, record kept. The log operation is
+ * the commit point: a failed pill save is not reported and the restored count stays
+ * in memory until the next successful meds save. A clock stepped back (now before
+ * creation) counts as expired. Needs a valid clock (HY_E_CLOCK otherwise).
  */
 hy_err_t hy_act_undo(uint32_t log_id);
 
