@@ -138,6 +138,30 @@ static void test_color_range(void)
     TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_med_validate(&m, NULL, 0));
 }
 
+static void test_weekdays_and_dates(void)
+{
+    hy_med_t m;
+    make_valid(&m, 1, "A");
+    m.weekdays = 0xFF;
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_med_validate(&m, NULL, 0));
+    make_valid(&m, 1, "A");
+    m.type = HY_SCHED_AS_NEEDED; m.n_times = 0; m.weekdays = 0x80 | 0x7F;
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_med_validate(&m, NULL, 0));
+
+    make_valid(&m, 1, "A");
+    m.active_from = 20261001; m.active_until = 20261031;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_med_validate(&m, NULL, 0));
+    int32_t bad[] = { -1, 5, 19991231, 20260001, 20261301, 20260100, 20260132, 100000101 };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        make_valid(&m, 1, "A");
+        m.active_from = bad[i];
+        TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_med_validate(&m, NULL, 0));
+        make_valid(&m, 1, "A");
+        m.active_until = bad[i];
+        TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_med_validate(&m, NULL, 0));
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -147,5 +171,6 @@ int main(void)
     RUN_TEST(test_name_rules);
     RUN_TEST(test_times_rules);
     RUN_TEST(test_color_range);
+    RUN_TEST(test_weekdays_and_dates);
     return UNITY_END();
 }

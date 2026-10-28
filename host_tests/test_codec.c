@@ -284,6 +284,50 @@ void test_meds_full(void)
     TEST_ASSERT_EQUAL(HY_E_FULL, hy_meds_from_json(three, d, 2, &n));
 }
 
+void test_encoder_rejects_what_decoder_rejects(void)
+{
+    hy_med_t m[3];
+    hy_log_t e = sample_log();
+    char buf[1024];
+    make_meds(m);
+    free(hy_meds_to_json(m, 1));
+
+    make_meds(m); m[0].weekdays = 0xFF;
+    TEST_ASSERT_NULL(hy_meds_to_json(m, 1));
+    make_meds(m); m[0].active_from = 100000000;
+    TEST_ASSERT_NULL(hy_meds_to_json(m, 1));
+    make_meds(m); m[0].active_until = -5;
+    TEST_ASSERT_NULL(hy_meds_to_json(m, 1));
+    make_meds(m); m[0].color = 10;
+    TEST_ASSERT_NULL(hy_meds_to_json(m, 1));
+    make_meds(m); m[0].n_times = 9;
+    TEST_ASSERT_NULL(hy_meds_to_json(m, 1));
+
+    e.ts = 1000000000000000LL;
+    TEST_ASSERT_EQUAL(-1, hy_log_to_jsonl(&e, buf, sizeof buf));
+    e = sample_log(); e.slot = -1000000000000000LL;
+    TEST_ASSERT_EQUAL(-1, hy_log_to_jsonl(&e, buf, sizeof buf));
+    e = sample_log(); e.ts = 999999999999999LL;
+    TEST_ASSERT_GREATER_THAN(0, hy_log_to_jsonl(&e, buf, sizeof buf));
+    hy_log_t d;
+    TEST_ASSERT_EQUAL(HY_OK, hy_log_from_jsonl(buf, &d));
+    TEST_ASSERT_EQUAL_INT64(e.ts, d.ts);
+}
+
+void test_trailing_data_rejected(void)
+{
+    hy_log_t d;
+    hy_med_t m[2];
+    size_t n;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_log_from_jsonl(
+        "{\"id\":1,\"ts\":5,\"med_id\":1,\"status\":\"taken\"} junk", &d));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_log_from_jsonl(
+        "{\"id\":1,\"ts\":5,\"med_id\":1,\"status\":\"taken\"}{\"id\":2}", &d));
+    TEST_ASSERT_EQUAL(HY_OK, hy_log_from_jsonl(
+        "{\"id\":1,\"ts\":5,\"med_id\":1,\"status\":\"taken\"}  ", &d));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_meds_from_json("{\"v\":1,\"meds\":[]} x", m, 2, &n));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -297,5 +341,7 @@ int main(void)
     RUN_TEST(test_meds_defaults_and_unknown_fields);
     RUN_TEST(test_meds_invalid);
     RUN_TEST(test_meds_full);
+    RUN_TEST(test_encoder_rejects_what_decoder_rejects);
+    RUN_TEST(test_trailing_data_rejected);
     return UNITY_END();
 }

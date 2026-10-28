@@ -17,7 +17,6 @@
 #define PATH_MAX_   160
 #define LINE_MAX_   1024            /* longest accepted log line incl. '\n' */
 #define MEDS_MAX_B  (256 * 1024)    /* larger meds.json is treated as corrupt */
-#define YEAR_MAX    9999
 
 static char s_base[BASE_MAX];
 static bool s_open;
@@ -94,22 +93,6 @@ static int dir_month_next(int after)
     return best;
 }
 
-/* Largest existing month index strictly below `before` (INT_MAX-like start), or -1. */
-static int dir_month_prev(int before)
-{
-    char p[PATH_MAX_];
-    if (!make_path(p, "log")) return -1;
-    DIR *d = opendir(p);
-    if (!d) return -1;
-    int best = -1;
-    struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        int idx = parse_month_name(de->d_name);
-        if (idx >= 0 && idx < before && idx > best) best = idx;
-    }
-    closedir(d);
-    return best;
-}
 
 /* ---- line reading ---- */
 
@@ -323,18 +306,16 @@ hy_err_t hy_store_open(const char *base_dir)
     remove_tmp_in(s_base);
     remove_tmp_in(p);
 
-    /* next id = max id in the newest month file that holds any entry, + 1 */
+    /* next id = max id over all month files + 1 (ids are global; entries can be
+     * backdated into older months or moved between months) */
     uint32_t max = 0;
-    for (int idx = dir_month_prev(YEAR_MAX * 12 + 12); idx >= 0; idx = dir_month_prev(idx)) {
+    for (int idx = dir_month_next(-1); idx >= 0; idx = dir_month_next(idx)) {
         char rel[32], fp[PATH_MAX_];
         month_name(idx, rel, sizeof rel);
         if (!make_path(fp, rel)) return HY_E_IO;
         probe_ctx pc = { 0, false, 0 };
         scan_file(fp, probe_cb, &pc);
-        if (pc.max > 0) {
-            max = pc.max;
-            break;
-        }
+        if (pc.max > max) max = pc.max;
     }
     s_next_id = max + 1;
     s_skipped = 0;

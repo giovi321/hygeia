@@ -6,7 +6,8 @@
 #include "hy/codec.h"
 #include "hy/med.h"
 
-#define MAX_SAFE_INT 9007199254740992.0 /* 2^53: every integer below is exact in a double */
+#define MAX_SAFE_INT 999999999999999.0 /* 15 digits: cJSON prints numbers with %1.15g, so these round-trip exactly */
+#define MAX_SAFE_I64 999999999999999LL
 
 static const char *const STATUS_NAMES[] = { "taken", "skipped", "missed" };
 static const char *const SOURCE_NAMES[] = { "screen", "web", "mqtt", "auto" };
@@ -78,6 +79,10 @@ int hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len)
 {
     if (!e || !buf || len == 0) return -1;
     if ((unsigned)e->status > HY_MISSED || (unsigned)e->source > HY_SRC_AUTO) return -1;
+    /* refuse what the decoder would reject */
+    if (e->ts < -MAX_SAFE_I64 || e->ts > MAX_SAFE_I64 || e->slot < -MAX_SAFE_I64 ||
+        e->slot > MAX_SAFE_I64) return -1;
+    if (strnlen(e->tz, sizeof e->tz) >= sizeof e->tz || strnlen(e->note, sizeof e->note) >= sizeof e->note) return -1;
 
     cJSON *o = cJSON_CreateObject();
     if (!o) return -1;
@@ -107,7 +112,7 @@ int hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len)
 hy_err_t hy_log_from_jsonl(const char *line, hy_log_t *out)
 {
     if (!line || !out) return HY_E_INVALID;
-    cJSON *o = cJSON_Parse(line);
+    cJSON *o = cJSON_ParseWithOpts(line, NULL, true);
     if (!o) return HY_E_INVALID;
     hy_err_t r = HY_E_INVALID;
     if (cJSON_IsObject(o)) {
@@ -157,7 +162,12 @@ static cJSON *med_to_json(const hy_med_t *m)
     cJSON *times = cJSON_CreateArray();
     cJSON *pc = cJSON_CreateObject();
     if (!o || !sch || !times || !pc || (unsigned)m->type > HY_SCHED_AS_NEEDED ||
-        m->n_times > HY_MAX_TIMES) {
+        m->n_times > HY_MAX_TIMES || m->weekdays > 127 || m->color > 9 ||
+        m->active_from < 0 || m->active_from > 99991231 ||
+        m->active_until < 0 || m->active_until > 99991231 ||
+        strnlen(m->code, sizeof m->code) >= sizeof m->code ||
+        strnlen(m->name, sizeof m->name) >= sizeof m->name ||
+        strnlen(m->dose, sizeof m->dose) >= sizeof m->dose) {
         goto fail;
     }
     for (unsigned i = 0; i < m->n_times; i++) {
@@ -320,7 +330,7 @@ static hy_err_t med_from_json(const cJSON *o, hy_med_t *m)
 hy_err_t hy_meds_from_json(const char *json, hy_med_t *out, size_t max, size_t *n)
 {
     if (!json || !n || (max > 0 && !out)) return HY_E_INVALID;
-    cJSON *root = cJSON_Parse(json);
+    cJSON *root = cJSON_ParseWithOpts(json, NULL, true);
     if (!root) return HY_E_INVALID;
     hy_err_t r = HY_E_INVALID;
     cJSON *v = cJSON_GetObjectItemCaseSensitive(root, "v");

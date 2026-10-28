@@ -33,7 +33,7 @@
 
 #define HY_SCHEMA_VERSION 1
 
-/* One line without '\n'. Returns the length, or -1 if len is too small (or e is invalid). */
+/* One line without '\n'. Returns the length, or -1 if len is too small (or e is invalid, or ts/slot beyond 15 digits). */
 int      hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len);
 hy_err_t hy_log_from_jsonl(const char *line, hy_log_t *out);
 

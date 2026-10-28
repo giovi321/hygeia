@@ -31,8 +31,21 @@ static bool code_ok(const char *code)
     return true;
 }
 
+/* Plausible local date YYYYMMDD, or 0 = unset. */
+static bool date_ok(int32_t d)
+{
+    if (d == 0) {
+        return true;
+    }
+    int y = d / 10000, mo = (d / 100) % 100, day = d % 100;
+    return d > 0 && y >= 2000 && y <= 9999 && mo >= 1 && mo <= 12 && day >= 1 && day <= 31;
+}
+
 static bool times_ok(const hy_med_t *m)
 {
+    if (m->weekdays & 0x80) {
+        return false; /* bits above Sunday */
+    }
     if (m->type != HY_SCHED_FIXED) {
         return true; /* as-needed: no times required */
     }
@@ -71,6 +84,9 @@ hy_err_t hy_med_validate(const hy_med_t *m, const hy_med_t *others, size_t n_oth
         return HY_E_NAME; /* empty, or unterminated */
     }
     if (m->color > 9) {
+        return HY_E_INVALID;
+    }
+    if (!date_ok(m->active_from) || !date_ok(m->active_until)) {
         return HY_E_INVALID;
     }
     if (!times_ok(m)) {
