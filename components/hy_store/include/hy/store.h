@@ -30,4 +30,10 @@ hy_err_t hy_store_open(const char *base_dir);
 const hy_store_port_t *hy_store_port(void);   /* ctx is NULL */
 size_t   hy_store_skipped_lines(void);        /* corrupt lines skipped since open */
 
+#ifdef ESP_PLATFORM
+#include "esp_err.h"
+/* Device only: mounts the LittleFS partition "storage" at "/data"; formats it only if the mount fails. */
+esp_err_t hy_store_mount(void);
+#endif
+
 #endif /* HY_STORE_H */

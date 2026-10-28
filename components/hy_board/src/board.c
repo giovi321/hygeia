@@ -210,6 +210,8 @@ static esp_err_t board_init_once(void)
     i2c_scan();
 
     esp_lv_adapter_config_t acfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
+    /* The LVGL task also runs the actions and the store (line buffers, JSON): more than the 8 KB default */
+    acfg.task_stack_size = 12 * 1024;
     err = esp_lv_adapter_init(&acfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "lvgl adapter init: %s", esp_err_to_name(err));

@@ -5,8 +5,12 @@
 
 #include "esp_log.h"
 #include "hy/board.h"
+#include "hy/actions.h"
 #include "hy/clock.h"
+#include "hy/store.h"
+#include "hy/ui.h"
 #include "nvs_flash.h"
+#include <sys/stat.h>
 
 #include "console.h"
 
@@ -23,6 +27,9 @@ static void cmd_boardtest(const char *args)
         ESP_LOGE(TAG, "boardtest: lvgl lock timeout");
         return;
     }
+    /* The test screen cleans the active screen, which would delete the home grid: load a fresh one
+     * first. The home screen stays alive but hidden; a reboot returns to it. */
+    lv_screen_load(lv_obj_create(NULL));
     hy_board_selftest();
     hy_board_unlock();
 }
@@ -64,6 +71,83 @@ static void cmd_clock(const char *args)
     hy_clock_report();
 }
 
+static void cmd_tap(const char *args)
+{
+    char code[4];
+    strlcpy(code, args, sizeof code);
+    if (!code[0]) {
+        ESP_LOGE(TAG, "usage: tap <code>");
+        return;
+    }
+    hy_ui_debug_tap(code);
+}
+
+static void cmd_undo(const char *args) { (void)args; hy_ui_debug_undo(); }
+static void cmd_logs(const char *args) { (void)args; hy_ui_debug_logs(); }
+static void cmd_seed4(const char *args) { hy_ui_debug_seed4(args); }
+static void cmd_shot(const char *args) { (void)args; hy_ui_debug_shot(); }
+
+#define MEDS_FILE "/data/meds.json"
+
+/* First boot: the three example medicines, added through the actions so validation applies. */
+static void seed_example_meds(void)
+{
+    static const struct {
+        const char *code, *name;
+        uint8_t color;
+        uint16_t times[3];
+        uint8_t n_times;
+        uint16_t min_interval;
+    } seed[] = {
+        {"A", "Antibiotic", 0, {6 * 60, 14 * 60, 22 * 60}, 3, 0},
+        {"V", "Vitamin D", 1, {8 * 60 + 30}, 1, 0},
+        {"M", "Magnesium", 2, {0}, 0, 240},
+    };
+    for (size_t i = 0; i < sizeof seed / sizeof seed[0]; i++) {
+        hy_med_t m;
+        memset(&m, 0, sizeof m);
+        hy_med_defaults(&m);
+        strcpy(m.code, seed[i].code);
+        strcpy(m.name, seed[i].name);
+        m.color = seed[i].color;
+        m.order = (uint16_t)i;
+        if (seed[i].n_times) {
+            m.type = HY_SCHED_FIXED;
+            memcpy(m.times, seed[i].times, sizeof m.times);
+            m.n_times = seed[i].n_times;
+        } else {
+            m.type = HY_SCHED_AS_NEEDED;
+            m.min_interval_min = seed[i].min_interval;
+        }
+        hy_err_t e = hy_act_med_upsert(&m);
+        ESP_LOGI(TAG, "seed %s: err %d", seed[i].code, (int)e);
+    }
+}
+
+static void init_storage(void)
+{
+    esp_err_t err = hy_store_mount();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "storage unavailable, no persistence: %s", esp_err_to_name(err));
+        return;
+    }
+    err = hy_store_open("/data");
+    ESP_LOGI(TAG, "hy_store_open: %s", esp_err_to_name(err));
+    if (err != ESP_OK) {
+        return;
+    }
+    struct stat st;
+    bool first_boot = stat(MEDS_FILE, &st) != 0;
+    hy_err_t e = hy_actions_init(hy_store_port(), NULL, hy_clock_port(), NULL);
+    ESP_LOGI(TAG, "hy_actions_init: err %d", (int)e);
+    if (first_boot) {
+        ESP_LOGI(TAG, "%s not found: seeding the example medicines", MEDS_FILE);
+        seed_example_meds();
+    }
+    const hy_med_t *ms;
+    ESP_LOGI(TAG, "medicines loaded: %u", (unsigned)hy_meds(&ms));
+}
+
 static void init_nvs(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -81,16 +165,6 @@ void app_main(void)
 
     esp_err_t err = hy_board_init();
     ESP_LOGI(TAG, "hy_board_init: %s", esp_err_to_name(err));
-    if (err == ESP_OK) {
-        if (hy_board_lock(1000)) {
-            lv_obj_t *l = lv_label_create(lv_screen_active());
-            lv_label_set_text(l, "hygeia");
-            lv_obj_center(l);
-            hy_board_unlock();
-        } else {
-            ESP_LOGE(TAG, "boot label: lvgl lock timeout");
-        }
-    }
 
     init_nvs();
     if (err == ESP_OK) {
@@ -98,9 +172,20 @@ void app_main(void)
         ESP_LOGI(TAG, "hy_clock_init: %s, clock valid: %s", esp_err_to_name(cerr), hy_clock_valid() ? "yes" : "no");
     }
 
+    init_storage();
+    if (err == ESP_OK) {
+        esp_err_t uerr = hy_ui_start();
+        ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));
+    }
+
     console_register("boardtest", cmd_boardtest);
     console_register("powerstat", cmd_powerstat);
     console_register("time", cmd_time);
     console_register("clock", cmd_clock);
+    console_register("tap", cmd_tap);
+    console_register("undo", cmd_undo);
+    console_register("logs", cmd_logs);
+    console_register("seed4", cmd_seed4);
+    console_register("shot", cmd_shot);
     console_start();
 }
