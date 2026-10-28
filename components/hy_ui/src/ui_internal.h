@@ -57,6 +57,7 @@ void toast_create(lv_obj_t *parent);
 void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id);
 void toast_show_info(const char *text);  /* warning style, no Undo */
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
+bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */
 
 /* ui.c */
 void ui_log_hwm(const char *what);       /* logs the LVGL task stack margin once per `what` */
