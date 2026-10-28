@@ -13,7 +13,7 @@ Observed on the Waveshare ESP32-S3-Touch-AMOLED-2.16 with the registry BSP (wave
 
 - LVGL display 480x480, RGB565
 - Flush areas seen: x=0..479, y in steps of 48 (480x48), including the full-screen redraw after `lv_obj_clean`
-- No odd-size or misaligned flush was logged (the BSP 2-pixel rounder is kept)
+- None logged: no odd-size or misaligned flush appeared in the serial log during the observed runs (the 2-pixel rounder is re-implemented in `board.c`, because the BSP display start function is bypassed)
 
 ## Buffers
 

@@ -1,5 +1,6 @@
 #include "console.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -24,6 +25,8 @@ void console_register(const char *name, void (*fn)(const char *args))
         s_cmds[s_ncmds].name = name;
         s_cmds[s_ncmds].fn = fn;
         s_ncmds++;
+    } else {
+        ESP_LOGE(TAG, "command table full (%d), dropped: %s", MAX_CMDS, name);
     }
 }
 
@@ -56,6 +59,7 @@ static void console_task(void *arg)
 {
     char line[LINE_MAX_LEN];
     size_t n = 0;
+    bool overflow = false;
     for (;;) {
         int c = getchar();
         if (c == EOF) {
@@ -63,16 +67,25 @@ static void console_task(void *arg)
             continue;
         }
         if (c == '\r' || c == '\n') {
-            line[n] = '\0';
+            if (overflow) {
+                ESP_LOGW(TAG, "line too long (max %d), discarded", LINE_MAX_LEN - 1);
+            } else {
+                line[n] = '\0';
+                dispatch(line);
+            }
             n = 0;
-            dispatch(line);
+            overflow = false;
         } else if (n < sizeof line - 1) {
             line[n++] = (char)c;
+        } else {
+            overflow = true;
         }
     }
 }
 
 void console_start(void)
 {
-    xTaskCreate(console_task, "console", 4096, NULL, 3, NULL);
+    if (xTaskCreate(console_task, "console", 6144, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "console task create failed");
+    }
 }
