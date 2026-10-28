@@ -3,6 +3,7 @@
 #include "hy/actions.h"
 #include "hy/events.h"
 #include "hy/med.h"
+#include "hy/occ.h"
 
 #define D0 1793145600LL /* 2026-10-28 00:00 UTC */
 #define H(h, m) ((int64_t)((h) * 3600 + (m) * 60))
@@ -492,6 +493,43 @@ static void test_truncated_query_is_full(void)
     TEST_ASSERT_EQUAL_INT(0, n_evs);
 }
 
+static void test_as_needed_logs_despite_full_history(void)
+{
+    hy_med_t m; hy_med_defaults(&m);
+    m.id = 0; m.order = 9; strcpy(m.code, "P"); strcpy(m.name, "Painkiller");
+    m.type = HY_SCHED_AS_NEEDED; m.min_interval_min = 240;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&m));
+    uint32_t pid = m.id;
+    /* 130 doses within the 8-day look-back, the newest 5 hours before now */
+    for (int i = 0; i < 130; i++) {
+        hy_log_t f;
+        memset(&f, 0, sizeof f);
+        f.id = 1000 + (uint32_t)i; f.ts = clk.now - H(5, 0) - (int64_t)i * 1200;
+        f.med_id = pid; f.status = HY_TAKEN;
+        st.logs[st.n_logs++] = f;
+    }
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(pid, 0, NULL, HY_SRC_SCREEN, &id));
+    TEST_ASSERT_EQUAL_size_t(131, st.n_logs);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
+    /* the home screen reads [now - max(interval, 1 day), now + 1): 128 cap keeps the newest
+     * dose visible because the window holds at most 72 of these doses */
+    hy_log_t win[128];
+    size_t n = s_query(NULL, clk.now - 86400, clk.now + 1, pid, win, 128);
+    TEST_ASSERT_TRUE(n < 128);
+    int32_t since = -1;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_min_interval_check(med_by_id(pid), clk.now, win, n, &since));
+    TEST_ASSERT_EQUAL_INT32(300, since);
+    /* a fresh dose inside the window is seen and is too soon */
+    hy_log_t f;
+    memset(&f, 0, sizeof f);
+    f.id = 5000; f.ts = clk.now - 600; f.med_id = pid; f.status = HY_TAKEN;
+    st.logs[st.n_logs++] = f;
+    n = s_query(NULL, clk.now - 86400, clk.now + 1, pid, win, 128);
+    TEST_ASSERT_EQUAL_INT(HY_W_TOO_SOON, hy_min_interval_check(med_by_id(pid), clk.now, win, n, &since));
+    TEST_ASSERT_EQUAL_INT32(10, since);
+}
+
 static void test_undo_with_clock_stepped_back(void)
 {
     uint32_t id;
@@ -610,6 +648,7 @@ int main(void)
     RUN_TEST(test_backdated_does_not_duplicate_taken);
     RUN_TEST(test_backdated_converts_later_missed);
     RUN_TEST(test_truncated_query_is_full);
+    RUN_TEST(test_as_needed_logs_despite_full_history);
     RUN_TEST(test_undo_with_clock_stepped_back);
     RUN_TEST(test_uninitialised_and_failed_init);
     RUN_TEST(test_null_tz_is_utc);

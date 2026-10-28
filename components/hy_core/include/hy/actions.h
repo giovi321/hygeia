@@ -63,7 +63,8 @@ hy_err_t hy_act_med_archive(uint32_t id, bool archived);
  * still returned, the undo record is created, HY_EV_TAKEN is published, and the
  * decremented count stays in memory until the next successful meds save persists it.
  * HY_E_FULL (nothing written) when the store returns 128 logs for the look-back
- * query, since matching on truncated data could pick the wrong slot.
+ * query, since matching on truncated data could pick the wrong slot. As-needed
+ * medicines (not HY_SCHED_FIXED) skip the query: slot 0, never HY_E_FULL.
  * Every action returns HY_E_INVALID before a successful hy_actions_init.
  * A NULL tz() from the clock port is treated as "UTC0".
  */

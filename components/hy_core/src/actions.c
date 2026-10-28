@@ -173,14 +173,20 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
     const char *tz = clk->tz(clk_ctx);
     if (!tz) tz = "UTC0";
 
-    /* Entries are indexed by their own ts, and a backdated ts can sit before entries
-     * written later (a taken log at 09:30, an auto missed entry at slot + 120 min),
-     * so the upper bound also covers `now`. */
-    int64_t hi = ts + (int64_t)med->early_window_min * 60;
-    if (now > hi) hi = now;
-    size_t n = store->query_log(store_ctx, ts - LOOKBACK_S, hi + 1, med_id, qbuf, QUERY_MAX);
-    if (n >= QUERY_MAX) return HY_E_FULL; /* possibly truncated: do not match on partial data */
-    int64_t slot = hy_match_slot(med, ts, tz, qbuf, n);
+    /* As-needed medicines have no slots: hy_match_slot gives 0, so the log is not queried
+     * (a long history could otherwise hit the query cap and block logging). */
+    size_t n = 0;
+    int64_t slot = 0;
+    if (med->type == HY_SCHED_FIXED) {
+        /* Entries are indexed by their own ts, and a backdated ts can sit before entries
+         * written later (a taken log at 09:30, an auto missed entry at slot + 120 min),
+         * so the upper bound also covers `now`. */
+        int64_t hi = ts + (int64_t)med->early_window_min * 60;
+        if (now > hi) hi = now;
+        n = store->query_log(store_ctx, ts - LOOKBACK_S, hi + 1, med_id, qbuf, QUERY_MAX);
+        if (n >= QUERY_MAX) return HY_E_FULL; /* possibly truncated: do not match on partial data */
+        slot = hy_match_slot(med, ts, tz, qbuf, n);
+    }
     if (status == HY_SKIPPED && slot == 0) return HY_E_INVALID;
 
     hy_log_t *missed = NULL;
