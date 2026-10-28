@@ -15,6 +15,7 @@
 #include "hy/clock.h"
 #include "hy/occ.h"
 #include "hy/store.h"
+#include "hy/tzlock.h"
 #include "hy/ui.h"
 #include "ui_internal.h"
 
@@ -37,11 +38,13 @@ static void job_logs(void)
     }
     time_t now = (time_t)ck->now(NULL);
     struct tm tm;
-    localtime_r(&now, &tm);       /* TZ is applied process-wide by hy_clock */
+    hy_tz_lock();                 /* the process TZ is hy_clock's zone outside this lock */
+    localtime_r(&now, &tm);
     tm.tm_hour = tm.tm_min = tm.tm_sec = 0;
     tm.tm_mday -= 1;
     tm.tm_isdst = -1;
     int64_t from = (int64_t)mktime(&tm);
+    hy_tz_unlock();
 
     hy_log_t *buf = heap_caps_malloc(128 * sizeof(hy_log_t), MALLOC_CAP_SPIRAM);
     if (!buf) {

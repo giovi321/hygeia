@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "hy/occ.h"
 #include "hy/types.h"
 
 typedef struct {
@@ -20,6 +21,8 @@ typedef struct {
     int64_t     (*now)(void *ctx);
     const char *(*tz)(void *ctx);
     bool        (*valid)(void *ctx);
+    /* Last recorded time-zone change. May be NULL; returns false when no change is recorded. */
+    bool        (*last_change)(void *ctx, hy_tzchange_t *out);
 } hy_clock_port_t;
 
 #define HY_MAX_MEDS 50

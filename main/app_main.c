@@ -1,5 +1,6 @@
 #include "esp_app_desc.h"
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -72,6 +73,19 @@ static void cmd_time(const char *args)
     }
     esp_err_t err = hy_clock_set(epoch, *end ? end : NULL, "serial");
     ESP_LOGI(TAG, "time: %s", esp_err_to_name(err));
+}
+
+static void cmd_zone(const char *args)
+{
+    /* Wider than HY_ZONE_LEN / HY_TZ_LEN so hy_clock_set_zone rejects a too long value
+     * instead of sscanf truncating it */
+    char iana[64], posix[64], extra[2];
+    if (sscanf(args, "%63s %63s %1s", iana, posix, extra) != 2) {
+        ESP_LOGE(TAG, "usage: zone <iana> <posix_tz>");
+        return;
+    }
+    esp_err_t err = hy_clock_set_zone(iana, posix);
+    ESP_LOGI(TAG, "zone: %s", esp_err_to_name(err));
 }
 
 static void cmd_clock(const char *args)
@@ -192,6 +206,7 @@ void app_main(void)
     console_register("boardtest", cmd_boardtest);
     console_register("powerstat", cmd_powerstat);
     console_register("time", cmd_time);
+    console_register("zone", cmd_zone);
     console_register("clock", cmd_clock);
     console_register("tap", cmd_tap);
     console_register("undo", cmd_undo);

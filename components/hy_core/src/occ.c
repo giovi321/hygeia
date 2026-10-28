@@ -1,4 +1,5 @@
 #include "hy/occ.h"
+#include "hy/tzlock.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -134,14 +135,21 @@ typedef struct {
     char value[SAVED_TZ_LEN];
 } saved_tz_t;
 
+/* tz_enter takes the process-wide TZ lock before saving the old TZ and keeps it on success;
+ * tz_leave restores the old TZ and only then releases the lock. On failure tz_enter releases
+ * the lock itself. */
 static bool tz_enter(saved_tz_t *s, const char *posix_tz)
 {
+    hy_tz_lock();
     const char *cur = getenv("TZ");
     s->had = cur != NULL;
     s->value[0] = '\0';
     if (cur) {
         size_t n = strlen(cur);
-        if (n >= sizeof s->value) return false;
+        if (n >= sizeof s->value) {
+            hy_tz_unlock();
+            return false;
+        }
         memcpy(s->value, cur, n + 1);
     }
     setenv("TZ", posix_tz ? posix_tz : "UTC0", 1);
@@ -154,6 +162,7 @@ static void tz_leave(const saved_tz_t *s)
     if (s->had) setenv("TZ", s->value, 1);
     else unsetenv("TZ");
     tzset();
+    hy_tz_unlock();
 }
 
 /* Local wall-clock time of a UTC instant in posix_tz, as seconds since
