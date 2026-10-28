@@ -62,5 +62,6 @@ To verify on hardware. The BSP default is `swap_xy=1, mirror_x=0, mirror_y=1`, u
 
 ### Recovery
 
-- Hold BOOT (GPIO 0) while pressing PWR or plugging in: the gate is bypassed and the log shows `gate bypassed (BOOT held)`
-- To reflash a device that keeps powering off, hold BOOT while connecting USB to enter ROM download mode
+- GPIO 0 is a strapping pin: holding BOOT through the reset (while plugging in or pressing PWR) enters ROM download mode instead of running the app
+- Bypass: press BOOT right after pressing PWR or plugging in (after the reset) and hold it until the log shows `gate bypassed (BOOT held)`
+- Reflash a device that keeps powering off: hold BOOT before the reset (while connecting USB) to enter ROM download mode
