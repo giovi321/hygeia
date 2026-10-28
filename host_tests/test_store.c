@@ -441,6 +441,76 @@ void test_id_exhaustion(void)
     TEST_ASSERT_NOT_EQUAL(0, stat(p, &sb));
 }
 
+void test_id_exhaustion_at_uint32_max(void)
+{
+    hy_log_t e = mk(TS_2026_01 + 5, 1);
+    e.id = 4294967295u;
+    char line[1024];
+    TEST_ASSERT_TRUE(hy_log_to_jsonl(&e, line, sizeof line) > 0);
+    strcat(line, "\n");
+    put_file("log/2026-01.jsonl", line);
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    uint32_t id = 7;
+    TEST_ASSERT_EQUAL(HY_E_FULL, add(TS_2026_01 + 9, 1, &id));
+    char p[160];
+    path(p, sizeof p, "log/2026-01.jsonl");
+    struct stat sb;
+    TEST_ASSERT_EQUAL(0, stat(p, &sb));
+    TEST_ASSERT_EQUAL((long)strlen(line), (long)sb.st_size);
+}
+
+static void make_month_files(int n)
+{
+    for (int i = 0; i < n; i++) {
+        char rel[40];
+        snprintf(rel, sizeof rel, "log/%04d-%02d.jsonl", 1 + i / 12, 1 + i % 12);
+        put_file(rel, "");
+    }
+}
+
+void test_open_with_too_many_months_is_full(void)
+{
+    make_month_files(1200);
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    make_month_files(1201);
+    TEST_ASSERT_EQUAL(HY_E_FULL, hy_store_open(base));
+}
+
+void test_append_to_new_month_when_index_full(void)
+{
+    make_month_files(1200);
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    uint32_t id = 7;
+    TEST_ASSERT_EQUAL(HY_E_FULL, add(TS_2026_01 + 9, 1, &id));
+    char p[160];
+    struct stat sb;
+    path(p, sizeof p, "log/2026-01.jsonl");
+    TEST_ASSERT_NOT_EQUAL(0, stat(p, &sb));
+    /* an existing month still accepts entries (0001-01-01 00:00 UTC) */
+    TEST_ASSERT_EQUAL(HY_OK, add(-62135596800LL + 5, 1, &id));
+    hy_log_t out[4];
+    TEST_ASSERT_EQUAL(1, q(-62135596800LL, -62135596800LL + DAY, 0, out, 4));
+}
+
+void test_update_into_new_month_when_index_full(void)
+{
+    make_month_files(1200);
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    uint32_t id;
+    int64_t y1 = -62135596800LL;
+    TEST_ASSERT_EQUAL(HY_OK, add(y1 + 5, 1, &id));
+    hy_log_t out[4];
+    TEST_ASSERT_EQUAL(1, q(y1, y1 + DAY, 0, out, 4));
+    hy_log_t e = out[0];
+    e.ts = TS_2026_01 + 5;
+    TEST_ASSERT_EQUAL(HY_E_FULL, P->update_log(NULL, &e));
+    TEST_ASSERT_EQUAL(1, q(y1, y1 + DAY, 0, out, 4));
+    char p[160];
+    struct stat sb;
+    path(p, sizeof p, "log/2026-01.jsonl");
+    TEST_ASSERT_NOT_EQUAL(0, stat(p, &sb));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -461,5 +531,9 @@ int main(void)
     RUN_TEST(test_new_month_after_open_is_indexed);
     RUN_TEST(test_update_moves_into_month_without_file);
     RUN_TEST(test_id_exhaustion);
+    RUN_TEST(test_id_exhaustion_at_uint32_max);
+    RUN_TEST(test_open_with_too_many_months_is_full);
+    RUN_TEST(test_append_to_new_month_when_index_full);
+    RUN_TEST(test_update_into_new_month_when_index_full);
     return UNITY_END();
 }
