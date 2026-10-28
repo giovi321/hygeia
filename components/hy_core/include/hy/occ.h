@@ -26,7 +26,11 @@ typedef struct { int64_t at; char old_tz[HY_TZ_LEN]; char new_tz[HY_TZ_LEN]; } h
  * window [slot - early_window_min, next_slot) contains ts. next_slot is the
  * following occurrence of the same medicine. A slot is satisfied by a log for
  * this medicine with status HY_TAKEN or HY_SKIPPED and that slot (a HY_MISSED
- * log does not satisfy it). Occurrences in [ts - 8 days, ts + early_window_min]
+ * log does not satisfy it). Exception: if that earliest unsatisfied slot is
+ * already past its missed deadline at ts (ts >= slot + missed_after_min) and a
+ * later unsatisfied slot's early window [s - early_window_min, s) contains ts,
+ * the later slot wins, so a dose taken early for the upcoming slot is not
+ * attributed to a missed one. Occurrences in [ts - 8 days, ts + early_window_min]
  * are considered. Returns the slot, or 0 for a free log, an as-needed or an
  * archived medicine.
  */
@@ -40,7 +44,8 @@ int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
  *    this slot rendered in posix_tz; else SKIPPED if a skipped log for the slot
  *    exists.
  * 2. UNTRACKED if the slot lies inside a gap [start, end) and its window closed
- *    (base + missed_after_min) at or before the gap end.
+ *    (base + missed_after_min) at or before the gap end. `now` is not
+ *    consulted: gaps are assumed to be recorded only once they have ended.
  * 3. From base: UPCOMING before base, DUE from base, LATE from base +
  *    late_after_min, MISSED from base + missed_after_min.
  * base is the slot, except (east rule) when last_change moved the wall clock
