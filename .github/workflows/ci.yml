@@ -24,7 +24,7 @@ jobs:
         with:
           esp_idf_version: v6.0.2
           target: esp32s3
-          command: idf.py -B build-rel -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build
+          command: idf.py -B build-rel -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build && ! grep -qw console_start build-rel/hygeia.map
 
   host-tests:
     runs-on: ubuntu-latest
