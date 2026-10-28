@@ -14,6 +14,8 @@ Observed on the Waveshare ESP32-S3-Touch-AMOLED-2.16 with the registry BSP (wave
 - LVGL display 480x480, RGB565
 - Flush areas seen: x=0..479, y in steps of 48 (480x48), including the full-screen redraw after `lv_obj_clean`
 - None logged: no odd-size or misaligned flush appeared in the serial log during the observed runs (the 2-pixel rounder is re-implemented in `board.c`, because the BSP display start function is bypassed)
+- Partial flushes narrower than the screen can be taller than 48 rows (210 px wide: 108 rows), because LVGL fits rows into the same 46080-byte buffer; the flush log flags only misalignment or more than 480 x 48 pixels
+- Display, owner-verified on firmware a319c4e: all four 40 px corner squares fully visible, no offset or tearing
 
 ## Buffers
 
@@ -47,7 +49,9 @@ The device-to-address mapping is inferred from the usual addresses of these part
 
 ## Touch orientation
 
-To verify on hardware. The BSP default is `swap_xy=1, mirror_x=0, mirror_y=1`, used unchanged. Pass criterion: touching each corner square of `boardtest` logs an x,y in the same corner of the 480x480 area.
+Verified on firmware a319c4e: no axis swap or mirror. The BSP default `swap_xy=1, mirror_x=0, mirror_y=1` is used unchanged, and the logged touches match the corners: TL x=33 y=28, TR x=466 y=29, BL x=24 y=460, BR x=460 y=466.
+
+The owner's first two touch attempts in one session logged no touches at all; this is unexplained and was not reproduced.
 
 ## Power-on source
 
@@ -58,7 +62,14 @@ To verify on hardware. The BSP default is `swap_xy=1, mirror_x=0, mirror_y=1`, u
   - after a readlog.py RTS reset: `rst:0x15 (USB_UART_CHIP_RESET)`, `pwron_status=0x04 reset_reason=11 (other)`
   - the VBUS-insert bit stays latched across chip resets; flash and RTS resets report ESP_RST_USB (11), not power-on, so they keep running
 - Decision: enforcement is unconditional. Only `ESP_RST_POWERON` is gated; everything else keeps running. The gate fails open: a power-on reset with no known source bit (R22), or with EN mode (bit 5) set (R24), boots; a chip-id register (0x03) other than 0x4A skips the gate and writes nothing to 0x10
-- Not verified on the board: the power-off path itself and the status byte after a real unplug and replug (see the owner checks in the task report)
+
+Owner-verified on firmware a319c4e:
+
+- Battery connected, after a PWR long-press off: unplugging and replugging USB leaves the screen dark and the charge LED shows charging
+- A PWR press boots with `pwron_status=0x01`, `reset_reason=1` (power-on); the gate allows
+- USB only, no battery: plugging in leaves the screen dark; PWR boots with `0x01`
+- The BOOT bypass is not tested on hardware
+- One earlier accidental USB replug came up running with no boot log captured; it was not reproduced in later replugs
 
 ### Recovery
 
@@ -75,5 +86,11 @@ Verified on the board from the serial log, 2026-10-28.
 - `time <epoch> [posix_tz]` wrote the RTC; read back 1 to 2 s later with the OS flag clear, weekday register 3 for Wednesday 2026-10-28
 - After an RTS reset (power stays on) the RTC kept running and the firmware reported the clock valid with the correct UTC time; the TZ stored in NVS (namespace "clock", key "tz") was also restored
 - A time before the build epoch is rejected by `time` (ESP_ERR_INVALID_ARG)
-- Time kept without power: to verify on hardware (USB unplugged, no battery, 1 min)
+- Time is kept over a USB power cycle (`osc_stopped=0`, valid)
+- RTC kept time over 74 s with USB unplugged and, pending owner confirmation, the battery unplugged (`osc_stopped=0` afterwards); this implies a backup supply for the PCF85063
+
+## Home grid
+
+- Owner-verified on firmware a319c4e: tile tap, Undo by finger, scroll with 5 medicines, and the panel's look against the mockup
+- LVGL task stack minimum free: 6996 bytes
 
