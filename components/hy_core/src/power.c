@@ -2,6 +2,7 @@
 
 #define PWRON_KNOWN_MASK 0x3F /* bits 0..5 are defined sources; 6..7 are not */
 #define PWRON_SRC_KEY    0x01 /* bit 0: PWRON key low */
+#define PWRON_SRC_EN     0x20 /* bit 5: EN mode, PWRON always high; fails open (R24) */
 
 bool hy_power_on_allowed(uint8_t pwron_status, hy_reset_kind_t reset)
 {
@@ -12,5 +13,5 @@ bool hy_power_on_allowed(uint8_t pwron_status, hy_reset_kind_t reset)
     if (known == 0) {
         return true;
     }
-    return (known & PWRON_SRC_KEY) != 0;
+    return (known & (PWRON_SRC_KEY | PWRON_SRC_EN)) != 0;
 }
