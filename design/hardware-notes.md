@@ -48,3 +48,15 @@ The device-to-address mapping is inferred from the usual addresses of these part
 ## Touch orientation
 
 To verify on hardware. The BSP default is `swap_xy=1, mirror_x=0, mirror_y=1`, used unchanged. Pass criterion: touching each corner square of `boardtest` logs an x,y in the same corner of the 480x480 area.
+
+## Power-on source
+
+- AXP2101 at 0x34 confirmed: register 0x03 reads 0x4A, the chip id in XPowersLib (`AXP2101Constants.h`, commit d6997586e68f65afd51baa775903df930db39821)
+- PWRON status register 0x20, bits: 0 PWRON key low, 1 IRQ pin low, 2 VBUS insert, 3 battery above 3.3 V when charged, 4 battery insert, 5 EN mode. Power-off: set bit 0 of register 0x10. XPowersLib has no call that clears the status, so the latch is not cleared
+- Log evidence on COM7 (USB connected, 2026-10-28), log-only build then enforcing build:
+  - after `idf.py -p COM7 flash`: `pwron_status=0x04 reset_reason=11 (other)`
+  - after a readlog.py RTS reset: `rst:0x15 (USB_UART_CHIP_RESET)`, `pwron_status=0x04 reset_reason=11 (other)`
+  - the VBUS-insert bit stays latched across chip resets; flash and RTS resets report ESP_RST_USB (11), not power-on, so they keep running
+- Decision: enforcement is unconditional. Only `ESP_RST_POWERON` is gated; everything else keeps running. A power-on reset with no known source bit boots (ruling R22)
+- Not verified on the board: the power-off path itself and the status byte after a real unplug and replug (see the owner checks in the task report)
+

@@ -4,6 +4,7 @@ idf_component_register(
     INCLUDE_DIRS
         "include"
     REQUIRES
+        hy_core
         waveshare__esp32_s3_touch_amoled_2_16
         espressif__esp_lvgl_adapter
         lvgl__lvgl
