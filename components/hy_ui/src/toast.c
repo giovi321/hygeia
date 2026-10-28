@@ -55,7 +55,7 @@ void toast_create(lv_obj_t *parent)
     lv_obj_set_pos(s_scrim, 0, HY_BAR_H);
     lv_obj_set_style_bg_color(s_scrim, lv_color_hex(HY_C_BG), 0);
     lv_obj_set_style_bg_opa(s_scrim, LV_OPA_60, 0);
-    lv_obj_set_clickable(s_scrim, false);
+    lv_obj_set_clickable(s_scrim, true);   /* absorbs taps while the logged toast shows */
     lv_obj_set_scrollable(s_scrim, false);
     lv_obj_set_hidden(s_scrim, true);
     lv_obj_set_floating(s_scrim, true);
@@ -167,4 +167,9 @@ bool toast_undo_pressed(void)
         toast_show_info("Too late to undo");
     }
     return true;
+}
+
+bool toast_logged_visible(void)
+{
+    return s_mode == MODE_LOGGED;
 }

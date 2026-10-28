@@ -429,6 +429,11 @@ void home_create(lv_obj_t *parent)
 
 void home_tap_med(uint32_t med_id)
 {
+    if (toast_logged_visible()) {
+        /* A finger lands on the scrim and does nothing; the serial command behaves the same. */
+        ESP_LOGI(TAG, "tap ignored: logged toast is showing");
+        return;
+    }
     const hy_med_t *m = find_med(med_id);
     if (!m || m->archived) {
         ESP_LOGW(TAG, "tap: medicine %u not found", (unsigned)med_id);
