@@ -414,6 +414,43 @@ static void test_long_tz_left_untouched(void)
     tzset();
 }
 
+/* Daily 08:00 Zurich; yesterday's (2026-11-01, CET) 08:00 slot has a MISSED log.
+ * A dose today (2026-11-02) at 07:45 goes to today's 08:00 slot. */
+static void test_match_prefers_upcoming_over_missed_daily(void)
+{
+    hy_med_t m;
+    hy_log_t logs[1];
+    make_med(&m, 8 * 60, 0xFFFF);
+    int64_t today = T_2026_11_02_0700Z, yday = today - DAY;
+    make_log(&logs[0], 1, m.id, yday + 2 * HOUR, TZ_ZURICH, HY_MISSED, yday);
+    TEST_ASSERT_EQUAL_INT64(today, hy_match_slot(&m, today - 15 * MIN, TZ_ZURICH, logs, 1));
+}
+
+/* 2026-11-02 Zurich, slots 08:00 and 14:00, the 08:00 slot MISSED. A dose at
+ * 13:30 goes to 14:00; a dose at 11:00 (before 14:00's early window) still
+ * converts the missed 08:00. */
+static void test_match_prefers_upcoming_over_missed_same_day(void)
+{
+    hy_med_t m;
+    hy_log_t logs[1];
+    make_med(&m, 8 * 60, 14 * 60);
+    int64_t s8 = T_2026_11_02_0700Z, s14 = s8 + 6 * HOUR;
+    make_log(&logs[0], 1, m.id, s8 + 2 * HOUR, TZ_ZURICH, HY_MISSED, s8);
+    TEST_ASSERT_EQUAL_INT64(s14, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, logs, 1));
+    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 3 * HOUR, TZ_ZURICH, logs, 1));
+}
+
+/* Same slots, missed_after_min 360 (08:00 deadline 14:00): at 13:30 the 08:00
+ * slot is not yet missed, so the earliest unsatisfied slot still wins. */
+static void test_match_earliest_wins_before_missed_deadline(void)
+{
+    hy_med_t m;
+    make_med(&m, 8 * 60, 14 * 60);
+    m.missed_after_min = 360;
+    int64_t s8 = T_2026_11_02_0700Z;
+    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, NULL, 0));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -441,5 +478,8 @@ int main(void)
     RUN_TEST(test_format_local_uses_log_tz);
     RUN_TEST(test_match_free_for_as_needed_and_archived);
     RUN_TEST(test_long_tz_left_untouched);
+    RUN_TEST(test_match_prefers_upcoming_over_missed_daily);
+    RUN_TEST(test_match_prefers_upcoming_over_missed_same_day);
+    RUN_TEST(test_match_earliest_wins_before_missed_deadline);
     return UNITY_END();
 }

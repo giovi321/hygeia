@@ -249,7 +249,9 @@ int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
     int64_t early = (int64_t)m->early_window_min * 60;
     int64_t from = ts - MATCH_LOOKBACK;
     int64_t to = ts + early + 1; /* the slot at exactly ts + early is included */
+    int64_t missed = (int64_t)m->missed_after_min * 60;
     int64_t occ[MATCH_CHUNK];
+    int64_t cand = 0; /* earliest unsatisfied slot whose window contains ts */
 
     /* Walk the occurrences in ascending chunks so a long range is never truncated. */
     for (;;) {
@@ -259,12 +261,20 @@ int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
             int64_t next = i + 1 < n ? occ[i + 1] : next_occurrence(m, s, posix_tz);
             if (ts < s - early || ts >= next) continue;
             if (slot_satisfied(m, s, logs, n_logs)) continue;
-            return s;
+            if (cand == 0) {
+                cand = s;
+                /* Not yet past its missed deadline: the earliest slot wins. */
+                if (ts < cand + missed) return cand;
+                continue;
+            }
+            /* The earliest candidate is already missed: a later unsatisfied slot
+             * whose early window [s - early, s) contains ts wins instead. */
+            if (ts < s) return s;
         }
         if (n < MATCH_CHUNK) break;
         from = occ[n - 1] + 1;
     }
-    return 0;
+    return cand;
 }
 
 /* ---- slot states ---- */
@@ -279,7 +289,11 @@ static bool slot_taken(const hy_med_t *m, int64_t slot, const char *posix_tz,
         if (l->med_id != m->id || l->status != HY_TAKEN || l->slot == 0) continue;
         if (l->slot == slot) return true;
         /* West rule: the log's slot, in the log's own zone, is the same local
-         * date and HH:MM as this slot in posix_tz. */
+         * date and HH:MM as this slot in posix_tz. Zone offsets differ by at
+         * most about a day, so logs further than 2 days away cannot match;
+         * skipping them bounds the setenv/tzset cost on a long history. */
+        int64_t dist = l->slot > slot ? l->slot - slot : slot - l->slot;
+        if (dist > 2 * 86400LL) continue;
         int64_t log_wall;
         if (have_wall && local_wall(l->slot, l->tz, &log_wall) &&
             log_wall / 60 == slot_wall / 60)
