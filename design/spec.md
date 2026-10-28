@@ -66,7 +66,7 @@ To verify on the first hardware session (unconfirmed in the sources):
 
 Decided:
 
-- ESP-IDF v5.5.x (Waveshare's CI-tested version; v6.0.x also tested). C, with C++ only where a component needs it
+- ESP-IDF v6.0.x (Waveshare CI-tests v5.5.5 and v6.0.2; v6.x chosen because a v6 toolchain is already installed on the development machine). C, with C++ only where a component needs it
 - LVGL 9.x through the managed component and `esp_lvgl_port`
 - Board support from the registry component `waveshare/esp32_s3_touch_amoled_2_16` (v2.0.1 at time of writing). If its display init is unsuitable, fall back to the approach in thejimoneil/ESP32-Tetris: custom CO5300 init for the full 480×480, `esp_lcd_touch_cst9220`, double-buffered DMA, rounder callback forcing even x1/y1 and odd x2/y2, software rotation
 - UI written by hand in LVGL C on one shared theme; no generated-code tools
