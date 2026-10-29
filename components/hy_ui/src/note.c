@@ -82,9 +82,26 @@ static void cancel_cb(lv_event_t *e)
     ui_nav_pop();
 }
 
+/* The keyboard's enter and OK keys must not auto-repeat: a held key would send READY again and the repeat
+ * counts as the confirming second request of the R29 too-soon warning. Every mode switch reloads the stock control
+ * map, so the flag is set again on each press. One press, one READY. */
+static void kb_no_repeat(void)
+{
+    for (uint32_t i = 0; i < 64; i++) {
+        const char *t = lv_buttonmatrix_get_button_text(s_kb, i);
+        if (!t) {
+            break;
+        }
+        if (strcmp(t, LV_SYMBOL_NEW_LINE) == 0 || strcmp(t, LV_SYMBOL_OK) == 0) {
+            lv_buttonmatrix_set_button_ctrl(s_kb, i, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
+        }
+    }
+}
+
 /* The text before the press, so a stroke that only woke the screen can be taken back after the keyboard typed it */
 static void kb_press_cb(lv_event_t *e)
 {
+    kb_no_repeat();
     snprintf(s_prev, sizeof s_prev, "%s", lv_textarea_get_text(s_ta));
     consume_cb(e);
 }
@@ -234,5 +251,6 @@ void note_create(void)
     lv_obj_add_event_cb(s_kb, kb_press_cb, LV_EVENT_PRESSED | LV_EVENT_PREPROCESS, NULL);   /* before the key's own handler */
     lv_obj_add_event_cb(s_kb, consume_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(s_kb, kb_value_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    kb_no_repeat();
     /* READY and CANCEL go to the keyboard and then to its textarea: handle them on the textarea only */
 }
