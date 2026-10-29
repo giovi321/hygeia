@@ -16,6 +16,7 @@ idf_component_register(
         "src/chime.c"
         "src/settings.c"
         "src/battery.c"
+        "src/gap.c"
         "src/screen.c"
     INCLUDE_DIRS
         "include"

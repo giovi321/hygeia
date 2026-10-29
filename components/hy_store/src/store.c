@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "hy/codec.h"
+#include "hy/gap.h"
 #include "hy/store.h"
 
 #define BASE_MAX    96
@@ -24,6 +25,8 @@ static uint64_t s_next_id = 1;   /* 64 bit: max id 0xFFFFFFFF must not wrap */
 static size_t s_skipped;
 static char s_line[LINE_MAX_];      /* single-threaded by contract */
 static char s_wbuf[LINE_MAX_];
+static size_t s_gap_lines;          /* non-blank lines in gaps.jsonl, corrupt ones included */
+static size_t count_lines(const char *path);
 
 /* ---- paths ---- */
 
@@ -360,6 +363,8 @@ hy_err_t hy_store_open(const char *base_dir)
         if (pc.max > max) max = pc.max;
     }
     s_next_id = (uint64_t)max + 1;
+    char gp[PATH_MAX_];
+    s_gap_lines = make_path(gp, "gaps.jsonl") ? count_lines(gp) : 0;
     s_skipped = 0;
     s_open = true;
     return HY_OK;
@@ -555,6 +560,160 @@ static size_t st_query_log(void *ctx, int64_t from, int64_t to, uint32_t med_id,
     return c.n;
 }
 
+/* ---- gaps: <base>/gaps.jsonl, append-only, one line per gap in end order ---- */
+
+#define GAP_TRIM_AT   1100   /* rewrite when an append leaves more lines than this */
+#define GAP_KEEP      1000   /* newest lines kept by the rewrite */
+
+typedef bool (*gap_cb)(const hy_gap_t *g, uint8_t reason, const char *raw, void *arg);
+
+/* Iterates the valid lines in file order; corrupt lines are counted. false when the file cannot be opened. */
+static bool scan_gaps(const char *path, gap_cb cb, void *arg)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    for (;;) {
+        int r = read_line(f);
+        if (r == LINE_EOF) break;
+        if (r == LINE_BAD) {
+            s_skipped++;
+            continue;
+        }
+        if (blank(s_line)) continue;
+        hy_gap_t g;
+        hy_gap_reason_t why;
+        if (hy_gap_from_jsonl(s_line, &g, &why) != HY_OK) {
+            s_skipped++;
+            continue;
+        }
+        if (!cb(&g, (uint8_t)why, s_line, arg)) break;
+    }
+    fclose(f);
+    return true;
+}
+
+static size_t count_lines(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = 0;
+    for (;;) {
+        int r = read_line(f);
+        if (r == LINE_EOF) break;
+        if (r == LINE_OK && blank(s_line)) continue;
+        n++;
+    }
+    fclose(f);
+    return n;
+}
+
+typedef struct { size_t valid; } gcount_ctx;
+
+static bool gcount_cb(const hy_gap_t *g, uint8_t reason, const char *raw, void *arg)
+{
+    (void)g; (void)reason; (void)raw;
+    ((gcount_ctx *)arg)->valid++;
+    return true;
+}
+
+typedef struct { FILE *tmp; size_t skip, seen, kept; bool io_err; } gtrim_ctx;
+
+static bool gtrim_cb(const hy_gap_t *g, uint8_t reason, const char *raw, void *arg)
+{
+    (void)g; (void)reason;
+    gtrim_ctx *c = arg;
+    if (c->seen++ < c->skip) return true;
+    if (fputs(raw, c->tmp) < 0 || fputc('\n', c->tmp) == EOF) {
+        c->io_err = true;
+        return false;
+    }
+    c->kept++;
+    return true;
+}
+
+/* Keeps the newest GAP_KEEP valid lines; corrupt lines are dropped. Temp file, fsync, rename. */
+static hy_err_t gaps_trim(const char *path)
+{
+    char tmp[PATH_MAX_ + 8];
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return HY_E_IO;
+    size_t skipped_before = s_skipped;
+    gcount_ctx cc = { 0 };
+    if (!scan_gaps(path, gcount_cb, &cc)) return HY_E_IO;
+    s_skipped = skipped_before;   /* the write pass counts them once */
+    gtrim_ctx c = { fopen(tmp, "wb"), cc.valid > GAP_KEEP ? cc.valid - GAP_KEEP : 0, 0, 0, false };
+    if (!c.tmp) return HY_E_IO;
+    bool opened = scan_gaps(path, gtrim_cb, &c);
+    if (!opened || c.io_err) {
+        fclose(c.tmp);
+        unlink(tmp);
+        return HY_E_IO;
+    }
+    if (!sync_close(c.tmp)) {
+        unlink(tmp);
+        return HY_E_IO;
+    }
+    if (rename(tmp, path) != 0) {
+        unlink(tmp);
+        return HY_E_IO;
+    }
+    s_gap_lines = c.kept;
+    return HY_OK;
+}
+
+static hy_err_t st_append_gap(void *ctx, const hy_gap_t *g, uint8_t reason)
+{
+    (void)ctx;
+    if (!s_open || !g) return HY_E_IO;
+    char line[LINE_MAX_], p[PATH_MAX_];
+    if (hy_gap_to_jsonl(g, (hy_gap_reason_t)reason, line, sizeof line) < 0) return HY_E_INVALID;
+    if (!make_path(p, "gaps.jsonl")) return HY_E_IO;
+    hy_err_t r = append_line(p, line);
+    if (r != HY_OK) return r;
+    s_gap_lines++;
+    if (s_gap_lines > GAP_TRIM_AT) gaps_trim(p);   /* the gap is stored; a failed trim retries on the next append */
+    return HY_OK;
+}
+
+typedef struct { int64_t from, to; hy_gap_t *out; uint8_t *rs; size_t max, n; } gquery_ctx;
+
+static bool gap_before(const hy_gap_t *a, const hy_gap_t *b)
+{
+    return a->start != b->start ? a->start < b->start : a->end < b->end;
+}
+
+static bool gquery_cb(const hy_gap_t *g, uint8_t reason, const char *raw, void *arg)
+{
+    (void)raw;
+    gquery_ctx *c = arg;
+    if (g->start >= c->to || g->end <= c->from) return true;
+    size_t pos = c->n;
+    if (c->n == c->max) {
+        if (!gap_before(g, &c->out[c->n - 1])) return true;   /* keep the earliest max */
+        pos = c->n - 1;
+    } else {
+        c->n++;
+    }
+    while (pos > 0 && gap_before(g, &c->out[pos - 1])) {
+        c->out[pos] = c->out[pos - 1];
+        if (c->rs) c->rs[pos] = c->rs[pos - 1];
+        pos--;
+    }
+    c->out[pos] = *g;
+    if (c->rs) c->rs[pos] = reason;
+    return true;
+}
+
+static size_t st_query_gaps(void *ctx, int64_t from, int64_t to, hy_gap_t *out, uint8_t *reasons, size_t max)
+{
+    (void)ctx;
+    if (!s_open || !out || max == 0 || to <= from) return 0;
+    char p[PATH_MAX_];
+    if (!make_path(p, "gaps.jsonl")) return 0;
+    gquery_ctx c = { from, to, out, reasons, max, 0 };
+    scan_gaps(p, gquery_cb, &c);
+    return c.n;
+}
+
 static const hy_store_port_t PORT = {
     .load_meds = st_load_meds,
     .save_meds = st_save_meds,
@@ -562,6 +721,8 @@ static const hy_store_port_t PORT = {
     .update_log = st_update_log,
     .delete_log = st_delete_log,
     .query_log = st_query_log,
+    .append_gap = st_append_gap,
+    .query_gaps = st_query_gaps,
 };
 
 const hy_store_port_t *hy_store_port(void) { return &PORT; }

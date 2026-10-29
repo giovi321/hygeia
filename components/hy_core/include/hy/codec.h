@@ -2,6 +2,7 @@
 #define HY_CODEC_H
 
 #include <stddef.h>
+#include "hy/gap.h"
 #include "hy/types.h"
 
 /*
@@ -36,6 +37,13 @@
 /* One line without '\n'. Returns the length, or -1 if len is too small (or e is invalid, or ts/slot beyond 15 digits). */
 int      hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len);
 hy_err_t hy_log_from_jsonl(const char *line, hy_log_t *out);
+
+/*
+ * Gap line: {"s":1793000000,"e":1793003600,"r":"off|lost|clock|jump"}. Required on decode:
+ * s, e, r; e must be after s. Returns the length, or -1 if len is too small or the gap is invalid.
+ */
+int      hy_gap_to_jsonl(const hy_gap_t *g, hy_gap_reason_t r, char *buf, size_t len);
+hy_err_t hy_gap_from_jsonl(const char *line, hy_gap_t *g, hy_gap_reason_t *r);
 
 /* Returns a malloc'd NUL-terminated string (release with free()), or NULL on failure. */
 char    *hy_meds_to_json(const hy_med_t *meds, size_t n);
