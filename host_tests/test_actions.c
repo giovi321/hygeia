@@ -140,7 +140,7 @@ static void test_events_subscribe_unsubscribe(void)
     hy_ev_unsubscribe(h[3]);
     extra = hy_ev_subscribe(on_ev, NULL);
     TEST_ASSERT_EQUAL_INT(h[3], extra);
-    hy_event_t e = { HY_EV_DUE, 1, 2, 3, 0 };
+    hy_event_t e = { HY_EV_DUE, 1, 2, 3, 0, 0 };
     n_evs = 0;
     hy_ev_publish(&e);
     TEST_ASSERT_EQUAL_INT(HY_EV_MAX_SUBSCRIBERS, n_evs);

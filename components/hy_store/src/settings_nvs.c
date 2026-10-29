@@ -31,11 +31,15 @@ esp_err_t hy_settings_load(hy_settings_t *s)
     if (err == ESP_OK) {
         uint8_t u8;
         uint16_t u16;
+        uint32_t u32;
         if (nvs_get_u8(h, "sound", &u8) == ESP_OK) s->sound = u8 != 0;
         if (nvs_get_u8(h, "dnd", &u8) == ESP_OK) s->dnd = u8 != 0;
         if (nvs_get_u8(h, "vol", &u8) == ESP_OK) s->volume = u8;
         if (nvs_get_u8(h, "bright", &u8) == ESP_OK) s->brightness = u8;
         if (nvs_get_u16(h, "snooze", &u16) == ESP_OK) s->snooze_min = u16;
+        if (nvs_get_u16(h, "dim_s", &u16) == ESP_OK) s->dim_s = u16;
+        if (nvs_get_u16(h, "off_bat_s", &u16) == ESP_OK) s->off_bat_s = u16;
+        if (nvs_get_u32(h, "off_usb_s", &u32) == ESP_OK) s->off_usb_s = u32;
         nvs_close(h);
     } else if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;   /* first boot: defaults */
@@ -60,6 +64,9 @@ esp_err_t hy_settings_save(const hy_settings_t *s)
     if (err == ESP_OK) err = nvs_set_u8(h, "vol", s->volume);
     if (err == ESP_OK) err = nvs_set_u8(h, "bright", s->brightness);
     if (err == ESP_OK) err = nvs_set_u16(h, "snooze", s->snooze_min);
+    if (err == ESP_OK) err = nvs_set_u16(h, "dim_s", s->dim_s);
+    if (err == ESP_OK) err = nvs_set_u16(h, "off_bat_s", s->off_bat_s);
+    if (err == ESP_OK) err = nvs_set_u32(h, "off_usb_s", s->off_usb_s);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;
