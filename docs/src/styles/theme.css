@@ -1,0 +1,11 @@
+/* Accent colours from the logo kit: crimson #8E4449 (capsule), slate #495155 (ring), #D0646B on black */
+:root {
+  --sl-color-accent-low: #3b2326;
+  --sl-color-accent: #8e4449;
+  --sl-color-accent-high: #d0646b;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #f0d9db;
+  --sl-color-accent: #8e4449;
+  --sl-color-accent-high: #6b2f34;
+}
