@@ -133,10 +133,10 @@ Scheduler evaluation and Home refresh on the board (newlib, CLIB malloc):
 
 ## Owed hardware checks
 
-- Item 8: repeat chimes (every 2 min, up to 5 plays) with sound on
-- Item 29: Play chime in Sound settings
-- Item 18: Detail scroll with more history rows than fit on screen (the owner saw no scroll with the current content)
-- Serial check A: waking stroke while a due card appears (`idle on`, `gesture hold`, `remindtest 0`, `gesture release left`: no snooze, nav stays `[due]`)
+Owner-verified on firmware 73db1cc (2026-10-29): repeat chimes (5 plays at 2 min intervals, then silent), Play chime in Sound settings, detail scroll, due card dots, QWERTY note keyboard. Splash 1000 to 1009 ms with a 52 ms maximum frame gap over 3 boots. RTC alarm log line: hardware fire at the programmed second, software due-now fire within 1 s.
+
+Still owed:
+- Serial check A: waking stroke while a due card appears (`idle on`, `gesture hold`, `remindtest 0`, `gesture release left`: no snooze, nav stays `[due]`). The run on 73db1cc was inconclusive because real touches released the scripted hold
 - Serial check B: idle Next after an early dose (take V early, `idle on`, the idle screen must not name the satisfied slot)
 
 ## Home grid
