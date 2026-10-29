@@ -56,6 +56,14 @@ static void read_wrap(lv_indev_t *indev, lv_indev_data_t *data)
 
 static void finish(int32_t x, int32_t y, uint32_t t);
 
+/* A stroke starting now only wakes: the screen is DIM or OFF, or a touch just woke the CPU from the sleep mode
+ * (that wake ran before LVGL read the stroke, so the state is already ON) */
+static bool stroke_waking(void)
+{
+    bool guard = screen_wake_guard_take();
+    return ui_nav_idle() || guard;
+}
+
 static void indev_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
@@ -67,7 +75,8 @@ static void indev_cb(lv_event_t *e)
         }
         s_active = true;
         lv_display_trigger_activity(NULL);
-        s_waking = ui_nav_idle();
+        s_waking = stroke_waking();
+        screen_activity();
         /* while the logged toast and its scrim are up a swipe does not navigate */
         s_consumed = toast_logged_visible();
         s_last_tap = false;
@@ -101,6 +110,9 @@ static void finish(int32_t x, int32_t y, uint32_t t)
     ESP_LOGI(TAG, "stroke dx=%d dy=%d ms=%u -> %s (max_dev %u%s)", s_st.x1 - s_st.x0, s_st.y1 - s_st.y0,
              (unsigned)(s_st.t1_ms - s_st.t0_ms), ui_gesture_name(g), (unsigned)s_st.max_dev,
              s_consumed ? ", consumed" : "");
+    if (!s_waking) {
+        screen_activity();   /* a long stroke restarts the timers at its release too */
+    }
     if (s_waking) {
         /* the stroke began on the dimmed screen: it only wakes. When a due card woke the screen under the
          * finger the navigation is no longer idle and the stroke is dropped, so it cannot snooze or step it. */
@@ -192,7 +204,8 @@ void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t 
     uint32_t now = lv_tick_get();
     s_active = true;
     lv_display_trigger_activity(NULL);
-    s_waking = ui_nav_idle();
+    s_waking = stroke_waking();
+    screen_activity();
     s_consumed = toast_logged_visible();
     s_last_tap = false;
     s_st.x0 = x0;
@@ -211,7 +224,8 @@ void input_debug_hold(int16_t x0, int16_t y0)
 {
     s_active = true;
     lv_display_trigger_activity(NULL);
-    s_waking = ui_nav_idle();
+    s_waking = stroke_waking();
+    screen_activity();
     s_consumed = toast_logged_visible();
     s_last_tap = false;
     s_st.x0 = x0;

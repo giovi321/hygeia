@@ -1,5 +1,6 @@
 /* Navigation host: owns the hy_nav_t, keeps one view per hy_view_t inside ui_content() and shows the top of
- * the stack. The idle clock overlay is idle.c. */
+ * the stack. The screen state machine and the idle clock are idle.c; it keeps the nav idle flag equal to
+ * "state is DIM or OFF". */
 
 #include <stdio.h>
 #include <string.h>
@@ -188,7 +189,8 @@ static void show_top(void)
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
 {
     if (s_nav.poweroff && s_nav.idle) {
-        /* a countdown with the idle clock toggled on by PWR short: the next stroke wakes (rule 0 would swallow it) */
+        /* an overlay up on a DIM or OFF screen (the countdown after PWR short): the stroke only wakes, as rule 1
+         * does for every other view (rule 0 would swallow it and leave the screen dark) */
         s_nav.idle = false;
         fx_wake();
         ui_nav_log();

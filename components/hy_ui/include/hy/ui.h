@@ -55,6 +55,7 @@ void hy_ui_debug_settz(const char *iana); /* the zone picker's Set with that IAN
 void hy_ui_debug_settings(void);          /* logs the settings in the RAM copy (what NVS holds after a reboot) */
 void hy_ui_debug_poweroff(const char *arg); /* "show|cancel|slide|crit": the power-off confirmation, its slide (powers off) and the critical countdown */
 void hy_ui_debug_gaps(void);              /* the stored untracked gaps of the last 30 days */
+void hy_ui_debug_scr(const char *arg);    /* "": screen state and timers; "off": OFF now; "nousb": run as on battery; "usb": back */
 #endif
 
 #ifdef __cplusplus

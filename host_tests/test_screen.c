@@ -101,6 +101,25 @@ static void test_hold(void)
     TEST_ASSERT_EQUAL(HY_SCR_DIM, hy_screen_event(&s, HY_SE_TICK, S(3730), &CFG));
 }
 
+/* R1: hold means held ON. An overlay (countdown, power-off confirmation) or a due card on USB that appears on a
+   dimmed screen brings it back ON at the next tick; PWR short still turns it OFF and the hold keeps it OFF (the
+   countdown keeps running behind a dark panel); PWR short again turns it ON */
+static void test_hold_restores_dim_keeps_off(void)
+{
+    hy_screen_t s; hy_screen_init(&s, false, 0);
+    TEST_ASSERT_EQUAL(HY_SCR_DIM, hy_screen_event(&s, HY_SE_TICK, S(30), &CFG));
+    hy_screen_set_hold(&s, true, S(31));
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(31), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(600), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_OFF, hy_screen_event(&s, HY_SE_PWR_SHORT, S(601), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_OFF, hy_screen_event(&s, HY_SE_TICK, S(602), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_OFF, hy_screen_event(&s, HY_SE_CHIME, S(603), &CFG));   /* battery: no wake */
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_PWR_SHORT, S(604), &CFG));
+    hy_screen_set_hold(&s, false, S(610));
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(639), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_DIM, hy_screen_event(&s, HY_SE_TICK, S(640), &CFG));
+}
+
 static void test_wrap(void)
 {
     hy_screen_t s; hy_screen_init(&s, false, 0xFFFFF000u);
@@ -117,6 +136,7 @@ int main(void)
     RUN_TEST(test_chime_on_battery_no_wake);
     RUN_TEST(test_unplug_restarts_timer);
     RUN_TEST(test_hold);
+    RUN_TEST(test_hold_restores_dim_keeps_off);
     RUN_TEST(test_wrap);
     return UNITY_END();
 }

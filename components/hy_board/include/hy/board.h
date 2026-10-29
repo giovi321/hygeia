@@ -45,12 +45,20 @@ esp_err_t hy_board_pmu_charger_setup(void);
 uint32_t  hy_board_pmu_irq(void);
 esp_err_t hy_board_pmu_read(hy_batt_raw_t *out);    /* STATUS1, STATUS2, 0xA4, 0x34/0x35 */
 void      hy_board_pmu_power_off(void);              /* the boot gate's AXP2101 power-off, public */
-/* Panel sleep in/out and display on/off; brightness unchanged. The caller keeps LVGL from flushing
-   while the panel is off. */
+/* Panel sleep in/out and display on/off; brightness unchanged. While the panel is off the LVGL flushes are
+   dropped (completed at once); the caller invalidates the screen after turning it back on. */
 void      hy_board_display_power(bool on);
 /* Called from the touch interrupt (ISR context) on every touch INT edge, beside the LVGL adapter's own
    handling; NULL clears. fn must be ISR safe. */
 void      hy_board_set_touch_isr_hook(void (*fn)(void));
+/* User key (GPIO 18, input with pull-up, falling edge): fn is called from its ISR; NULL clears. */
+void      hy_board_set_user_key_isr_hook(void (*fn)(void));
+/* Light-sleep GPIO wakes, low level: touch INT (GPIO 11), RTC INT (GPIO 13), user key (GPIO 18). on: each pin that
+   reads high is armed (a pin already low would wake at once: logged, not armed); the RTC INT interrupt is masked
+   while armed; touch and key disarm their own pin from their ISR on the first edge (no level-interrupt storm).
+   off: every armed pin back to its falling-edge interrupt. Task context. */
+void      hy_board_sleep_wake_arm(bool on);
+bool      hy_board_rtc_int_low(void);                /* RTC INT (GPIO 13) reads low: an alarm is pending */
 
 #if CONFIG_HY_DEBUG_CONSOLE
 /* Log the raw PMU registers: STATUS1/2, 0xA4, battery mV, INTEN1..3, 0x22, 0x27, 0x30, 0x50, 0x61..0x64 */

@@ -23,6 +23,9 @@
 #include "esp_attr.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lv_adapter.h"
+#include "esp_sleep.h"
+#include "hal/gpio_ll.h"
+#include "soc/gpio_struct.h"
 
 static const char *TAG = "hy_board";
 
@@ -35,7 +38,19 @@ static esp_err_t s_init_err = ESP_OK; /* first init failure, returned on later c
 static lv_indev_t *s_indev;
 static esp_lcd_panel_handle_t s_panel;
 static void (*volatile s_touch_hook)(void);
+static void (*volatile s_key_hook)(void);
 static void touch_isr(esp_lcd_touch_handle_t tp, void *ctx);
+static void key_and_sleep_pins_init(void);
+static volatile bool s_panel_off;    /* flushes are dropped while the panel is off */
+
+#define USER_KEY_GPIO 18   /* spec Hardware table: user key GPIO 18 */
+#define RTC_INT_GPIO  13   /* PCF85063 INT, owned by hy_clock (falling-edge interrupt) */
+
+/* Light-sleep GPIO wake: s_wake_armed is the set armed by hy_board_sleep_wake_arm(true) (task context only);
+ * s_wake_live the armed pins whose ISR has not disarmed them yet (touch and key), under s_wake_mux. */
+static portMUX_TYPE s_wake_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_wake_armed;
+static volatile uint32_t s_wake_live;
 static lv_display_flush_cb_t s_orig_flush;
 static uint32_t s_flush_count;
 static int64_t s_verbose_until_us;
@@ -63,6 +78,10 @@ static void flush_wrap(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
                  (int)area->x2, (int)area->y1, (int)area->y2, w, h, odd ? " ODD" : "");
     }
     s_flush_count++;
+    if (s_panel_off) {
+        lv_display_flush_ready(disp);   /* nothing is sent to a sleeping panel; a full invalidate follows the wake */
+        return;
+    }
     s_orig_flush(disp, area, px);
 }
 
@@ -485,6 +504,7 @@ static esp_err_t board_init_once(void)
     }
     lv_indev_add_event_cb(s_indev, touch_cb, LV_EVENT_PRESSED, NULL);
     lv_indev_set_long_press_time(s_indev, HY_LONG_PRESS_MS);
+    key_and_sleep_pins_init();
 
     err = esp_lv_adapter_start();
     if (err != ESP_OK) {
@@ -510,7 +530,9 @@ void hy_board_display_power(bool on)
     if (on) {
         e1 = esp_lcd_panel_disp_sleep(s_panel, false);
         e2 = esp_lcd_panel_disp_on_off(s_panel, true);
+        s_panel_off = false;
     } else {
+        s_panel_off = true;   /* first: later flushes are dropped */
         e1 = esp_lcd_panel_disp_on_off(s_panel, false);
         e2 = esp_lcd_panel_disp_sleep(s_panel, true);
     }
@@ -521,11 +543,24 @@ void hy_board_display_power(bool on)
     }
 }
 
+/* An armed wake pin fired: back to its falling-edge interrupt before the low-level type re-triggers the ISR */
+static void IRAM_ATTR wake_pin_fired(uint32_t pin)
+{
+    portENTER_CRITICAL_ISR(&s_wake_mux);
+    if (s_wake_live & (1u << pin)) {
+        gpio_ll_wakeup_disable(&GPIO, pin);
+        gpio_ll_set_intr_type(&GPIO, pin, GPIO_INTR_NEGEDGE);
+        s_wake_live &= ~(1u << pin);
+    }
+    portEXIT_CRITICAL_ISR(&s_wake_mux);
+}
+
 /* Runs inside the LVGL adapter's touch ISR (callbacks.on_interrupt); the adapter's handling is unchanged */
 static void IRAM_ATTR touch_isr(esp_lcd_touch_handle_t tp, void *ctx)
 {
     (void)tp;
     (void)ctx;
+    wake_pin_fired(BSP_LCD_TOUCH_INT);
     void (*fn)(void) = s_touch_hook;
     if (fn) {
         fn();
@@ -535,6 +570,108 @@ static void IRAM_ATTR touch_isr(esp_lcd_touch_handle_t tp, void *ctx)
 void hy_board_set_touch_isr_hook(void (*fn)(void))
 {
     s_touch_hook = fn;
+}
+
+static void IRAM_ATTR key_isr(void *arg)
+{
+    (void)arg;
+    wake_pin_fired(USER_KEY_GPIO);
+    void (*fn)(void) = s_key_hook;
+    if (fn) {
+        fn();
+    }
+}
+
+void hy_board_set_user_key_isr_hook(void (*fn)(void))
+{
+    s_key_hook = fn;
+}
+
+/* User key: input with pull-up, falling-edge interrupt. Outputs that must keep their level in light sleep (panel
+ * and touch reset, panel CS, speaker amplifier enable) are excluded from the sleep GPIO switch
+ * (CONFIG_PM_SLP_DISABLE_GPIO would otherwise disable them while asleep). */
+static void key_and_sleep_pins_init(void)
+{
+    gpio_config_t gc = {
+        .pin_bit_mask = 1ULL << USER_KEY_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
+    };
+    esp_err_t err = gpio_config(&gc);
+    if (err == ESP_OK) {
+        esp_log_level_t old = esp_log_level_get("gpio");
+        esp_log_level_set("gpio", ESP_LOG_NONE);   /* the service is usually installed already (touch) */
+        err = gpio_install_isr_service(0);
+        esp_log_level_set("gpio", old);
+        if (err == ESP_ERR_INVALID_STATE) {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK) {
+        err = gpio_isr_handler_add(USER_KEY_GPIO, key_isr, NULL);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "user key init: %s", esp_err_to_name(err));
+    }
+    static const gpio_num_t keep[] = {BSP_LCD_RST, BSP_LCD_TOUCH_RST, BSP_LCD_CS, BSP_POWER_AMP_IO};
+    for (size_t i = 0; i < sizeof keep / sizeof keep[0]; i++) {
+        gpio_sleep_sel_dis(keep[i]);
+    }
+}
+
+void hy_board_sleep_wake_arm(bool on)
+{
+    static const uint32_t pins[] = {BSP_LCD_TOUCH_INT, RTC_INT_GPIO, USER_KEY_GPIO};
+    if (on) {
+        if (s_wake_armed) {
+            return;
+        }
+        uint32_t armed = 0;
+        for (size_t i = 0; i < sizeof pins / sizeof pins[0]; i++) {
+            uint32_t p = pins[i];
+            if (gpio_get_level((gpio_num_t)p) == 0) {
+                ESP_LOGW(TAG, "sleep wake: gpio %u low, not armed", (unsigned)p);
+                continue;
+            }
+            if (p == RTC_INT_GPIO) {
+                gpio_intr_disable((gpio_num_t)p);   /* hy_clock's ISR does not disarm: no level interrupt */
+            }
+            /* the live bit and the level type change together: the pin's ISR sees both or neither */
+            portENTER_CRITICAL(&s_wake_mux);
+            gpio_wakeup_enable((gpio_num_t)p, GPIO_INTR_LOW_LEVEL);
+            s_wake_live |= 1u << p;
+            portEXIT_CRITICAL(&s_wake_mux);
+            armed |= 1u << p;
+        }
+        s_wake_armed = armed;
+        esp_sleep_enable_gpio_wakeup();
+        return;
+    }
+    if (!s_wake_armed) {
+        return;
+    }
+    for (size_t i = 0; i < sizeof pins / sizeof pins[0]; i++) {
+        uint32_t p = pins[i];
+        if (!(s_wake_armed & (1u << p))) {
+            continue;
+        }
+        portENTER_CRITICAL(&s_wake_mux);
+        s_wake_live &= ~(1u << p);
+        portEXIT_CRITICAL(&s_wake_mux);
+        gpio_wakeup_disable((gpio_num_t)p);
+        gpio_set_intr_type((gpio_num_t)p, GPIO_INTR_NEGEDGE);
+        if (p == RTC_INT_GPIO) {
+            gpio_intr_enable((gpio_num_t)p);
+        }
+    }
+    s_wake_armed = 0;
+}
+
+bool hy_board_rtc_int_low(void)
+{
+    return gpio_get_level((gpio_num_t)RTC_INT_GPIO) == 0;
 }
 
 lv_display_t *hy_board_display(void)

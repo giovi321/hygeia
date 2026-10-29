@@ -14,4 +14,6 @@ idf_component_register(
         nvs_flash
         esp_timer
         freertos
+        esp_pm
+        espressif__esp_lvgl_adapter
 )

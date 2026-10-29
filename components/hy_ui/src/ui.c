@@ -35,6 +35,7 @@ static void async_refresh(void *arg)
     history_refresh_if_changed();
     detail_refresh_if_changed();
     due_refresh();
+    screen_sched_evaluated();
     topbar_refresh();   /* a zone change moves the clock */
 }
 
@@ -100,6 +101,7 @@ void ui_refresh_all(void)
     history_refresh_if_changed();
     detail_refresh_if_changed();
     due_refresh();
+    screen_sched_evaluated();
 }
 
 /* A time or zone set publishes no hy event: recompute the views that depend on the day and the zone */
@@ -115,6 +117,33 @@ static void tick_cb(lv_timer_t *t)
 {
     (void)t;
     ui_refresh_all();
+    screen_tick();
+}
+
+/* hy_power_ui_t.usb: the countdown (only USB cancels it) and the screen */
+static void power_usb(bool in)
+{
+    poweroff_usb(in);
+    screen_usb(in);
+}
+
+/* hy_power_ui_t.wake: the power task left the sleep mode, or the user key */
+static void power_wake(hy_power_wake_t cause)
+{
+    switch (cause) {
+    case HY_PWAKE_TOUCH:
+        screen_touch_wake();
+        break;
+    case HY_PWAKE_KEY:
+        screen_event(HY_SE_USER_KEY);
+        break;
+    case HY_PWAKE_TICK:
+        /* next_wake or the RTC alarm: the scheduler decides now (a due card or a chime on USB turns the screen ON;
+         * otherwise it stays OFF and screen_tick asks for the sleep mode again) */
+        ui_refresh_all();
+        screen_tick();
+        break;
+    }
 }
 
 /* The first snapshot, as soon as the LVGL task runs; the tiles stay blank until then */
@@ -126,6 +155,7 @@ static void first_tick(void *arg)
     overview_refresh_if_changed();
     history_refresh_if_changed();
     due_refresh();
+    screen_sched_evaluated();
 }
 
 lv_obj_t *ui_plain(lv_obj_t *parent)
@@ -453,10 +483,11 @@ esp_err_t hy_ui_start(void)
         }
     }
     splash_finish(s_screen);
-    /* input, the 1 s tick, the first evaluation (a due card and its chime) and the idle timer start with the content */
+    /* input, the 1 s tick, the first evaluation (a due card and its chime) and the screen state start with the content */
     nav_host_warm_start();   /* the hidden views, one every 250 ms in the LVGL task */
     idle_create();
     poweroff_create();
+    screen_init();
     input_init(hy_board_indev());
     lv_timer_create(tick_cb, 1000, NULL);
     lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */
@@ -464,7 +495,8 @@ esp_err_t hy_ui_start(void)
     static const hy_power_ui_t power_ui = {.battery = battery_cb,
                                            .pwr_short = poweroff_pwr_short,
                                            .pwr_long = poweroff_pwr_long,
-                                           .usb = poweroff_usb};
+                                           .usb = power_usb,
+                                           .wake = power_wake};
     hy_power_set_ui(&power_ui);
     hy_board_unlock();
 

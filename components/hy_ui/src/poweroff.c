@@ -6,7 +6,9 @@
  * Countdown (critical battery): title, "Powering off in N s", a hint. No slider, no Cancel: only USB cancels it.
  * At 0 it powers off; with fakebatt active it only logs and closes.
  *
- * Both set the nav poweroff flag (gestures do nothing) and the idle hold, and wake a dimmed screen.
+ * Both set the nav poweroff flag (gestures do nothing), hold the screen on (R1: the state machine reads
+ * poweroff_visible and poweroff_countdown_visible) and wake a dimmed or dark screen. PWR short toggles the screen
+ * ON <-> OFF over the countdown, which keeps counting (no sleep mode while it shows).
  * Everything runs in the LVGL task. */
 
 #include <stdio.h>
@@ -73,8 +75,7 @@ bool poweroff_countdown_visible(void)
 static void open_common(void)
 {
     ui_nav_set_poweroff(true);
-    idle_set_hold(true);
-    idle_wake();   /* a dimmed screen comes back; the hold keeps the idle timer from dimming it again */
+    screen_wake("poweroff");   /* a dimmed or dark screen comes back; the hold keeps it on */
     lv_display_trigger_activity(NULL);
     knob_reset();
     lv_obj_set_style_opa(s_ov, LV_OPA_TRANSP, 0);
@@ -100,8 +101,7 @@ static void close_overlay(bool flush_toast)
     lv_timer_pause(s_tmr);
     lv_anim_delete(s_ov, opa_exec);
     lv_obj_set_hidden(s_ov, true);
-    ui_nav_set_poweroff(false);
-    idle_set_hold(false);
+    ui_nav_set_poweroff(false);   /* the hold ends at the next screen event: the dim timer starts then */
     if (flush_toast) {
         ui_battery_toast_flush();   /* a low-battery toast held while the overlay was up */
     }

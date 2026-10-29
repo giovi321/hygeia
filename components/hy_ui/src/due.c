@@ -235,7 +235,7 @@ static void show_card(void)
     s_visible = true;
     knob_reset();
     ui_nav_set_due(true);
-    idle_wake_due();   /* a due dose wakes the dimmed screen */
+    idle_wake_due();   /* DUE: a due dose wakes a dimmed or dark screen, on USB and on battery */
     lv_obj_set_style_opa(s_card, LV_OPA_TRANSP, 0);
     lv_obj_set_hidden(s_card, false);
     lv_obj_move_foreground(s_card);
