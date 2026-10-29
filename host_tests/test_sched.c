@@ -1,0 +1,388 @@
+#include <string.h>
+#include "unity.h"
+#include "hy/sched.h"
+#include "hy/occ.h"
+#include "hy/types.h"
+
+#define TZ_ZURICH "CET-1CEST,M3.5.0,M10.5.0/3"
+#define TZ_NY     "EST5EDT,M3.2.0,M11.1.0"
+
+/* Literal UTC epochs (same values as test_occ.c). */
+#define T_2026_11_02_LOCAL_MIDNIGHT 1793574000LL /* 2026-11-01T23:00:00Z, Monday, CET */
+#define T_2026_03_29_LOCAL_MIDNIGHT 1774738800LL /* 2026-03-28T23:00:00Z */
+#define T_2026_03_29_0100Z          1774746000LL /* 03:00 CEST, first minute after the gap */
+#define T_2026_07_15_0600Z          1784095200LL /* 08:00 CEST Zurich */
+#define T_2026_07_15_1000Z          1784109600LL /* 06:00 EDT New York, 12:00 CEST Zurich */
+#define MIN 60LL
+#define HOUR 3600LL
+
+/* Local Zurich time on 2026-11-02. */
+#define L(h, m) (T_2026_11_02_LOCAL_MIDNIGHT + (h) * HOUR + (m) * MIN)
+
+void setUp(void) {}
+void tearDown(void) {}
+
+static hy_sched_t s;
+static hy_sched_out_t out;
+static hy_med_t meds[4];
+static size_t n_meds;
+static hy_log_t logs[8];
+static size_t n_logs;
+static hy_snooze_t snoozes[4];
+static size_t n_snoozes;
+static const char *tz = TZ_ZURICH;
+static const hy_tzchange_t *change;
+
+static void reset(void)
+{
+    hy_sched_init(&s);
+    memset(&out, 0, sizeof out);
+    memset(meds, 0, sizeof meds);
+    memset(logs, 0, sizeof logs);
+    memset(snoozes, 0, sizeof snoozes);
+    n_meds = n_logs = n_snoozes = 0;
+    tz = TZ_ZURICH;
+    change = NULL;
+}
+
+/* A: Antibiotic, fixed 08:00 and 20:00, order 0. */
+static hy_med_t *add_a(void)
+{
+    hy_med_t *m = &meds[n_meds++];
+    hy_med_defaults(m);
+    m->id = 1;
+    strcpy(m->code, "A");
+    strcpy(m->name, "Antibiotic");
+    m->type = HY_SCHED_FIXED;
+    m->times[0] = 8 * 60;
+    m->times[1] = 20 * 60;
+    m->n_times = 2;
+    m->order = 0;
+    return m;
+}
+
+/* V: Vitamin D, fixed 08:00, order 1. */
+static hy_med_t *add_v(void)
+{
+    hy_med_t *m = &meds[n_meds++];
+    hy_med_defaults(m);
+    m->id = 2;
+    strcpy(m->code, "V");
+    strcpy(m->name, "Vitamin D");
+    m->type = HY_SCHED_FIXED;
+    m->times[0] = 8 * 60;
+    m->n_times = 1;
+    m->order = 1;
+    return m;
+}
+
+static void add_log(uint32_t med_id, int64_t ts, hy_status_t st, int64_t slot)
+{
+    hy_log_t *l = &logs[n_logs];
+    memset(l, 0, sizeof *l);
+    l->id = (uint32_t)(n_logs + 1);
+    l->ts = ts;
+    strcpy(l->tz, TZ_ZURICH);
+    l->med_id = med_id;
+    l->status = st;
+    l->slot = slot;
+    l->delta_min = (int32_t)((ts - slot) / 60);
+    l->source = st == HY_MISSED ? HY_SRC_AUTO : HY_SRC_SCREEN;
+    n_logs++;
+}
+
+static void eval(int64_t now)
+{
+    hy_sched_in_t in;
+    memset(&in, 0, sizeof in);
+    in.meds = meds;
+    in.n_meds = n_meds;
+    in.logs = logs;
+    in.n_logs = n_logs;
+    in.snoozes = snoozes;
+    in.n_snoozes = n_snoozes;
+    in.tz = tz;
+    in.last_change = change;
+    in.now = now;
+    hy_sched_eval(&s, &in, &out);
+}
+
+static bool in_list(const hy_slot_ref_t *l, size_t n, uint32_t med_id, int64_t slot)
+{
+    for (size_t i = 0; i < n; i++)
+        if (l[i].med_id == med_id && l[i].slot == slot) return true;
+    return false;
+}
+
+/* Review Focus 2: tracking began after the 08:00 window closed. */
+static void test_no_missed_before_tracking(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    hy_sched_start_tracking(&s, L(12, 0));
+    eval(L(12, 0));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+    TEST_ASSERT_FALSE(out.chime);
+    TEST_ASSERT_EQUAL_INT64(L(12, 0), hy_sched_tracked_since(&s, a->id));
+    hy_gap_t g = { 0, hy_sched_tracked_since(&s, a->id) };
+    TEST_ASSERT_EQUAL_INT(HY_OCC_UNTRACKED,
+                          hy_occ_state(a, L(8, 0), L(20, 0), L(12, 0), TZ_ZURICH, NULL, 0, &g, 1, NULL));
+}
+
+/* Review Focus 2: a clock jump restarts tracking; the skipped window is not missed. */
+static void test_clock_jump_untracked(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 30));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    hy_sched_start_tracking(&s, L(13, 0));
+    eval(L(13, 0));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+    TEST_ASSERT_FALSE(in_list(out.to_miss, out.n_to_miss, 1, L(8, 0)));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+}
+
+static void test_due_once_and_chime_cap(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 59));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+    TEST_ASSERT_FALSE(out.chime);
+
+    eval(L(8, 0));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_UINT32(1, out.open[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.open[0].slot);
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.open[0].base);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_DUE, out.open[0].state);
+    TEST_ASSERT_EQUAL_INT64(0, out.open[0].snoozed_until);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_showing);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_newly_due);
+    TEST_ASSERT_EQUAL_UINT32(1, out.newly_due[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.newly_due[0].slot);
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(1, s.chime_plays);
+
+    eval(L(8, 0) + 30);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+    TEST_ASSERT_FALSE(out.chime);
+
+    for (int m = 2; m <= 8; m += 2) {
+        eval(L(8, m));
+        TEST_ASSERT_TRUE_MESSAGE(out.chime, "repeat chime");
+        TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+    }
+    TEST_ASSERT_EQUAL_UINT8(5, s.chime_plays);
+    eval(L(8, 10));
+    TEST_ASSERT_FALSE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(5, s.chime_plays);
+}
+
+static void test_late_then_missed(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(8, 30));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_LATE, out.open[0].state);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+
+    eval(L(10, 0));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_to_miss);
+    TEST_ASSERT_EQUAL_UINT32(1, out.to_miss[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.to_miss[0].slot);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+
+    add_log(1, L(10, 0), HY_MISSED, L(8, 0));
+    eval(L(10, 1));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+}
+
+static void test_taken_closes_and_stops_chime(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(8, 0));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_TRUE(out.chime);
+    add_log(1, L(8, 1), HY_TAKEN, L(8, 0));
+    eval(L(8, 2));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_showing);
+    TEST_ASSERT_FALSE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(0, s.chime_plays);
+}
+
+/* Review Focus 4: two doses at once, one snoozed. */
+static void test_two_due_and_snooze(void)
+{
+    reset();
+    add_v(); /* array order differs from medicine order on purpose */
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(8, 0));
+    TEST_ASSERT_EQUAL_UINT(2, out.n_open);
+    TEST_ASSERT_EQUAL_UINT32(1, out.open[0].med_id);
+    TEST_ASSERT_EQUAL_UINT32(2, out.open[1].med_id);
+    TEST_ASSERT_EQUAL_UINT(2, out.n_showing);
+    TEST_ASSERT_EQUAL_UINT(2, out.n_newly_due);
+    TEST_ASSERT_TRUE(out.chime);
+
+    snoozes[0] = (hy_snooze_t){ 2, L(8, 0), L(8, 15) };
+    n_snoozes = 1;
+    eval(L(8, 1));
+    TEST_ASSERT_EQUAL_UINT(2, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_showing);
+    TEST_ASSERT_EQUAL_INT64(L(8, 15), out.open[1].snoozed_until);
+    TEST_ASSERT_EQUAL_INT64(0, out.open[0].snoozed_until);
+    TEST_ASSERT_FALSE(out.chime);
+
+    eval(L(8, 2));
+    TEST_ASSERT_TRUE(out.chime); /* A repeat */
+    TEST_ASSERT_EQUAL_UINT8(2, s.chime_plays);
+
+    eval(L(8, 15));
+    TEST_ASSERT_EQUAL_UINT(2, out.n_showing);
+    TEST_ASSERT_EQUAL_INT64(0, out.open[1].snoozed_until);
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(1, s.chime_plays);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+}
+
+static void test_new_medicine_mid_day(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    add_v(); /* V first seen at 12:00 */
+    eval(L(12, 0));
+    TEST_ASSERT_EQUAL_INT64(L(12, 0), hy_sched_tracked_since(&s, 2));
+    for (size_t i = 0; i < out.n_open; i++) TEST_ASSERT_NOT_EQUAL(2, out.open[i].med_id);
+    TEST_ASSERT_FALSE(in_list(out.to_miss, out.n_to_miss, 2, L(8, 0)));
+    /* A was tracked from 07:00, so its 08:00 slot is missed. */
+    TEST_ASSERT_TRUE(in_list(out.to_miss, out.n_to_miss, 1, L(8, 0)));
+}
+
+/* Review Focus 5 (R6 setup): Zurich 08:00 slot in the skipped interval, DUE on arrival. */
+static void test_east_arrival_due(void)
+{
+    reset();
+    add_a();
+    static hy_tzchange_t ch;
+    memset(&ch, 0, sizeof ch);
+    ch.at = T_2026_07_15_1000Z;
+    strcpy(ch.old_tz, TZ_NY);
+    strcpy(ch.new_tz, TZ_ZURICH);
+    change = &ch;
+    hy_sched_start_tracking(&s, T_2026_07_15_1000Z - HOUR);
+    eval(T_2026_07_15_1000Z);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_INT64(T_2026_07_15_0600Z, out.open[0].slot);
+    TEST_ASSERT_EQUAL_INT64(T_2026_07_15_1000Z, out.open[0].base);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_DUE, out.open[0].state);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+
+    eval(T_2026_07_15_1000Z + 2 * HOUR);
+    TEST_ASSERT_TRUE(in_list(out.to_miss, out.n_to_miss, 1, T_2026_07_15_0600Z));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+}
+
+static void test_next_wake(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.next_wake);
+    eval(L(8, 0));
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_INT64(L(8, 2), out.next_wake);
+    for (int m = 2; m <= 8; m += 2) {
+        eval(L(8, m));
+        TEST_ASSERT_TRUE(out.chime);
+    }
+    TEST_ASSERT_EQUAL_UINT8(5, s.chime_plays);
+    TEST_ASSERT_EQUAL_INT64(L(8, 30), out.next_wake); /* late */
+    snoozes[0] = (hy_snooze_t){ 1, L(8, 0), L(8, 15) };
+    n_snoozes = 1;
+    eval(L(8, 9));
+    TEST_ASSERT_EQUAL_INT64(L(8, 15), out.next_wake);
+}
+
+static void test_dst_gap_slot(void)
+{
+    reset();
+    hy_med_t *m = add_a();
+    m->times[0] = 2 * 60 + 30; /* 02:30 does not exist on 2026-03-29 in Zurich */
+    m->n_times = 1;
+    hy_sched_start_tracking(&s, T_2026_03_29_LOCAL_MIDNIGHT);
+    eval(T_2026_03_29_0100Z - MIN);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_INT64(T_2026_03_29_0100Z, out.next_wake);
+    eval(T_2026_03_29_0100Z);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_INT64(T_2026_03_29_0100Z, out.open[0].slot);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_DUE, out.open[0].state);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_newly_due);
+}
+
+static void test_clock_back_no_reannounce(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(8, 1));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_newly_due);
+    eval(L(7, 59));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+    eval(L(8, 0));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+}
+
+static void test_not_tracking_outputs_nothing(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 30));
+    hy_sched_stop_tracking(&s);
+    TEST_ASSERT_EQUAL_INT64(0, hy_sched_tracked_since(&s, 1));
+    eval(L(8, 0));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_showing);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+    TEST_ASSERT_FALSE(out.chime);
+    TEST_ASSERT_EQUAL_INT64(0, out.next_wake);
+}
+
+int main(void)
+{
+    UNITY_BEGIN();
+    RUN_TEST(test_no_missed_before_tracking);
+    RUN_TEST(test_clock_jump_untracked);
+    RUN_TEST(test_due_once_and_chime_cap);
+    RUN_TEST(test_late_then_missed);
+    RUN_TEST(test_taken_closes_and_stops_chime);
+    RUN_TEST(test_two_due_and_snooze);
+    RUN_TEST(test_new_medicine_mid_day);
+    RUN_TEST(test_east_arrival_due);
+    RUN_TEST(test_next_wake);
+    RUN_TEST(test_dst_gap_slot);
+    RUN_TEST(test_clock_back_no_reannounce);
+    RUN_TEST(test_not_tracking_outputs_nothing);
+    return UNITY_END();
+}
