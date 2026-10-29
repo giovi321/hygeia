@@ -431,6 +431,11 @@ esp_err_t hy_clock_alarm_set(int64_t utc)
     return err;
 }
 
+void hy_clock_alarm_note_int(void)
+{
+    s_alarm_flag = true;
+}
+
 bool hy_clock_alarm_take(void)
 {
     if (!s_alarm_flag || !s_alarm_mutex) {

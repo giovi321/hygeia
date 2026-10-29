@@ -75,8 +75,9 @@ static bool s_lock_held;                   /* s_sleep_mu */
 static bool s_light;                       /* light sleep enabled in this sleep mode; s_sleep_mu */
 static volatile bool s_asleep;             /* LVGL paused by the sleep mode; written under s_sleep_mu and s_mux */
 static bool s_sleep_req;                   /* the UI asked for the sleep mode; s_mux */
-static bool s_vbus_real;                   /* the last PMU reading saw VBUS (fakebatt does not change it); s_mux */
-static volatile bool s_touch_isr, s_key_isr;
+static bool s_vbus_real = true;            /* the last PMU reading saw VBUS (fakebatt does not change it); true until
+                                              the first good reading, so light sleep never starts on USB; s_mux */
+static volatile bool s_touch_isr, s_key_isr; /* set by the ISRs, taken under s_mux */
 static int64_t s_sleep_t0_ms;              /* s_sleep_mu */
 /* sleepstat counters; s_mux */
 static uint32_t s_n_entries, s_n_wake[W_N], s_n_chime_batt;
@@ -493,7 +494,9 @@ void hy_power_resume(void)
 
 static void IRAM_ATTR touch_hook(void)
 {
+    portENTER_CRITICAL_ISR(&s_mux);
     s_touch_isr = true;
+    portEXIT_CRITICAL_ISR(&s_mux);
     if (s_asleep && s_task) {
         BaseType_t hp = pdFALSE;
         vTaskNotifyGiveFromISR(s_task, &hp);
@@ -503,7 +506,9 @@ static void IRAM_ATTR touch_hook(void)
 
 static void IRAM_ATTR key_hook(void)
 {
+    portENTER_CRITICAL_ISR(&s_mux);
     s_key_isr = true;
+    portEXIT_CRITICAL_ISR(&s_mux);
     if (s_task) {
         BaseType_t hp = pdFALSE;
         vTaskNotifyGiveFromISR(s_task, &hp);
@@ -611,8 +616,10 @@ static void power_task(void *arg)
         if (irq) {
             log_irq(irq);
         }
+        portENTER_CRITICAL(&s_mux);
         bool touch = s_touch_isr, key = s_key_isr;
         s_touch_isr = s_key_isr = false;
+        portEXIT_CRITICAL(&s_mux);
         wake_cause_t cause = W_N;
         if (s_asleep) {
             int64_t (*nw)(void) = s_next_wake_fn;
@@ -629,6 +636,9 @@ static void power_task(void *arg)
                 cause = W_RTC;
             } else if (next && hy_clock_valid() && (int64_t)time(NULL) >= next) {
                 cause = W_NEXT;
+            }
+            if (cause == W_RTC) {
+                hy_clock_alarm_note_int();   /* the masked ISR missed the edge: the next tick takes and clears AF */
             }
             if (cause != W_N) {
                 exit_sleep(cause);
@@ -850,14 +860,17 @@ void hy_power_sleep_stats(void)
     if (asleep) {
         ms += mono_ms() - s_sleep_t0_ms;
     }
-    ESP_LOGI(TAG, "sleepstat: %s%s, entries %" PRIu32 ", asleep %lld ms total, chimes on battery %" PRIu32
+    ESP_LOGI(TAG, "sleepstat: %s%s, entries %" PRIu32 ", asleep %lld ms total, chime moments on battery %" PRIu32
              ", longest awake stretch while off %lld ms, requested %d, vbus %d",
              asleep ? "asleep" : "awake", asleep ? (s_light ? " (light sleep)" : " (no light sleep)") : "", entries,
              (long long)ms, chimes, (long long)longest, req, vbus);
     ESP_LOGI(TAG, "sleepstat wakes: pwr %" PRIu32 ", usb %" PRIu32 ", touch %" PRIu32 ", key %" PRIu32 ", rtc %" PRIu32
              ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", timer-only %" PRIu32,
              w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_TIMER]);
-    esp_pm_dump_locks(stdout);   /* any lock other than hy_awake held while asleep keeps the chip out of light sleep */
+    /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
+     * build) this also prints the measured time per mode: LIGHT_SLEEP is the light-sleep time since boot, and the
+     * light-sleep counts. */
+    esp_pm_dump_locks(stdout);
 }
 
 void hy_power_debug_fakebatt(const char *args)
