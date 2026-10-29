@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "hy/sched_run.h"
@@ -48,6 +49,9 @@ static uint32_t s_view_us, s_lvgl_us;
 static lv_timer_t *s_tap_timer;
 static uint32_t s_tap_med;
 static bool s_pressed;
+#define HBUF_CAP      512            /* one medicine's logs over the 32 days of the 30 day range */
+#define HBUF_WINDOW_S (32 * 86400)
+static hy_log_t *s_hbuf;             /* PSRAM */
 
 /* Past days only change when a log, a medicine, the zone or the tracking start changes, and hy_day_mark costs
  * about 4 ms a call (measured), so everything is recomputed only when the recompute key changes (today, zone,
@@ -331,14 +335,33 @@ void history_refresh(void)
             key = ui_fnv(key, &last->ts, sizeof last->ts);
         }
         bool full = s_full || key != s_key;
+        /* The snapshot holds the last 8 days of logs. The 30 day range needs every day, so a full recompute
+         * queries each medicine's last 32 days (one medicine at a time into one buffer) and sums its adherence. */
+        bool deep = full && s_days == 30 && s_hbuf;
+        hy_adherence_t deep_ad = {0, 0};
         for (size_t i = 0; i < n; i++) {
+            const hy_sched_in_t *in = &sn->in;
+            hy_sched_in_t din;
+            if (deep) {
+                din = sn->in;
+                din.logs = s_hbuf;
+                din.n_logs = ui_log_window(s_meds[i]->id, sn->in.now - HBUF_WINDOW_S, sn->in.now + 1, s_hbuf, HBUF_CAP);
+                in = &din;
+            }
             for (int d = full ? 0 : s_days - 1; d < s_days; d++) {
                 bool prog = false;
-                s_marks[i][d] = hy_day_mark(s_meds[i], hy_date_add(first, d), &sn->in, sn->sched,
+                s_marks[i][d] = hy_day_mark(s_meds[i], hy_date_add(first, d), in, sn->sched,
                                             d == s_days - 1 ? &prog : NULL);
                 if (d == s_days - 1) {
                     s_prog[i] = prog;
                 }
+            }
+            if (deep) {
+                hy_adherence_t a;
+                hy_adherence(s_meds[i]->id, first, s_days, in, sn->sched, &a);
+                uint32_t t = (uint32_t)deep_ad.taken + a.taken, r = (uint32_t)deep_ad.resolved + a.resolved;
+                deep_ad.taken = (uint16_t)(t > 65535 ? 65535 : t);
+                deep_ad.resolved = (uint16_t)(r > 65535 ? 65535 : r);
             }
             sig = ui_fnv(sig, s_marks[i], sizeof s_marks[i][0] * (size_t)s_days);
             sig = ui_fnv(sig, &s_prog[i], sizeof s_prog[i]);
@@ -347,7 +370,11 @@ void history_refresh(void)
             sig = ui_fnv(sig, &s_meds[i]->color, sizeof s_meds[i]->color);
         }
         if (full) {
-            hy_adherence(0, first, s_days, &sn->in, sn->sched, &s_ad);
+            if (deep) {
+                s_ad = deep_ad;
+            } else {
+                hy_adherence(0, first, s_days, &sn->in, sn->sched, &s_ad);
+            }
             s_key = key;
             s_full = false;
         }
@@ -435,6 +462,10 @@ static void legend_item(lv_obj_t *page, int cx, int kind, uint32_t color, const 
 
 void history_create(lv_obj_t *page)
 {
+    s_hbuf = heap_caps_malloc(HBUF_CAP * sizeof(hy_log_t), MALLOC_CAP_SPIRAM);
+    if (!s_hbuf) {
+        ESP_LOGE(TAG, "no PSRAM for the 30 day log window: the 30 day range uses the 8 day snapshot");
+    }
     s_page = page;
     s_bg = lv_obj_create(page);   /* the double tap lands anywhere on the page */
     lv_obj_remove_style_all(s_bg);
