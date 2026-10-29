@@ -15,6 +15,7 @@ idf_component_register(
         "src/tzdb_data.c"
         "src/chime.c"
         "src/settings.c"
+        "src/battery.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
