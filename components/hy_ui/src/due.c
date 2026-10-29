@@ -338,6 +338,8 @@ void due_refresh(void)
     }
     if (!s_visible) {
         show_card();
+    } else if (sn->out.n_newly_due > 0) {
+        idle_wake_due();   /* a dose joined the open card: wake a dimmed or dark screen too (R16) */
     }
     render();
     if (sn->flash && hy_sched_take_flash()) {

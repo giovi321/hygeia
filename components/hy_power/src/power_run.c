@@ -54,6 +54,8 @@ static uint8_t s_scr;               /* batlog scr column: 0 on, 1 dim, 2 off; 0 
 /* fakebatt: replaces the raw reading; under s_mux */
 static bool s_fake, s_fake_usb, s_fake_changed, s_force_read;
 static int8_t s_fake_pct;
+static uint16_t s_fake_mv;   /* the voltage a fake reading reports; 0 = derive it from the percent */
+static hy_batt_crit_confirm_t s_crit_conf;   /* power task only */
 
 /* Heartbeat writes come from the power task, the runner (LVGL task) and the console. s_alive_mu serialises
  * the checks below, the NVS write and the cache update; NVS cannot run inside a portMUX critical section. */
@@ -235,8 +237,7 @@ void hy_power_off(void)
     hy_clock_alarm_set(0);
     hy_board_set_brightness(0);
     hy_board_display_power(false);
-    hy_board_pmu_power_off();
-    vTaskDelay(pdMS_TO_TICKS(2000));   /* the cut takes effect within this time */
+    hy_board_pmu_power_off();   /* waits for the cut (2.2 s); returning means it did not happen */
     stop_abort();
     ESP_LOGE(TAG, "power: off failed, still running");
     hy_board_display_power(true);
@@ -485,12 +486,14 @@ void hy_power_chime_on_battery(void)
     portEXIT_CRITICAL(&s_mux);
 }
 
+#if CONFIG_HY_DEBUG_CONSOLE
 void hy_power_resume(void)
 {
     if (s_asleep) {
         exit_sleep(W_DEBUG);
     }
 }
+#endif
 
 static void IRAM_ATTR touch_hook(void)
 {
@@ -548,16 +551,15 @@ static uint32_t read_battery(int64_t mono, bool *refake)
     }
     bool fake = s_fake, fake_usb = s_fake_usb;
     int8_t fake_pct = s_fake_pct;
+    uint16_t fake_mv = s_fake_mv;
     *refake = s_fake_changed;
     s_fake_changed = false;
     portEXIT_CRITICAL(&s_mux);
 
     if (fake) {
-        if (err != ESP_OK) {
-            raw.mv = 0;
-        }
         raw.present = true;
         raw.pct = fake_pct;
+        raw.mv = fake_mv ? fake_mv : (uint16_t)(3300 + 9 * fake_pct);   /* 4 % -> 3336 mV, 100 % -> 4200 mV */
         raw.vbus = fake_usb;
         raw.chg = fake_usb ? (fake_pct >= 100 ? HY_CHG_DONE : HY_CHG_CHARGING) : HY_CHG_NONE;
         err = ESP_OK;
@@ -571,6 +573,7 @@ static uint32_t read_battery(int64_t mono, bool *refake)
         bool was_ok = s_st.pmu_ok;
         s_st.pmu_ok = false;
         portEXIT_CRITICAL(&s_mux);
+        s_crit_conf = (hy_batt_crit_confirm_t){0};
         return was_ok ? HY_BATT_CHANGED : 0; /* the top bar switches to the unknown text */
     }
 
@@ -581,8 +584,12 @@ static uint32_t read_battery(int64_t mono, bool *refake)
     if (*refake) {
         /* entering or leaving fakebatt: restart the model so the new value shows at once */
         hy_batt_init(&b, b.rate_cph);
+        s_crit_conf = (hy_batt_crit_confirm_t){0};
     }
     uint32_t flags = hy_batt_update(&b, &raw, mono);
+    if (hy_batt_crit_confirm(&s_crit_conf, mono, b.pct, raw.mv, raw.vbus)) {
+        flags |= HY_BATT_CRIT_CONFIRMED;
+    }
     if (!was_ok) {
         flags |= HY_BATT_CHANGED;
     }
@@ -626,8 +633,8 @@ static void power_task(void *arg)
             int64_t next = nw ? nw() : 0;
             if (irq & (HY_PMU_PKEY_SHORT | HY_PMU_PKEY_LONG)) {
                 cause = W_PWR;
-            } else if (irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) {
-                cause = W_USB;
+            } else if ((irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) || (s_light && s_vbus_real)) {
+                cause = W_USB;   /* s_light with VBUS seen: a lost VBUS_IN IRQ must not keep light sleep on USB */
             } else if (touch) {
                 cause = W_TOUCH;
             } else if (key) {
@@ -691,7 +698,10 @@ static void power_task(void *arg)
                          st.batt.raw.pct, (unsigned)st.batt.raw.mv, st.batt.raw.vbus, (int)st.batt.raw.chg,
                          st.pmu_ok ? "ok" : "error");
             }
-            if ((flags & (HY_BATT_EV_LOW | HY_BATT_EV_CRIT)) && s_asleep) {
+            if (flags & HY_BATT_CRIT_CONFIRMED) {
+                ESP_LOGW(TAG, "battery critical confirmed: %d%%, %u mV", st.batt.pct, (unsigned)st.batt.raw.mv);
+            }
+            if ((flags & (HY_BATT_EV_LOW | HY_BATT_EV_CRIT | HY_BATT_CRIT_CONFIRMED)) && s_asleep) {
                 exit_sleep(W_BATT);   /* the UI publishes the event; critical opens the countdown */
             }
             if (flags) {
@@ -876,7 +886,7 @@ void hy_power_sleep_stats(void)
 void hy_power_debug_fakebatt(const char *args)
 {
     bool on, usb = false;
-    long pct = 0;
+    long pct = 0, mv = 0;
     if (strcmp(args, "off") == 0) {
         on = false;
     } else {
@@ -885,8 +895,17 @@ void hy_power_debug_fakebatt(const char *args)
         while (*end == ' ') {
             end++;
         }
-        if (end == args || pct < 0 || pct > 100 || (*end && strcmp(end, "usb") != 0)) {
-            ESP_LOGE(TAG, "usage: fakebatt <pct 0..100> [usb] | fakebatt off");
+        bool bad = end == args || pct < 0 || pct > 100;
+        if (!bad && *end >= '0' && *end <= '9') {
+            const char *num = end;
+            mv = strtol(num, &end, 10);
+            while (*end == ' ') {
+                end++;
+            }
+            bad = mv < 1000 || mv > 5000;
+        }
+        if (bad || (*end && strcmp(end, "usb") != 0)) {
+            ESP_LOGE(TAG, "usage: fakebatt <pct 0..100> [mv 1000..5000] [usb] | fakebatt off");
             return;
         }
         on = true;
@@ -899,6 +918,7 @@ void hy_power_debug_fakebatt(const char *args)
     s_fake = on;
     s_fake_usb = usb;
     s_fake_pct = (int8_t)pct;
+    s_fake_mv = (uint16_t)mv;
     s_force_read = true;
     portEXIT_CRITICAL(&s_mux);
     ESP_LOGI(TAG, "fakebatt: %s", on ? "on" : "off");

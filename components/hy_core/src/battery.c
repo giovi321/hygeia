@@ -75,6 +75,27 @@ uint32_t hy_batt_update(hy_batt_t *b, const hy_batt_raw_t *r, int64_t now)
     return flags;
 }
 
+bool hy_batt_crit_confirm(hy_batt_crit_confirm_t *c, int64_t mono_s, int pct, int mv, bool usb)
+{
+    if (usb || pct < 0 || pct > HY_BATT_CRIT_PCT || mv <= 0 || mv >= HY_BATT_CRIT_MV) {
+        *c = (hy_batt_crit_confirm_t){0};
+        return false;
+    }
+    if (c->done) {
+        return false;
+    }
+    if (!c->pending) {
+        c->pending = true;
+        c->t0 = mono_s;
+        return false;
+    }
+    if (mono_s - c->t0 >= HY_BATT_CRIT_CONFIRM_S) {
+        c->done = true;
+        return true;
+    }
+    return false;
+}
+
 void hy_batt_text(const hy_batt_t *b, char *buf, size_t len, const char *unknown, bool *red, bool *bolt)
 {
     if (b->pct < 0)

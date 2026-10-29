@@ -63,10 +63,14 @@ static void event_cb(const hy_event_t *ev, void *ctx)
 
 /* Power task callback (LVGL task, via lv_async_call): refresh the battery widgets; a low or critical crossing
  * publishes its event. Low also shows the info toast, on a dark screen too (it does not wake it and is gone
- * after its 5 s). Critical shows no toast: the countdown overlay replaces it. */
+ * after its 5 s). Critical publishes its event on the first reading and shows no toast; the countdown overlay opens
+ * on HY_BATT_CRIT_CONFIRMED (hy_batt_crit_confirm in the power task), not on the first reading. */
 static void battery_cb(uint32_t flags)
 {
     topbar_battery_refresh();
+    if (flags & HY_BATT_CRIT_CONFIRMED) {
+        poweroff_countdown_show();   /* two critical readings 10 s apart with a low voltage (R18) */
+    }
     if (!(flags & (HY_BATT_EV_LOW | HY_BATT_EV_CRIT))) {
         return;
     }
@@ -85,7 +89,6 @@ static void battery_cb(uint32_t flags)
         ev.type = HY_EV_BATTERY_CRITICAL;
         ESP_LOGI(TAG, "HY_EV_BATTERY_CRITICAL value=%d", (int)ev.value);
         hy_ev_publish(&ev);
-        poweroff_countdown_show();
     }
 }
 

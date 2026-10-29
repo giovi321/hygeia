@@ -16,7 +16,7 @@ typedef struct {
     hy_err_t (*delete_log)(void *ctx, uint32_t id, int64_t ts);  /* ts locates the month */
     size_t   (*query_log)(void *ctx, int64_t from, int64_t to, uint32_t med_id /*0 = all*/,
                           hy_log_t *out, size_t max);
-    /* Untracked gaps. Both may be NULL (host fixtures, device until the store provides them):
+    /* Untracked gaps. Both may be NULL (host fixtures that do not need them; the device port has both):
      * hy_act_record_gap then returns HY_E_INVALID. query_gaps returns the gaps overlapping
      * [from, to) ascending by start, with their reasons (a hy_gap_reason_t value). */
     hy_err_t (*append_gap)(void *ctx, const hy_gap_t *g, uint8_t reason);
