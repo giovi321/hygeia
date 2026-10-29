@@ -423,6 +423,7 @@ esp_err_t hy_ui_start(void)
     }
     splash_finish(s_screen);
     /* input, the 1 s tick, the first evaluation (a due card and its chime) and the idle timer start with the content */
+    nav_host_warm_start();   /* the hidden views, one every 250 ms in the LVGL task */
     idle_create();
     input_init(hy_board_indev());
     lv_timer_create(tick_cb, 1000, NULL);

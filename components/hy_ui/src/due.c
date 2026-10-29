@@ -359,6 +359,13 @@ void due_refresh(void)
     }
 }
 
+void due_raise(void)
+{
+    if (s_card) {
+        lv_obj_move_foreground(s_card);
+    }
+}
+
 bool due_visible(void)
 {
     return s_visible;
