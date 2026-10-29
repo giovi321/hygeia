@@ -63,6 +63,8 @@ static lv_obj_t *s_card, *s_ring, *s_code, *s_name, *s_due, *s_track, *s_knob, *
 
 /* knob drag */
 static bool s_drag;
+static entry_t s_cap;          /* the entry the knob was grabbed on: (med, slot, code) */
+static bool s_deferred;        /* a refresh arrived during the drag; applied after the release */
 static int32_t s_x0, s_off0, s_off;
 
 /* flash */
@@ -117,6 +119,9 @@ static void knob_reset(void)
 }
 
 /* ---- speaker failure flash ---- */
+
+static bool drag_begin(void);
+static void drag_end(bool released);
 
 static void flash_apply(bool bright)
 {
@@ -296,6 +301,13 @@ void due_refresh(void)
         s_idx = 0;
     }
 
+    if (s_drag) {
+        /* P38: the card does not change under the finger; the list is kept, drawing waits for the release */
+        s_deferred = true;
+        ESP_LOGI(TAG, "due: refresh deferred during the knob drag (%u showing)", (unsigned)n);
+        return;
+    }
+
     if (n == 0) {
         if (s_visible) {
             hide_card();
@@ -320,6 +332,25 @@ bool due_visible(void)
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
+/* "due drag": a knob grab on the shown entry with the knob at the end of the track; "due drop": the release.
+ * Anything that changes the list in between (tap, remindtest, due snooze) tests the frozen entry. */
+void due_drag_debug(bool drop)
+{
+    if (!drop) {
+        if (!drag_begin()) {
+            ESP_LOGW(TAG, "drag: nothing to grab");
+            return;
+        }
+        s_off = TRAVEL;
+        lv_obj_set_x(s_knob, KNOB_PAD + s_off);
+        ESP_LOGI(TAG, "drag: grabbed %s slot %lld at %d px", s_cap.code, (long long)s_cap.slot, (int)s_off);
+    } else if (s_drag) {
+        drag_end(true);
+    } else {
+        ESP_LOGW(TAG, "drop: no drag");
+    }
+}
+
 void due_flash_debug(void)
 {
     if (s_visible) {
@@ -360,8 +391,34 @@ void due_snooze(void)
         toast_show_info(msg);
     } else {
         ESP_LOGW(TAG, "snooze %s: %s (%d)", code, hy_err_str(err), (int)err);
-        toast_show_info(ui_err_text(err));
+        const char *t = ui_err_text(err);
+        toast_show_info(strcmp(t, HY_S_ERR_LOG) == 0 ? HY_S_ERR_SNOOZE : t);
     }
+}
+
+/* Result handling shared by take and skip */
+static void act_result(const char *what, const char *code, hy_err_t err, uint32_t log_id, bool skipped)
+{
+    ESP_LOGI(TAG, "%s %s: %s (%d), log id %u", what, code, hy_err_str(err), (int)err, (unsigned)log_id);
+    if (err != HY_OK) {
+        toast_show_info(ui_err_text(err));
+        return;
+    }
+    char hhmm[8];
+    now_hhmm(hhmm, sizeof hhmm);
+    if (skipped) {
+        toast_show_skipped(code, hhmm, log_id);
+    } else {
+        toast_show_logged(code, hhmm, log_id);
+    }
+    ui_log_hwm(what);
+}
+
+static void take_entry(const entry_t *e)
+{
+    uint32_t log_id = 0;
+    hy_err_t err = hy_act_log_taken(e->med_id, 0, NULL, HY_SRC_SCREEN, &log_id);
+    act_result("take", e->code, err, log_id, false);
 }
 
 void due_slide_complete(void)
@@ -371,19 +428,8 @@ void due_slide_complete(void)
         ESP_LOGW(TAG, "take: nothing is due");
         return;
     }
-    char code[3];
-    snprintf(code, sizeof code, "%s", e->code);
-    uint32_t log_id = 0;
-    hy_err_t err = hy_act_log_taken(e->med_id, 0, NULL, HY_SRC_SCREEN, &log_id);
-    ESP_LOGI(TAG, "take %s: %s (%d), log id %u", code, hy_err_str(err), (int)err, (unsigned)log_id);
-    if (err == HY_OK) {
-        char hhmm[8];
-        now_hhmm(hhmm, sizeof hhmm);
-        toast_show_logged(code, hhmm, log_id);
-        ui_log_hwm("due take");
-    } else {
-        toast_show_info(ui_err_text(err));
-    }
+    entry_t copy = *e;   /* the action republishes events; do not point into the list */
+    take_entry(&copy);
 }
 
 void due_skip(void)
@@ -393,22 +439,75 @@ void due_skip(void)
         ESP_LOGW(TAG, "skip: nothing is due");
         return;
     }
+    uint32_t log_id = 0;
     char code[3];
     snprintf(code, sizeof code, "%s", e->code);
-    uint32_t log_id = 0;
     hy_err_t err = hy_act_skip(e->med_id, HY_SRC_SCREEN, &log_id);
-    ESP_LOGI(TAG, "skip %s: %s (%d), log id %u", code, hy_err_str(err), (int)err, (unsigned)log_id);
-    if (err == HY_OK) {
-        char hhmm[8];
-        now_hhmm(hhmm, sizeof hhmm);
-        toast_show_skipped(code, hhmm, log_id);
-        ui_log_hwm("due skip");
-    } else {
-        toast_show_info(ui_err_text(err));
-    }
+    act_result("skip", code, err, log_id, true);
 }
 
 /* ---- touch ---- */
+
+static void knob_back(void)
+{
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_knob);
+    lv_anim_set_exec_cb(&a, x_exec);
+    lv_anim_set_values(&a, lv_obj_get_x(s_knob), KNOB_PAD);
+    lv_anim_set_duration(&a, BACK_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+    s_off = 0;
+}
+
+static void deferred_refresh(void *arg)
+{
+    (void)arg;
+    s_gen_seen = 0;   /* the next due_refresh redraws from the latest snapshot */
+    due_refresh();
+}
+
+/* The drag starts on the shown entry; that entry, and no other, is what a release can log (P38) */
+static bool drag_begin(void)
+{
+    entry_t *e = cur();
+    if (!s_visible || !e || ui_nav_idle() || toast_logged_visible()) {
+        return false;
+    }
+    s_cap = *e;
+    s_drag = true;
+    s_deferred = false;
+    return true;
+}
+
+static void drag_end(bool released)
+{
+    s_drag = false;
+    bool complete = released && s_off * 100 >= TRAVEL * COMPLETE_PCT;
+    ESP_LOGI(TAG, "knob released at %d of %d px: %s", (int)s_off, TRAVEL, complete ? "complete" : "back");
+    if (complete) {
+        knob_reset();
+        const entry_t *open = NULL;   /* the captured slot, if it is still showing in the latest list */
+        for (size_t i = 0; i < s_n; i++) {
+            if (s_list[i].med_id == s_cap.med_id && s_list[i].slot == s_cap.slot) {
+                open = &s_list[i];
+            }
+        }
+        if (open) {
+            entry_t copy = *open;
+            take_entry(&copy);
+        } else {
+            ESP_LOGW(TAG, "take %s: slot no longer open, nothing logged", s_cap.code);
+        }
+    } else {
+        knob_back();
+    }
+    if (s_deferred) {
+        s_deferred = false;
+        lv_async_call(deferred_refresh, NULL);
+    }
+}
 
 /* The knob owns its stroke from the first sample (PRESSED and PRESSING both consume: whichever of them the input
  * layer sees after its own PRESSED handler is the one that sticks). A stroke that only wakes the dimmed screen
@@ -419,8 +518,7 @@ static void knob_cb(lv_event_t *e)
     lv_point_t p;
     switch (c) {
     case LV_EVENT_PRESSED:
-        s_drag = !ui_nav_idle() && !toast_logged_visible();
-        if (!s_drag) {
+        if (!drag_begin()) {
             return;
         }
         ui_input_consume();
@@ -443,25 +541,8 @@ static void knob_cb(lv_event_t *e)
     }
     case LV_EVENT_RELEASED:
     case LV_EVENT_PRESS_LOST:
-        if (!s_drag) {
-            return;
-        }
-        s_drag = false;
-        if (c == LV_EVENT_RELEASED && s_off * 100 >= TRAVEL * COMPLETE_PCT) {
-            ESP_LOGI(TAG, "knob released at %d of %d px: complete", (int)s_off, TRAVEL);
-            knob_reset();
-            due_slide_complete();
-        } else {
-            ESP_LOGI(TAG, "knob released at %d of %d px: back", (int)s_off, TRAVEL);
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, s_knob);
-            lv_anim_set_exec_cb(&a, x_exec);
-            lv_anim_set_values(&a, lv_obj_get_x(s_knob), KNOB_PAD);
-            lv_anim_set_duration(&a, BACK_MS);
-            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-            lv_anim_start(&a);
-            s_off = 0;
+        if (s_drag) {
+            drag_end(c == LV_EVENT_RELEASED);
         }
         break;
     default:

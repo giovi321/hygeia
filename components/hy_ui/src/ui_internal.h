@@ -147,7 +147,8 @@ void due_snooze(void);                   /* swipe left: snooze the shown entry b
 void due_slide_complete(void);           /* the knob reached 90%: log taken */
 void due_skip(void);                     /* the Skip tap: log skipped */
 #if CONFIG_HY_DEBUG_CONSOLE
-void due_flash_debug(void);              /* debug: runs the speaker-failure flash now */
+void due_flash_debug(void);
+void due_drag_debug(bool drop);          /* debug: simulated knob grab (false) and release (true) */              /* debug: runs the speaker-failure flash now */
 #endif
 
 /* toast.c */

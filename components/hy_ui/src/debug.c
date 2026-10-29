@@ -448,10 +448,12 @@ static void job_due(const char *arg)
         due_snooze();
     } else if (strcmp(arg, "next") == 0) {
         due_next();
+    } else if (strcmp(arg, "drag") == 0 || strcmp(arg, "drop") == 0) {
+        due_drag_debug(arg[2] == 'o');
     } else if (strcmp(arg, "flash") == 0) {
         due_flash_debug();
     } else {
-        ESP_LOGE(TAG, "usage: due <slide|skip|snooze|next|flash>");
+        ESP_LOGE(TAG, "usage: due <slide|skip|snooze|next|flash|drag|drop>");
     }
 }
 

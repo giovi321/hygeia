@@ -47,6 +47,7 @@
 #define HY_S_ERR_IO        "Storage error"
 #define HY_S_ERR_FULL      "Too many entries"
 #define HY_S_ERR_LOG       "Could not log"
+#define HY_S_ERR_SNOOZE    "Could not snooze"
 
 /* ---- toasts ---- */
 #define HY_S_LOGGED        "%s logged %s"           /* code, HH:MM */
