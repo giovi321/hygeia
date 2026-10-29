@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include "hy/actions.h"
+#include "hy/settings.h"
 
 /*
  * stdio-based persistence. base_dir must exist ("/data" on device, a temp
@@ -39,6 +40,15 @@ size_t   hy_store_skipped_lines(void);        /* corrupt lines skipped since ope
 #include "esp_err.h"
 /* Device only: mounts the LittleFS partition "storage" at "/data"; formats it only if the mount fails. */
 esp_err_t hy_store_mount(void);
+
+/* Settings in NVS namespace "settings" (keys sound, dnd, vol, bright, snooze). Needs nvs_flash_init first.
+ * load: missing keys give defaults, then clamps, and refreshes the RAM copy. save: writes the given values as is. */
+esp_err_t hy_settings_load(hy_settings_t *s);
+esp_err_t hy_settings_save(const hy_settings_t *s);
+/* RAM copy loaded at boot (defaults until hy_settings_load runs). Never NULL. */
+const hy_settings_t *hy_settings(void);
+/* Clamps, saves, and updates the RAM copy (the RAM copy is updated even when the save fails). */
+esp_err_t hy_settings_update(const hy_settings_t *s);
 #endif
 
 #endif /* HY_STORE_H */

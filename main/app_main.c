@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "hy/audio.h"
 #include "hy/board.h"
 #include "hy/actions.h"
 #include "hy/clock.h"
@@ -109,6 +110,7 @@ static void cmd_undo(const char *args) { (void)args; hy_ui_debug_undo(); }
 static void cmd_logs(const char *args) { (void)args; hy_ui_debug_logs(); }
 static void cmd_seed4(const char *args) { hy_ui_debug_seed4(args); }
 static void cmd_shot(const char *args) { (void)args; hy_ui_debug_shot(); }
+static void cmd_chime(const char *args) { (void)args; hy_audio_chime(); }
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -192,6 +194,17 @@ void app_main(void)
     ESP_LOGI(TAG, "hy_board_init: %s", esp_err_to_name(err));
 
     init_nvs();
+    hy_settings_t settings;
+    esp_err_t serr = hy_settings_load(&settings);
+    ESP_LOGI(TAG, "settings loaded: %s (sound %d, dnd %d, volume %u, brightness %u, snooze %u min)",
+             esp_err_to_name(serr), settings.sound, settings.dnd, (unsigned)settings.volume,
+             (unsigned)settings.brightness, (unsigned)settings.snooze_min);
+    if (err == ESP_OK) {
+        hy_board_set_brightness(settings.brightness);
+        esp_err_t aerr = hy_audio_init();
+        ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
+        hy_audio_set_volume(settings.volume);
+    }
     if (err == ESP_OK) {
         esp_err_t cerr = hy_clock_init(hy_board_i2c());
         ESP_LOGI(TAG, "hy_clock_init: %s, clock valid: %s", esp_err_to_name(cerr), hy_clock_valid() ? "yes" : "no");
@@ -214,6 +227,7 @@ void app_main(void)
     console_register("logs", cmd_logs);
     console_register("seed4", cmd_seed4);
     console_register("shot", cmd_shot);
+    console_register("chime", cmd_chime);
     console_start();
 #endif
 }
