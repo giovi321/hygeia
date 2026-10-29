@@ -84,6 +84,9 @@ esp_err_t hy_clock_alarm_set(int64_t utc);
    the alarm (it would otherwise match again the next day), so the caller re-arms after every true take.
    Call from the LVGL task. */
 bool      hy_clock_alarm_take(void);
+/* What the GPIO 13 ISR does, from a task: the power task saw INT low while the interrupt was masked for light-sleep
+   wake (the edge was not delivered). The next hy_clock_alarm_take returns true and clears AF. */
+void      hy_clock_alarm_note_int(void);
 
 const hy_clock_port_t *hy_clock_port(void);
 
