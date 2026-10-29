@@ -73,6 +73,7 @@ void      nav_host_init(void);                   /* creates the views in ui_cont
 void      nav_host_tick(void);                   /* root flags from the clock and the storage state */
 void      ui_show_view(hy_view_t v);             /* nav_host: hides others, runs the view's refresh */
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g);      /* applies hy_nav_gesture and its effect; WAKE = swallowed */
+hy_view_t ui_current_view(void);                  /* the view shown now */
 bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
 void      ui_nav_set_idle(bool idle);            /* stub until the idle module (Task 17) */
 void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2, and the idle timer is held */
@@ -90,6 +91,7 @@ const char *ui_gesture_name(hy_gesture_t g);
  * the dimmed screen is neither a tap nor still, so no widget acts on it. */
 void      input_init(lv_indev_t *indev);
 bool      ui_input_last_was_tap(void);           /* the stroke that produced the current click classified as TAP */
+bool      ui_input_last_was_double(void);        /* ... and it was the second tap of a double tap (300 ms, 40 px) */
 bool      ui_input_still(void);                  /* the current or last stroke never left the tap slop */
 void      ui_input_consume(void);                /* the current stroke belongs to a widget: no gesture */
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -107,6 +109,20 @@ lv_obj_t *pager_create(lv_obj_t *parent);        /* the pager root: three pages 
 lv_obj_t *pager_page(int idx);                   /* 0 Home, 1 Overview, 2 History */
 void      pager_show(int idx, bool animate);     /* 200 ms ease-out x offset */
 int       pager_index(void);
+
+/* overview.c, history.c: pager pages 1 and 2. Refresh runs from the snapshot only while the page is shown. */
+void overview_create(lv_obj_t *page);
+void overview_refresh(void);
+void overview_refresh_if_changed(void);  /* generation changed and the page is shown */
+void overview_timing(uint32_t *us);
+void history_create(lv_obj_t *page);
+void history_refresh(void);
+void history_refresh_if_changed(void);
+void history_show(void);                 /* the page became visible: recompute everything */
+void history_invalidate(void);           /* a log, medicine or zone changed: recompute everything on the next refresh */
+void history_toggle_range(void);         /* 7 <-> 30 days, redrawn from the LVGL loop */
+void history_tap(uint32_t med_id);       /* a TAP ended on a row (med_id) or on the page (0) */
+void history_timing(uint32_t *view_us, uint32_t *lvgl_us);
 
 /* storage_down.c */
 lv_obj_t *storage_down_create(lv_obj_t *parent);

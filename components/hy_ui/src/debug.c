@@ -23,7 +23,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY };
 typedef struct {
     int kind;
     char arg[24];
@@ -455,6 +455,39 @@ static void job_due(const char *arg)
     }
 }
 
+/* "history toggle|tap <code>|dbl <code>|perf": the range toggle and the row taps through the input layer.
+ * dbl sends two strokes 0 ms apart so the second one is a double tap by hy_gesture_double. */
+static void job_history(const char *arg)
+{
+    char cmd[8] = "", code[4] = "";
+    sscanf(arg, "%7s %3s", cmd, code);
+    uint32_t id = 0;
+    bool row = code[0] && home_med_id_by_code(code, &id);
+    if (strcmp(cmd, "toggle") == 0) {
+        history_toggle_range();
+    } else if (strcmp(cmd, "tap") == 0 || strcmp(cmd, "dbl") == 0) {
+        if (code[0] && !row) {
+            ESP_LOGW(TAG, "history: no active medicine with code \"%s\"", code);
+            return;
+        }
+        int n = strcmp(cmd, "dbl") == 0 ? 2 : 1;
+        for (int i = 0; i < n; i++) {
+            input_debug_stroke(240, 240, 242, 241, i ? 0 : 80);
+            history_tap(id);
+        }
+    } else if (strcmp(cmd, "perf") == 0) {
+        uint32_t v, l, o;
+        history_refresh();
+        history_timing(&v, &l);
+        overview_refresh();
+        overview_timing(&o);
+        ESP_LOGI(TAG, "history perf: marks %u us, lvgl %u us (no-op when unchanged); overview %u us", (unsigned)v,
+                 (unsigned)l, (unsigned)o);
+    } else {
+        ESP_LOGE(TAG, "usage: history <toggle|tap [code]|dbl [code]|perf>");
+    }
+}
+
 static void run_job(void *arg)
 {
     job_t *j = arg;
@@ -512,6 +545,9 @@ static void run_job(void *arg)
     case J_DUE:
         job_due(j->arg);
         break;
+    case J_HISTORY:
+        job_history(j->arg);
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -553,5 +589,6 @@ void hy_ui_debug_storefail(const char *arg) { post(J_STOREFAIL, arg); }
 void hy_ui_debug_idle(const char *arg) { post(J_IDLE, arg); }
 void hy_ui_debug_tapstroke(const char *code) { post(J_TAPSTROKE, code); }
 void hy_ui_debug_due(const char *arg) { post(J_DUE, arg); }
+void hy_ui_debug_history(const char *arg) { post(J_HISTORY, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

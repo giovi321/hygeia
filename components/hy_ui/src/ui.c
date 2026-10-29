@@ -27,6 +27,8 @@ static void async_refresh(void *arg)
     } else {
         home_refresh_if_changed();
     }
+    overview_refresh_if_changed();
+    history_refresh_if_changed();
     due_refresh();
     topbar_refresh();   /* a zone change moves the clock */
 }
@@ -38,6 +40,7 @@ static void event_cb(const hy_event_t *ev, void *ctx)
     if (ev->type == HY_EV_BATTERY_LOW || ev->type == HY_EV_BATTERY_CRITICAL) {
         return;
     }
+    history_invalidate();
     if (ev->type == HY_EV_MEDS_CHANGED) {
         s_rebuild_queued = true;
     }
@@ -54,6 +57,8 @@ static void tick_cb(lv_timer_t *t)
     nav_host_tick();
     topbar_refresh();
     home_refresh_if_changed();
+    overview_refresh_if_changed();
+    history_refresh_if_changed();
     due_refresh();
 }
 
@@ -63,6 +68,8 @@ static void first_tick(void *arg)
     (void)arg;
     hy_sched_run_tick();
     home_refresh_if_changed();
+    overview_refresh_if_changed();
+    history_refresh_if_changed();
     due_refresh();
 }
 

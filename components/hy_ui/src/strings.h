@@ -88,6 +88,8 @@
 #define HY_S_HI_ON_TIME    "on time"
 #define HY_S_HI_LATE       "late"
 #define HY_S_HI_MISSED     "missed"
+#define HY_S_HI_MONTHS     "JanFebMarAprMayJunJulAugSepOctNovDec" /* three letters each */
+#define HY_S_HI_TICK       "%d %.3s"                /* day, month name: "19 Oct" */
 #define HY_S_ADHERENCE     "Adherence %u%%"
 #define HY_S_ADHERENCE_NONE "Adherence " HY_S_DASH
 
