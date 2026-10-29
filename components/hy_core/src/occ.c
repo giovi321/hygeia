@@ -122,59 +122,18 @@ static int cmp_i64(const void *a, const void *b)
     return (x > y) - (x < y);
 }
 
-/* ---- TZ save / restore ---- */
-
-/* The previous TZ is saved in a fixed buffer (no allocation that could fail).
- * A previous TZ that does not fit is never overwritten: tz_enter returns false,
- * leaves TZ unchanged and the caller must not compute local times. Our own
- * zones are at most HY_TZ_LEN - 1 characters, so this only guards foreign TZs. */
-#define SAVED_TZ_LEN 64
-
-typedef struct {
-    bool had;
-    char value[SAVED_TZ_LEN];
-} saved_tz_t;
-
-/* tz_enter takes the process-wide TZ lock before saving the old TZ and keeps it on success;
- * tz_leave restores the old TZ and only then releases the lock. On failure tz_enter releases
- * the lock itself. */
-static bool tz_enter(saved_tz_t *s, const char *posix_tz)
-{
-    hy_tz_lock();
-    const char *cur = getenv("TZ");
-    s->had = cur != NULL;
-    s->value[0] = '\0';
-    if (cur) {
-        size_t n = strlen(cur);
-        if (n >= sizeof s->value) {
-            hy_tz_unlock();
-            return false;
-        }
-        memcpy(s->value, cur, n + 1);
-    }
-    setenv("TZ", posix_tz ? posix_tz : "UTC0", 1);
-    tzset();
-    return true;
-}
-
-static void tz_leave(const saved_tz_t *s)
-{
-    if (s->had) setenv("TZ", s->value, 1);
-    else unsetenv("TZ");
-    tzset();
-    hy_tz_unlock();
-}
+/* TZ save / restore: hy_tz_enter / hy_tz_leave from hy/tzlock.h. */
 
 /* Local wall-clock time of a UTC instant in posix_tz, as seconds since
  * 1970-01-01 00:00 of the local calendar. */
 static bool local_wall(int64_t utc, const char *posix_tz, int64_t *out)
 {
-    saved_tz_t saved;
-    if (!tz_enter(&saved, posix_tz)) return false;
+    hy_saved_tz_t saved;
+    if (!hy_tz_enter(&saved, posix_tz)) return false;
     time_t t = (time_t)utc;
     struct tm tm;
     bool ok = localtime_r(&t, &tm) != NULL;
-    tz_leave(&saved);
+    hy_tz_leave(&saved);
     if (!ok) return false;
     *out = days_from_civil(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday) * 86400 +
            tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec;
@@ -189,8 +148,8 @@ size_t hy_occurrences(const hy_med_t *m, int64_t from, int64_t to,
     if (!m || !out || max == 0 || to <= from) return 0;
     if (m->archived || m->type != HY_SCHED_FIXED || m->n_times == 0) return 0;
 
-    saved_tz_t saved;
-    if (!tz_enter(&saved, posix_tz)) return 0;
+    hy_saved_tz_t saved;
+    if (!hy_tz_enter(&saved, posix_tz)) return 0;
 
     size_t n = 0;
     int64_t first_day = local_day_of(from) - 1; /* safety margin */
@@ -219,7 +178,7 @@ size_t hy_occurrences(const hy_med_t *m, int64_t from, int64_t to,
         }
     }
 
-    tz_leave(&saved);
+    hy_tz_leave(&saved);
     return n;
 }
 
@@ -303,14 +262,16 @@ int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
 
 /* ---- slot states ---- */
 
-static bool slot_taken(const hy_med_t *m, int64_t slot, const char *posix_tz,
-                       const hy_log_t *logs, size_t n_logs)
+/* A log of the given status for this slot, or (west rule) for a slot with the same local
+ * date and HH:MM in the log's own zone. */
+static bool slot_logged(const hy_med_t *m, int64_t slot, const char *posix_tz,
+                        const hy_log_t *logs, size_t n_logs, hy_status_t status)
 {
     int64_t slot_wall = 0;
     bool have_wall = local_wall(slot, posix_tz, &slot_wall);
     for (size_t i = 0; i < n_logs; i++) {
         const hy_log_t *l = &logs[i];
-        if (l->med_id != m->id || l->status != HY_TAKEN || l->slot == 0) continue;
+        if (l->med_id != m->id || l->status != status || l->slot == 0) continue;
         if (l->slot == slot) return true;
         /* West rule: the log's slot, in the log's own zone, is the same local
          * date and HH:MM as this slot in posix_tz. Zone offsets differ by at
@@ -322,15 +283,6 @@ static bool slot_taken(const hy_med_t *m, int64_t slot, const char *posix_tz,
         if (have_wall && local_wall(l->slot, l->tz, &log_wall) &&
             log_wall / 60 == slot_wall / 60)
             return true;
-    }
-    return false;
-}
-
-static bool slot_skipped(const hy_med_t *m, int64_t slot, const hy_log_t *logs, size_t n_logs)
-{
-    for (size_t i = 0; i < n_logs; i++) {
-        const hy_log_t *l = &logs[i];
-        if (l->med_id == m->id && l->status == HY_SKIPPED && l->slot == slot) return true;
     }
     return false;
 }
@@ -374,8 +326,8 @@ hy_occ_state_t hy_occ_state(const hy_med_t *m, int64_t slot, int64_t next_slot, 
     if (!logs) n_logs = 0;
     if (!gaps) n_gaps = 0;
 
-    if (slot_taken(m, slot, posix_tz, logs, n_logs)) return HY_OCC_TAKEN;
-    if (slot_skipped(m, slot, logs, n_logs)) return HY_OCC_SKIPPED;
+    if (slot_logged(m, slot, posix_tz, logs, n_logs, HY_TAKEN)) return HY_OCC_TAKEN;
+    if (slot_logged(m, slot, posix_tz, logs, n_logs, HY_SKIPPED)) return HY_OCC_SKIPPED;
     if (slot_missed_logged(m, slot, logs, n_logs)) return HY_OCC_MISSED;
 
     int64_t base = state_base(slot, posix_tz, last_change);
@@ -431,12 +383,12 @@ void hy_format_local(int64_t ts, const char *posix_tz, char *buf, size_t len)
     if (!buf || len == 0) return;
     buf[0] = '\0';
 
-    saved_tz_t saved;
-    if (!tz_enter(&saved, posix_tz)) return;
+    hy_saved_tz_t saved;
+    if (!hy_tz_enter(&saved, posix_tz)) return;
     time_t t = (time_t)ts;
     struct tm tm;
     bool ok = localtime_r(&t, &tm) != NULL;
-    tz_leave(&saved);
+    hy_tz_leave(&saved);
     if (!ok || tm.tm_wday < 0 || tm.tm_wday > 6 || tm.tm_mon < 0 || tm.tm_mon > 11) return;
 
     snprintf(buf, len, "%s %02d %s %02d:%02d", wday[tm.tm_wday], tm.tm_mday, mon[tm.tm_mon],

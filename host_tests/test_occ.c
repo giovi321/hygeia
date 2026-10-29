@@ -394,6 +394,19 @@ static void test_west_no_repeat(void)
                           hy_occ_state(&m, ny, ny + DAY, ny, TZ_NY, logs, 1, NULL, 0, NULL));
 }
 
+/* A slot skipped in Zurich stays skipped after the zone change to New York (west rule). */
+static void test_west_skipped_stays_skipped(void)
+{
+    hy_med_t m;
+    hy_log_t logs[1];
+    make_med(&m, 8 * 60, 0xFFFF);
+    make_log(&logs[0], 1, m.id, T_2026_11_02_0700Z + 5 * MIN, TZ_ZURICH, HY_SKIPPED,
+             T_2026_11_02_0700Z);
+    int64_t ny = T_2026_11_02_1300Z;
+    TEST_ASSERT_EQUAL_INT(HY_OCC_SKIPPED,
+                          hy_occ_state(&m, ny, ny + DAY, ny + 3 * HOUR, TZ_NY, logs, 1, NULL, 0, NULL));
+}
+
 /* West rule negative: the New York 08:00 slot of the next day (2026-11-03) is not taken. */
 static void test_west_rule_other_day(void)
 {
@@ -561,6 +574,7 @@ int main(void)
     RUN_TEST(test_match_slot_uses_east_base);
     RUN_TEST(test_west_no_repeat);
     RUN_TEST(test_west_rule_other_day);
+    RUN_TEST(test_west_skipped_stays_skipped);
     RUN_TEST(test_min_interval);
     RUN_TEST(test_format_local_uses_log_tz);
     RUN_TEST(test_match_free_for_as_needed_and_archived);

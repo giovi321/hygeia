@@ -51,46 +51,14 @@ int32_t hy_date_add(int32_t date, int days)
 
 /* ---- local time ---- */
 
-#define SAVED_TZ_LEN 64
-typedef struct { bool had; char value[SAVED_TZ_LEN]; } saved_tz_t;
-
-/* Takes the process-wide TZ lock and keeps it on success; tz_leave restores TZ before the unlock.
- * A previous TZ that does not fit the buffer is never overwritten: returns false, lock released. */
-static bool tz_enter(saved_tz_t *s, const char *posix_tz)
-{
-    hy_tz_lock();
-    const char *cur = getenv("TZ");
-    s->had = cur != NULL;
-    s->value[0] = '\0';
-    if (cur) {
-        size_t n = strlen(cur);
-        if (n >= sizeof s->value) {
-            hy_tz_unlock();
-            return false;
-        }
-        memcpy(s->value, cur, n + 1);
-    }
-    setenv("TZ", posix_tz ? posix_tz : "UTC0", 1);
-    tzset();
-    return true;
-}
-
-static void tz_leave(const saved_tz_t *s)
-{
-    if (s->had) setenv("TZ", s->value, 1);
-    else unsetenv("TZ");
-    tzset();
-    hy_tz_unlock();
-}
-
 int32_t hy_local_date(int64_t ts, const char *posix_tz)
 {
-    saved_tz_t saved;
-    if (!tz_enter(&saved, posix_tz)) return 0;
+    hy_saved_tz_t saved;
+    if (!hy_tz_enter(&saved, posix_tz)) return 0;
     time_t t = (time_t)ts;
     struct tm tm;
     bool ok = localtime_r(&t, &tm) != NULL;
-    tz_leave(&saved);
+    hy_tz_leave(&saved);
     if (!ok) return 0;
     return (tm.tm_year + 1900) * 10000 + (tm.tm_mon + 1) * 100 + tm.tm_mday;
 }
@@ -202,7 +170,7 @@ void hy_tile_view(const hy_med_t *m, const hy_sched_in_t *in, const hy_sched_t *
         out->ring = HY_RING_MAX;
         for (size_t k = 0; in->snoozes && k < in->n_snoozes; k++) {
             const hy_snooze_t *z = &in->snoozes[k];
-            if (z->med_id == m->id && z->slot == prev && z->until > now) {
+            if (z->med_id == m->id && z->slot <= now && z->until > now) {
                 out->kind = HY_TILE_SNOOZED;
                 out->snoozed_until = z->until;
                 break;
@@ -217,6 +185,7 @@ void hy_tile_view(const hy_med_t *m, const hy_sched_in_t *in, const hy_sched_t *
     }
     if (!taken) {
         out->kind = HY_TILE_NO_DOSE;
+        out->ring = (prev && next && next > prev) ? frac(prev, next - prev, now) : 0;
         return;
     }
     out->kind = HY_TILE_SINCE;
@@ -225,14 +194,16 @@ void hy_tile_view(const hy_med_t *m, const hy_sched_in_t *in, const hy_sched_t *
 
 /* ---- today rows ---- */
 
-typedef struct { int64_t slot; size_t idx; } slot_ref_t;
+typedef struct { int64_t slot; uint16_t order; size_t idx; } slot_ref_t;
 
 static bool ref_before(const slot_ref_t *x, const slot_ref_t *y)
 {
-    return x->slot != y->slot ? x->slot < y->slot : x->idx < y->idx;
+    if (x->slot != y->slot) return x->slot < y->slot;
+    if (x->order != y->order) return x->order < y->order;
+    return x->idx < y->idx;
 }
 
-/* insertion sort: slot, then position in the medicine list */
+/* insertion sort: slot, then medicine order, then position in the list (as the scheduler orders) */
 static void sort_refs(slot_ref_t *r, size_t n)
 {
     for (size_t i = 1; i < n; i++) {
@@ -264,6 +235,7 @@ size_t hy_today_rows(const hy_sched_in_t *in, const hy_sched_t *s, hy_today_row_
             size_t n = day_slots(m, today, tz, sl, DAY_SLOTS);
             for (size_t k = 0; k < n && nr < ROW_SCRATCH; k++) {
                 refs[nr].slot = sl[k];
+                refs[nr].order = m->order;
                 refs[nr].idx = i;
                 nr++;
             }
@@ -385,9 +357,9 @@ void hy_adherence(uint32_t med_id, int32_t first_date, int days, const hy_sched_
             for (size_t k = 0; k < n; k++) {
                 hy_occ_state_t st = state_of(m, sl[k], in, s);
                 if (st == HY_OCC_TAKEN) {
-                    out->taken++;
-                    out->resolved++;
-                } else if (st == HY_OCC_SKIPPED || st == HY_OCC_MISSED) {
+                    if (out->taken < UINT16_MAX) out->taken++;
+                    if (out->resolved < UINT16_MAX) out->resolved++;
+                } else if ((st == HY_OCC_SKIPPED || st == HY_OCC_MISSED) && out->resolved < UINT16_MAX) {
                     out->resolved++;
                 }
             }
