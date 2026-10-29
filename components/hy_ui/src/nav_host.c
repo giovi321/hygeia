@@ -173,8 +173,9 @@ void ui_nav_log(void)
     for (uint8_t i = 0; i < s_nav.depth && o < sizeof b; i++) {
         o += (size_t)snprintf(b + o, sizeof b - o, "%s%s", i ? " > " : "", view_names[s_nav.stack[i]]);
     }
-    if (o < sizeof b && (s_nav.idle || s_nav.due)) {
-        snprintf(b + o, sizeof b - o, "%s%s", s_nav.idle ? " [idle]" : "", s_nav.due ? " [due]" : "");
+    if (o < sizeof b && (s_nav.idle || s_nav.due || s_nav.poweroff)) {
+        snprintf(b + o, sizeof b - o, "%s%s%s", s_nav.idle ? " [idle]" : "", s_nav.due ? " [due]" : "",
+                 s_nav.poweroff ? " [poweroff]" : "");
     }
     ESP_LOGI(TAG, "%s", b);
 }
@@ -186,6 +187,13 @@ static void show_top(void)
 
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
 {
+    if (s_nav.poweroff && s_nav.idle) {
+        /* a countdown with the idle clock toggled on by PWR short: the next stroke wakes (rule 0 would swallow it) */
+        s_nav.idle = false;
+        fx_wake();
+        ui_nav_log();
+        return HY_FX_WAKE;
+    }
     hy_nav_fx_t fx = hy_nav_gesture(&s_nav, g);
     switch (fx) {
     case HY_FX_WAKE:
@@ -226,6 +234,11 @@ void ui_nav_set_due(bool due)
 {
     s_nav.due = due;
     topbar_set_grab(!due && s_shown == HY_V_HOME);   /* pull-down is ignored while the card is up */
+}
+
+void ui_nav_set_poweroff(bool on)
+{
+    s_nav.poweroff = on;
 }
 
 void ui_nav_push(hy_view_t v)

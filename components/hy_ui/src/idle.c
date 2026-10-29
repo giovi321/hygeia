@@ -23,6 +23,7 @@ static const char *TAG = "idle";
 
 static lv_obj_t *s_ov, *s_grp, *s_clock, *s_next, *s_status;
 static bool s_active;
+static bool s_hold;     /* the power-off overlay or the critical countdown shows: no idle clock on the timer */
 static int64_t s_minute = -1;
 static int32_t s_bri;   /* the brightness the idle animation drives */
 
@@ -96,6 +97,42 @@ static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
         }
     }
     return best;
+}
+
+/* "Next: A at 14:00" for the power-off confirmation; false when the clock is invalid or nothing is scheduled */
+bool idle_next_text(char *out, size_t len)
+{
+    const hy_clock_port_t *ck = hy_clock_port();
+    if (!ck->valid(NULL)) {
+        return false;
+    }
+    const hy_snapshot_t *sn = hy_sched_snapshot();
+    const char *code = "";
+    int64_t nx = sn->tracking && hy_sched_generation() ? next_slot(sn, &code) : 0;
+    if (!nx) {
+        return false;
+    }
+    char tz[HY_TZ_LEN], hhmm[8];
+    hy_clock_tz_copy(tz, sizeof tz);
+    ui_fmt_hhmm(nx, tz, hhmm, sizeof hhmm);
+    snprintf(out, len, HY_S_IDLE_NEXT, code, hhmm);
+    return true;
+}
+
+void idle_set_hold(bool hold)
+{
+    s_hold = hold;
+}
+
+/* PWR short with no overlay. Stub until the screen state machine is wired: toggles the idle clock. */
+void screen_pwr_short(void)
+{
+    ESP_LOGI(TAG, "pwr short: %s", s_active ? "wake" : "idle clock");
+    if (s_active) {
+        idle_wake();
+    } else {
+        idle_enter();
+    }
 }
 
 void idle_status_refresh(void)
@@ -194,7 +231,7 @@ static void tick_cb(lv_timer_t *t)
         }
         return;
     }
-    if (due_visible() || ui_nav_idle()) {
+    if (due_visible() || ui_nav_idle() || s_hold) {
         return;
     }
     if (lv_display_get_inactive_time(NULL) >= IDLE_MS) {

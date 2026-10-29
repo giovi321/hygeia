@@ -84,6 +84,7 @@ static void battery_cb(uint32_t flags)
         ev.type = HY_EV_BATTERY_CRITICAL;
         ESP_LOGI(TAG, "HY_EV_BATTERY_CRITICAL value=%d", (int)ev.value);
         hy_ev_publish(&ev);
+        poweroff_countdown_show();
     }
 }
 
@@ -455,11 +456,15 @@ esp_err_t hy_ui_start(void)
     /* input, the 1 s tick, the first evaluation (a due card and its chime) and the idle timer start with the content */
     nav_host_warm_start();   /* the hidden views, one every 250 ms in the LVGL task */
     idle_create();
+    poweroff_create();
     input_init(hy_board_indev());
     lv_timer_create(tick_cb, 1000, NULL);
     lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */
     int sub = hy_ev_subscribe(event_cb, NULL);
-    static const hy_power_ui_t power_ui = {.battery = battery_cb};
+    static const hy_power_ui_t power_ui = {.battery = battery_cb,
+                                           .pwr_short = poweroff_pwr_short,
+                                           .pwr_long = poweroff_pwr_long,
+                                           .usb = poweroff_usb};
     hy_power_set_ui(&power_ui);
     hy_board_unlock();
 

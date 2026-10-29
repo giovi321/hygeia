@@ -185,7 +185,8 @@ void ui_battery_toast(int pct)
 
 void ui_battery_toast_flush(void)
 {
-    if (s_batt_pending < 0 || s_mode == MODE_LOGGED || idle_active()) {
+    if (s_batt_pending < 0 || s_mode == MODE_LOGGED || idle_active() || poweroff_visible() ||
+        poweroff_countdown_visible()) {
         return;
     }
     char b[48];

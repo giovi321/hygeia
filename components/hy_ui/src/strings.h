@@ -171,4 +171,14 @@
 #define HY_S_IDLE_SET_TIME HY_S_TIME_TITLE
 #define HY_S_IDLE_STATUS   "%s" HY_S_DOT "Wi-Fi off"   /* battery text */
 
+/* ---- power-off confirmation and the critical-battery countdown ---- */
+#define HY_S_CANCEL        "Cancel"
+#define HY_S_POWEROFF_TITLE  "Power off"
+#define HY_S_POWEROFF_WARN   "Reminders will not fire while off"
+#define HY_S_POWEROFF_SLIDE  "Slide to power off " HY_S_RSAQ
+#define HY_S_POWEROFF_FAILED "Power off failed"
+#define HY_S_CRIT_TITLE     "Battery critical"
+#define HY_S_CRIT_LINE      "Powering off in %u s"     /* seconds left */
+#define HY_S_CRIT_HINT      "Plug in USB to keep it on"
+
 #endif /* HY_UI_STRINGS_H */

@@ -24,7 +24,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF };
 typedef struct {
     int kind;
     char arg[96];
@@ -762,6 +762,9 @@ static void run_job(void *arg)
     case J_GAPS:
         job_gaps();
         break;
+    case J_POWEROFF:
+        poweroff_debug(j->arg);
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -811,5 +814,6 @@ void hy_ui_debug_qs(const char *arg) { post(J_QS, arg); }
 void hy_ui_debug_settz(const char *iana) { post(J_SETTZ, iana); }
 void hy_ui_debug_settings(void) { post(J_SETTINGS, NULL); }
 void hy_ui_debug_gaps(void) { post(J_GAPS, NULL); }
+void hy_ui_debug_poweroff(const char *arg) { post(J_POWEROFF, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */
