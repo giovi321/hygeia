@@ -36,3 +36,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run host tests
         run: make -C host_tests test
+      - name: Check the time-zone table is current
+        run: python3 tools/gen_tzdb.py third_party/posix_tz_db/zones.csv /tmp/t.c && diff -q /tmp/t.c components/hy_core/src/tzdb_data.c

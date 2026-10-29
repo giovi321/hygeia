@@ -11,6 +11,8 @@ idf_component_register(
         "src/sched.c"
         "src/summary.c"
         "src/nav.c"
+        "src/tzdb.c"
+        "src/tzdb_data.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
