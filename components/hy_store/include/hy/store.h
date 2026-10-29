@@ -7,7 +7,7 @@
 
 /*
  * stdio-based persistence. base_dir must exist ("/data" on device, a temp
- * directory on host). Layout: <base>/meds.json and <base>/log/YYYY-MM.jsonl
+ * directory on host). Layout: <base>/meds.json, <base>/gaps.jsonl and <base>/log/YYYY-MM.jsonl
  * (UTC month of ts). Open creates <base>/log, removes stray *.tmp files,
  * resets the skipped-line counter and sets the next log id to the highest id
  * found in any month file + 1 (ids are global and monotonic). The month files are
@@ -30,6 +30,10 @@
  * - delete_log searches only the month of ts. Not found: HY_E_NOT_FOUND.
  * - query_log covers [from, to), filters by med_id (0 = all), returns entries
  *   ascending by ts (ties by id), at most max, keeping the earliest ones.
+ * - append_gap appends one fsync'd line to <base>/gaps.jsonl (append-only, in end order). When
+ *   the file passes 1100 lines after an append it is rewritten atomically (temp, fsync,
+ *   rename) keeping the newest 1000. query_gaps returns the gaps overlapping [from, to),
+ *   ascending by start, at most max (the earliest), with their reasons (reasons may be NULL).
  * - Corrupt or over-long lines are skipped on every read path and counted.
  */
 hy_err_t hy_store_open(const char *base_dir);

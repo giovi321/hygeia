@@ -4,6 +4,7 @@
 #include <string.h>
 #include "cJSON.h"
 #include "hy/codec.h"
+#include "hy/gap.h"
 #include "hy/med.h"
 
 #define MAX_SAFE_INT 999999999999999.0 /* 15 digits: cJSON prints numbers with %1.15g, so these round-trip exactly */
@@ -72,6 +73,55 @@ static hy_err_t get_enum(const cJSON *obj, const char *name, const char *const *
 }
 
 #define TRY(x) do { hy_err_t e_ = (x); if (e_ != HY_OK) return e_; } while (0)
+
+/* ---- gap line ---- */
+
+static const char *const GAP_REASONS[] = { "off", "lost", "clock", "jump" };
+
+int hy_gap_to_jsonl(const hy_gap_t *g, hy_gap_reason_t r, char *buf, size_t len)
+{
+    if (!g || !buf || len == 0 || (unsigned)r > (unsigned)HY_GAP_JUMP) return -1;
+    if (g->end <= g->start || g->start < -MAX_SAFE_I64 || g->end > MAX_SAFE_I64) return -1;
+    cJSON *o = cJSON_CreateObject();
+    if (!o) return -1;
+    bool ok = cJSON_AddNumberToObject(o, "s", (double)g->start) &&
+              cJSON_AddNumberToObject(o, "e", (double)g->end) &&
+              cJSON_AddStringToObject(o, "r", GAP_REASONS[r]);
+    char *s = ok ? cJSON_PrintUnformatted(o) : NULL;
+    cJSON_Delete(o);
+    if (!s) return -1;
+    size_t n = strlen(s);
+    int ret = -1;
+    if (n < len && n <= 0x7FFFFFFF) {
+        memcpy(buf, s, n + 1);
+        ret = (int)n;
+    }
+    free(s);
+    return ret;
+}
+
+hy_err_t hy_gap_from_jsonl(const char *line, hy_gap_t *g, hy_gap_reason_t *r)
+{
+    if (!line || !g || !r) return HY_E_INVALID;
+    cJSON *o = cJSON_ParseWithOpts(line, NULL, true);
+    if (!o) return HY_E_INVALID;
+    hy_err_t res = HY_E_INVALID;
+    if (cJSON_IsObject(o)) {
+        double s = 0, e = 0;
+        int en = 0;
+        res = get_int(o, "s", -MAX_SAFE_INT, MAX_SAFE_INT, true, &s);
+        if (res == HY_OK) res = get_int(o, "e", -MAX_SAFE_INT, MAX_SAFE_INT, true, &e);
+        if (res == HY_OK) res = get_enum(o, "r", GAP_REASONS, 4, true, &en);
+        if (res == HY_OK && !(e > s)) res = HY_E_INVALID;
+        if (res == HY_OK) {
+            g->start = (int64_t)s;
+            g->end = (int64_t)e;
+            *r = (hy_gap_reason_t)en;
+        }
+    }
+    cJSON_Delete(o);
+    return res;
+}
 
 /* ---- log line ---- */
 

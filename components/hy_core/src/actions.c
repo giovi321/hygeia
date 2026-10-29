@@ -1,6 +1,7 @@
 #include <string.h>
 #include "hy/actions.h"
 #include "hy/events.h"
+#include "hy/gap.h"
 #include "hy/med.h"
 #include "hy/occ.h"
 
@@ -494,5 +495,17 @@ hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts)
     if (store->delete_log(store_ctx, log_id, ts) != HY_OK) return HY_E_IO;
     undo_forget(log_id);
     publish(HY_EV_LOG_EDITED, ts, 0, log_id, 0);
+    return HY_OK;
+}
+
+hy_err_t hy_act_record_gap(const hy_gap_t *g, hy_gap_reason_t reason)
+{
+    if (!inited || !g || !store->append_gap || g->end <= g->start) return HY_E_INVALID;
+    if ((unsigned)reason > (unsigned)HY_GAP_JUMP) return HY_E_INVALID;
+    if (store->append_gap(store_ctx, g, (uint8_t)reason) != HY_OK) return HY_E_IO;
+    hy_event_t ev;
+    ev.type = HY_EV_UNTRACKED; ev.ts = g->end; ev.med_id = 0; ev.log_id = 0;
+    ev.slot = g->start; ev.value = (int32_t)reason;
+    hy_ev_publish(&ev);
     return HY_OK;
 }
