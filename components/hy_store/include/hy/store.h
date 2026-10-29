@@ -45,7 +45,8 @@ esp_err_t hy_store_mount(void);
  * load: missing keys give defaults, then clamps, and refreshes the RAM copy. save: writes the given values as is. */
 esp_err_t hy_settings_load(hy_settings_t *s);
 esp_err_t hy_settings_save(const hy_settings_t *s);
-/* RAM copy loaded at boot (defaults until hy_settings_load runs). Never NULL. */
+/* hy_settings() and hy_settings_update() share one unlocked RAM copy: call them from the LVGL task only.
+ * RAM copy loaded at boot (defaults until hy_settings_load runs). Never NULL. */
 const hy_settings_t *hy_settings(void);
 /* Clamps, saves, and updates the RAM copy (the RAM copy is updated even when the save fails). */
 esp_err_t hy_settings_update(const hy_settings_t *s);
