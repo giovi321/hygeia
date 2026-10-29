@@ -16,6 +16,9 @@ esp_err_t hy_board_init(void);
 
 lv_display_t *hy_board_display(void);
 
+/* The touch input device (long-press time HY_LONG_PRESS_MS); NULL before a successful init */
+lv_indev_t *hy_board_indev(void);
+
 /* Shared I2C master bus (touch, RTC, PMU) */
 i2c_master_bus_handle_t hy_board_i2c(void);
 

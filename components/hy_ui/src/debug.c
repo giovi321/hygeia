@@ -23,7 +23,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL };
 typedef struct {
     int kind;
     char arg[24];
@@ -346,6 +346,46 @@ static void emit_line(const uint8_t *p, size_t n, uint32_t *crc)
     fputs(out, stdout);
 }
 
+/* The top bar and the overlays live on lv_layer_top, which a snapshot of the screen leaves out: blend a
+ * snapshot of the top layer over the RGB565 screen image. */
+static void overlay_top_layer(lv_draw_buf_t *dst)
+{
+    const uint32_t w = HY_SCREEN, h = HY_SCREEN;
+    const size_t size = (size_t)w * h * 4;
+    uint8_t *mem = heap_caps_aligned_alloc(64, size, MALLOC_CAP_SPIRAM);
+    if (!mem) {
+        ESP_LOGW(TAG, "shot: no PSRAM for the top layer, left out");
+        return;
+    }
+    lv_draw_buf_t top;
+    lv_draw_buf_init(&top, w, h, LV_COLOR_FORMAT_ARGB8888, w * 4, mem, size);
+    if (lv_snapshot_take_to_draw_buf(lv_layer_top(), LV_COLOR_FORMAT_ARGB8888, &top) != LV_RESULT_OK) {
+        ESP_LOGW(TAG, "shot: top layer snapshot failed, left out");
+        heap_caps_free(mem);
+        return;
+    }
+    for (uint32_t y = 0; y < h; y++) {
+        const uint8_t *src = top.data + (size_t)y * top.header.stride;
+        uint8_t *row = dst->data + (size_t)y * dst->header.stride;
+        for (uint32_t x = 0; x < w; x++) {
+            const uint8_t *p = src + x * 4;   /* B G R A */
+            uint32_t a = p[3];
+            if (!a) {
+                continue;
+            }
+            uint16_t v = (uint16_t)(row[x * 2] | (row[x * 2 + 1] << 8));
+            uint32_t r = ((v >> 11) & 0x1F) * 255 / 31, g = ((v >> 5) & 0x3F) * 255 / 63, b = (v & 0x1F) * 255 / 31;
+            r = (p[2] * a + r * (255 - a)) / 255;
+            g = (p[1] * a + g * (255 - a)) / 255;
+            b = (p[0] * a + b * (255 - a)) / 255;
+            v = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+            row[x * 2] = (uint8_t)v;
+            row[x * 2 + 1] = (uint8_t)(v >> 8);
+        }
+    }
+    heap_caps_free(mem);
+}
+
 static void job_shot(void)
 {
     const uint32_t w = HY_SCREEN, h = HY_SCREEN;
@@ -363,6 +403,7 @@ static void job_shot(void)
         heap_caps_free(mem);
         return;
     }
+    overlay_top_layer(&db);
     uint32_t stride = db.header.stride;
     uint32_t crc = 0;
     printf("\nSHOT_BEGIN %u %u RGB565\n", (unsigned)w, (unsigned)h);
@@ -376,6 +417,19 @@ static void job_shot(void)
     printf("SHOT_END %08x\n", (unsigned)crc);
     fflush(stdout);
     heap_caps_free(mem);
+}
+
+/* "gesture <name>": the same path as a classified touch stroke */
+static void job_gesture(const char *name)
+{
+    for (int g = HY_G_TAP; g <= HY_G_EDGE_RIGHT; g++) {
+        if (strcmp(name, ui_gesture_name((hy_gesture_t)g)) == 0) {
+            ESP_LOGI(TAG, "gesture %s", name);
+            ui_nav_gesture((hy_gesture_t)g);
+            return;
+        }
+    }
+    ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright>");
 }
 
 static void run_job(void *arg)
@@ -412,6 +466,15 @@ static void run_job(void *arg)
     case J_PERF:
         job_perf();
         break;
+    case J_GESTURE:
+        job_gesture(j->arg);
+        break;
+    case J_NAV:
+        ui_nav_log();
+        break;
+    case J_STOREFAIL:
+        ui_set_storage_down(strcmp(j->arg, "off") != 0);
+        break;
     }
     free(j);
 }
@@ -444,5 +507,8 @@ void hy_ui_debug_seed4(const char *arg) { post(J_SEED4, arg); }
 void hy_ui_debug_shot(void) { post(J_SHOT, NULL); }
 void hy_ui_debug_remindtest(const char *arg) { post(J_REMINDTEST, arg); }
 void hy_ui_debug_perf(void) { post(J_PERF, NULL); }
+void hy_ui_debug_gesture(const char *name) { post(J_GESTURE, name); }
+void hy_ui_debug_nav(void) { post(J_NAV, NULL); }
+void hy_ui_debug_storefail(const char *arg) { post(J_STOREFAIL, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

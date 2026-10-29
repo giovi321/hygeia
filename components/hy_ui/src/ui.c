@@ -11,7 +11,7 @@
 
 static const char *TAG = "ui";
 
-static lv_obj_t *s_screen;
+static lv_obj_t *s_screen, *s_content;
 static bool s_refresh_queued, s_rebuild_queued;
 
 static void async_refresh(void *arg)
@@ -25,6 +25,7 @@ static void async_refresh(void *arg)
     } else {
         home_refresh_if_changed();
     }
+    topbar_refresh();   /* a zone change moves the clock */
 }
 
 /* Events arrive in the LVGL task (actions run there); defer the redraw out of the action's call stack. */
@@ -47,7 +48,14 @@ static void tick_cb(lv_timer_t *t)
 {
     (void)t;
     hy_sched_run_tick();
+    nav_host_tick();
+    topbar_refresh();
     home_refresh_if_changed();
+}
+
+lv_obj_t *ui_content(void)
+{
+    return s_content;
 }
 
 void ui_log_hwm(const char *what)
@@ -82,9 +90,19 @@ esp_err_t hy_ui_start(void)
     lv_obj_set_size(s_screen, HY_SCREEN, HY_SCREEN);
     lv_obj_set_style_bg_color(s_screen, lv_color_hex(HY_C_BG), 0);
     lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
-    lv_obj_set_scrollable(s_screen, false);
-    home_create(s_screen);
+    lv_obj_set_scrollable(s_screen, false);   /* stays clickable: every touch reaches the input layer */
+
+    s_content = lv_obj_create(s_screen);
+    lv_obj_remove_style_all(s_content);
+    lv_obj_set_size(s_content, HY_SCREEN, HY_CONTENT_H);
+    lv_obj_set_pos(s_content, 0, HY_BAR_H);
+    lv_obj_set_scrollable(s_content, false);
+    lv_obj_set_clickable(s_content, false);
+
+    topbar_create();
+    nav_host_init();
     toast_create(s_screen);
+    input_init(hy_board_indev());
     lv_screen_load(s_screen);
     lv_timer_create(tick_cb, 1000, NULL);
     int sub = hy_ev_subscribe(event_cb, NULL);
@@ -94,6 +112,6 @@ esp_err_t hy_ui_start(void)
         ESP_LOGE(TAG, "event subscribe failed");
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "home screen up");
+    ESP_LOGI(TAG, "screen shell up");
     return ESP_OK;
 }
