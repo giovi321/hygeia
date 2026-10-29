@@ -125,13 +125,17 @@ static void open(int mode)
     lv_timer_resume(s_timer);
 }
 
-void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id)
+/* shared by the logged and the skipped toast: Undo, the scrim, the 5 s window */
+static void show_undoable(uint32_t log_id, uint32_t icon_color, const char *glyph)
 {
     s_log_id = log_id;
-    lv_obj_set_style_bg_color(s_icon, lv_color_hex(HY_C_OK), 0);
-    lv_obj_set_hidden(s_check, false);
-    lv_obj_set_hidden(s_bang, true);
-    lv_label_set_text_fmt(s_text, HY_S_LOGGED, code, hhmm);
+    lv_obj_set_style_bg_color(s_icon, lv_color_hex(icon_color), 0);
+    lv_obj_set_hidden(s_check, glyph != NULL);
+    lv_obj_set_hidden(s_bang, glyph == NULL);
+    if (glyph) {
+        lv_label_set_text(s_bang, glyph);
+        lv_obj_center(s_bang);
+    }
     lv_obj_set_width(s_text, HY_TOAST_W - 22 - ICON - 16 - UNDO_W);
     lv_obj_align(s_text, LV_ALIGN_LEFT_MID, 22 + ICON + 16, 0);
     lv_label_set_text_fmt(s_undo_lbl, HY_S_UNDO, (unsigned)HY_UNDO_WINDOW_S);
@@ -141,11 +145,25 @@ void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id)
     open(MODE_LOGGED);
 }
 
+void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id)
+{
+    lv_label_set_text_fmt(s_text, HY_S_LOGGED, code, hhmm);
+    show_undoable(log_id, HY_C_OK, NULL);
+}
+
+void toast_show_skipped(const char *code, const char *hhmm, uint32_t log_id)
+{
+    lv_label_set_text_fmt(s_text, HY_S_SKIPPED, code, hhmm);
+    show_undoable(log_id, HY_C_TEXT2, HY_S_RSAQ);
+}
+
 void toast_show_info(const char *text)
 {
     lv_obj_set_style_bg_color(s_icon, lv_color_hex(HY_C_AMBER), 0);
     lv_obj_set_hidden(s_check, true);
     lv_obj_set_hidden(s_bang, false);
+    lv_label_set_text(s_bang, HY_S_TOAST_BANG);
+    lv_obj_center(s_bang);
     lv_label_set_text(s_text, text);
     lv_obj_set_width(s_text, HY_TOAST_W - 22 - ICON - 16 - 22);
     lv_obj_align(s_text, LV_ALIGN_LEFT_MID, 22 + ICON + 16, 0);

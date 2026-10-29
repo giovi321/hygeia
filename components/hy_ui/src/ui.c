@@ -27,6 +27,7 @@ static void async_refresh(void *arg)
     } else {
         home_refresh_if_changed();
     }
+    due_refresh();
     topbar_refresh();   /* a zone change moves the clock */
 }
 
@@ -53,6 +54,7 @@ static void tick_cb(lv_timer_t *t)
     nav_host_tick();
     topbar_refresh();
     home_refresh_if_changed();
+    due_refresh();
 }
 
 /* The first snapshot, as soon as the LVGL task runs; the tiles stay blank until then */
@@ -61,6 +63,7 @@ static void first_tick(void *arg)
     (void)arg;
     hy_sched_run_tick();
     home_refresh_if_changed();
+    due_refresh();
 }
 
 lv_obj_t *ui_content(void)

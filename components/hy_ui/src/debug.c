@@ -23,7 +23,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE };
 typedef struct {
     int kind;
     char arg[24];
@@ -437,6 +437,24 @@ static void job_gesture(const char *name)
     ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright>");
 }
 
+/* "due slide|skip|snooze|next|flash": the same functions the knob, the Skip tap and the swipes call */
+static void job_due(const char *arg)
+{
+    if (strcmp(arg, "slide") == 0) {
+        due_slide_complete();
+    } else if (strcmp(arg, "skip") == 0) {
+        due_skip();
+    } else if (strcmp(arg, "snooze") == 0) {
+        due_snooze();
+    } else if (strcmp(arg, "next") == 0) {
+        due_next();
+    } else if (strcmp(arg, "flash") == 0) {
+        due_flash_debug();
+    } else {
+        ESP_LOGE(TAG, "usage: due <slide|skip|snooze|next|flash>");
+    }
+}
+
 static void run_job(void *arg)
 {
     job_t *j = arg;
@@ -491,6 +509,9 @@ static void run_job(void *arg)
         home_tile_click(id);
         break;
     }
+    case J_DUE:
+        job_due(j->arg);
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -531,5 +552,6 @@ void hy_ui_debug_nav(void) { post(J_NAV, NULL); }
 void hy_ui_debug_storefail(const char *arg) { post(J_STOREFAIL, arg); }
 void hy_ui_debug_idle(const char *arg) { post(J_IDLE, arg); }
 void hy_ui_debug_tapstroke(const char *code) { post(J_TAPSTROKE, code); }
+void hy_ui_debug_due(const char *arg) { post(J_DUE, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

@@ -468,7 +468,7 @@ void home_create(lv_obj_t *page)
 
 /* ---- tapping ---- */
 
-static const char *log_error_text(hy_err_t err)
+const char *ui_err_text(hy_err_t err)
 {
     switch (err) {
     case HY_E_CLOCK:     return HY_S_ERR_CLOCK;
@@ -527,6 +527,6 @@ void home_tap_med(uint32_t med_id)
         toast_show_logged(code, hhmm, log_id);
         ui_log_hwm("log");
     } else {
-        toast_show_info(log_error_text(err));
+        toast_show_info(ui_err_text(err));
     }
 }
