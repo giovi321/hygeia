@@ -133,6 +133,9 @@ static void cmd_shot(const char *args) { (void)args; hy_ui_debug_shot(); }
 static void cmd_chime(const char *args) { (void)args; hy_audio_chime(); }
 static void cmd_remindtest(const char *args) { hy_ui_debug_remindtest(args); }
 static void cmd_perf(const char *args) { (void)args; hy_ui_debug_perf(); }
+static void cmd_gesture(const char *args) { hy_ui_debug_gesture(args); }
+static void cmd_nav(const char *args) { (void)args; hy_ui_debug_nav(); }
+static void cmd_storefail(const char *args) { hy_ui_debug_storefail(args); }
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -178,11 +181,13 @@ static void init_storage(void)
     esp_err_t err = hy_store_mount();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storage unavailable, no persistence: %s", esp_err_to_name(err));
+        hy_ui_set_storage_ok(false);
         return;
     }
     hy_err_t oerr = hy_store_open("/data");
     ESP_LOGI(TAG, "hy_store_open: %s", hy_err_str(oerr));
     if (oerr != HY_OK) {
+        hy_ui_set_storage_ok(false);
         return;
     }
     struct stat st;
@@ -255,6 +260,9 @@ void app_main(void)
     console_register("chime", cmd_chime);
     console_register("remindtest", cmd_remindtest);
     console_register("perf", cmd_perf);
+    console_register("gesture", cmd_gesture);
+    console_register("nav", cmd_nav);
+    console_register("storefail", cmd_storefail);
     console_start();
 #endif
 }

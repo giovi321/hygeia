@@ -5,6 +5,7 @@
  * its 2-pixel area rounder is re-implemented here (rounder_cb). */
 
 #include "hy/board.h"
+#include "hy/nav.h"
 #include "hy/power.h"
 
 #include <inttypes.h>
@@ -283,6 +284,7 @@ static esp_err_t board_init_once(void)
         return ESP_FAIL;
     }
     lv_indev_add_event_cb(s_indev, touch_cb, LV_EVENT_PRESSED, NULL);
+    lv_indev_set_long_press_time(s_indev, HY_LONG_PRESS_MS);
 
     err = esp_lv_adapter_start();
     if (err != ESP_OK) {
@@ -302,6 +304,11 @@ static esp_err_t board_init_once(void)
 lv_display_t *hy_board_display(void)
 {
     return s_ready ? s_disp : NULL;
+}
+
+lv_indev_t *hy_board_indev(void)
+{
+    return s_ready ? s_indev : NULL;
 }
 
 i2c_master_bus_handle_t hy_board_i2c(void)

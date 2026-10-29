@@ -31,7 +31,7 @@ typedef struct {
 
 static tile_t s_tiles[HY_MAX_MEDS];
 static size_t s_ntiles;
-static lv_obj_t *s_grid, *s_time, *s_batt;
+static lv_obj_t *s_grid;
 static uint32_t s_gen_seen;
 static hy_log_t *s_logs;   /* LOG_MAX entries, PSRAM: the as-needed too-soon check only */
 
@@ -41,30 +41,29 @@ static bool s_pending;
 
 /* ---- helpers ---- */
 
-/* Duration as "2 h 14 m"; the spaces inside a number-unit pair are no-break spaces (U+00A0) so a
- * wrapped toast never separates "4" from "h". Under a minute gives "<1 m". */
-#define NB " "
+/* Duration as "2 h 14 m"; strings.h joins each number and unit with a no-break space so a wrapped toast never
+ * separates "4" from "h". Under a minute gives "<1 m". */
 static void fmt_dur(int64_t min, char *buf, size_t len)
 {
     if (min < 1) {
-        snprintf(buf, len, "<1" NB "m");
+        snprintf(buf, len, HY_S_DUR_LT1M);
         return;
     }
     int d = (int)(min / 1440), h = (int)((min % 1440) / 60), m = (int)(min % 60);
     if (d > 0) {
         if (h > 0) {
-            snprintf(buf, len, "%d" NB "d %d" NB "h", d, h);
+            snprintf(buf, len, HY_S_DUR_DH, d, h);
         } else {
-            snprintf(buf, len, "%d" NB "d", d);
+            snprintf(buf, len, HY_S_DUR_D, d);
         }
     } else if (h > 0) {
         if (m > 0) {
-            snprintf(buf, len, "%d" NB "h %d" NB "m", h, m);
+            snprintf(buf, len, HY_S_DUR_HM, h, m);
         } else {
-            snprintf(buf, len, "%d" NB "h", h);
+            snprintf(buf, len, HY_S_DUR_H, h);
         }
     } else {
-        snprintf(buf, len, "%d" NB "m", m);
+        snprintf(buf, len, HY_S_DUR_M, m);
     }
 }
 
@@ -120,9 +119,6 @@ static int64_t as_needed_from(const hy_med_t *m, int64_t now)
     return now - span;
 }
 
-/* Tile status text; local define until the strings live in strings.h */
-#define STR_TILE_SNOOZED "Snoozed \xC2\xB7 %s"
-
 typedef struct {
     int32_t ring;      /* 0..RING_MAX */
     bool due;          /* outline */
@@ -138,19 +134,19 @@ static void view_of(const hy_med_t *m, const hy_snapshot_t *sn, view_t *v)
     v->ring = tv.ring;
     switch (tv.kind) {
     case HY_TILE_AS_NEEDED:
-        snprintf(v->text, sizeof v->text, "as needed");
+        snprintf(v->text, sizeof v->text, HY_S_TILE_AS_NEEDED);
         break;
     case HY_TILE_NO_DOSE:
-        snprintf(v->text, sizeof v->text, "no dose yet");
+        snprintf(v->text, sizeof v->text, HY_S_TILE_NO_DOSE);
         break;
     case HY_TILE_SINCE: {
         int64_t min = (sn->in.now - tv.last_taken) / 60;
         if (min < 1) {
-            snprintf(v->text, sizeof v->text, "just now");
+            snprintf(v->text, sizeof v->text, HY_S_TILE_JUST_NOW);
         } else {
             char d[24];
             fmt_dur(min, d, sizeof d);
-            snprintf(v->text, sizeof v->text, "%s ago", d);
+            snprintf(v->text, sizeof v->text, HY_S_TILE_AGO, d);
         }
         break;
     }
@@ -158,18 +154,18 @@ static void view_of(const hy_med_t *m, const hy_snapshot_t *sn, view_t *v)
     case HY_TILE_LATE:
         v->due = true;
         v->style = 1;
-        snprintf(v->text, sizeof v->text, tv.kind == HY_TILE_DUE ? "Due now" : "Late");
+        snprintf(v->text, sizeof v->text, "%s", tv.kind == HY_TILE_DUE ? HY_S_TILE_DUE : HY_S_TILE_LATE);
         break;
     case HY_TILE_SNOOZED: {
         char hhmm[8];
         fmt_hhmm(tv.snoozed_until, sn->in.tz, hhmm, sizeof hhmm);
         v->style = 1;
-        snprintf(v->text, sizeof v->text, STR_TILE_SNOOZED, hhmm);
+        snprintf(v->text, sizeof v->text, HY_S_TILE_SNOOZED, hhmm);
         break;
     }
     case HY_TILE_MISSED:
         v->style = 2;
-        snprintf(v->text, sizeof v->text, "Missed");
+        snprintf(v->text, sizeof v->text, HY_S_TILE_MISSED);
         break;
     }
 }
@@ -204,11 +200,56 @@ static void set_ring(tile_t *t, int32_t target, bool animate)
 
 /* ---- tiles ---- */
 
+/* SHORT_CLICKED also follows a swipe that started on the tile (the pager does not scroll): only a stroke the
+ * input layer classified as TAP logs. */
 static void tile_click_cb(lv_event_t *e)
 {
     uint32_t id = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    if (!ui_input_last_was_tap()) {
+        return;
+    }
     ESP_LOGI(TAG, "tile tap: med %u", (unsigned)id);
     home_tap_med(id);
+}
+
+static void tile_long_cb(lv_event_t *e)
+{
+    uint32_t id = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    if (!ui_input_still()) {
+        return;   /* a slow drag is not a long press */
+    }
+    ESP_LOGI(TAG, "tile long press: med %u", (unsigned)id);
+    ui_open_detail(id);
+}
+
+static void plus_click_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!ui_input_last_was_tap()) {
+        return;
+    }
+    ESP_LOGI(TAG, "plus tile tap");
+    toast_show_info(HY_S_ADD_IN_WEB);
+}
+
+/* The "+" tile after the medicine tiles; the QR to the web UI comes with plan 4 */
+static void make_plus(void)
+{
+    lv_obj_t *tile = lv_obj_create(s_grid);
+    lv_obj_remove_style_all(tile);
+    lv_obj_set_size(tile, HY_TILE_W, HY_TILE_H);
+    lv_obj_set_style_radius(tile, 24, 0);
+    lv_obj_set_style_bg_color(tile, lv_color_hex(HY_C_PLUS_BG), 0);
+    lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
+    lv_obj_set_scrollable(tile, false);
+    lv_obj_set_clickable(tile, true);
+    lv_obj_set_scroll_chain(tile, true);
+    lv_obj_add_event_cb(tile, plus_click_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(tile);
+    lv_obj_set_style_text_font(l, hy_type.code_m, 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(HY_C_TEXT2), 0);
+    lv_label_set_text(l, HY_S_PLUS);
+    lv_obj_center(l);
 }
 
 static void make_tile(const hy_med_t *m, tile_t *t)
@@ -232,7 +273,8 @@ static void make_tile(const hy_med_t *m, tile_t *t)
     lv_obj_set_scrollable(tile, false);
     lv_obj_set_clickable(tile, true);
     lv_obj_set_scroll_chain(tile, true);
-    lv_obj_add_event_cb(tile, tile_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)m->id);
+    lv_obj_add_event_cb(tile, tile_click_cb, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)m->id);
+    lv_obj_add_event_cb(tile, tile_long_cb, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)m->id);
 
     /* children are positioned inside the tile's border box, so subtract the border */
     const int ring_x = (HY_TILE_W - HY_RING) / 2 - TILE_BORDER, ring_y = 16 - TILE_BORDER;
@@ -279,17 +321,6 @@ static void make_tile(const hy_med_t *m, tile_t *t)
     lv_label_set_text(st, "");
 }
 
-static void update_time(int64_t now, bool valid, const char *tz)
-{
-    char b[8];
-    if (valid) {
-        fmt_hhmm(now, tz, b, sizeof b);
-    } else {
-        snprintf(b, sizeof b, "--:--");
-    }
-    lv_label_set_text(s_time, b);
-}
-
 static void set_status(tile_t *t, const char *text, int style)
 {
     const lv_font_t *f = style ? hy_type.status_bold : hy_type.status;
@@ -320,7 +351,6 @@ void home_refresh(bool animate)
     const hy_snapshot_t *sn = hy_sched_snapshot();
     s_gen_seen = hy_sched_generation();
     bool valid = sn->tracking;
-    update_time(sn->in.now, valid, sn->in.tz);
 
     for (size_t i = 0; i < s_ntiles; i++) {
         tile_t *t = &s_tiles[i];
@@ -330,7 +360,7 @@ void home_refresh(bool animate)
         }
         if (!valid) {
             set_ring(t, 0, animate);
-            set_status(t, "clock not set", 0);
+            set_status(t, HY_S_TILE_CLOCK_UNSET, 0);
             lv_obj_set_style_border_opa(t->tile, LV_OPA_TRANSP, 0);
             continue;
         }
@@ -366,13 +396,14 @@ void home_rebuild(void)
         }
         make_tile(&ms[i], &s_tiles[s_ntiles++]);
     }
+    make_plus();
     lv_obj_update_layout(s_grid);
     ESP_LOGI(TAG, "grid rebuilt: %u tiles, viewport %d px, scrollable %d px",
              (unsigned)s_ntiles, (int)lv_obj_get_height(s_grid), (int)lv_obj_get_scroll_bottom(s_grid));
     home_refresh(false);
 }
 
-void home_create(lv_obj_t *parent)
+void home_create(lv_obj_t *page)
 {
     if (!s_logs) {
         s_logs = heap_caps_malloc(LOG_MAX * sizeof(hy_log_t), MALLOC_CAP_SPIRAM);
@@ -381,22 +412,10 @@ void home_create(lv_obj_t *parent)
         }
     }
 
-    s_time = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_time, hy_type.time, 0);
-    lv_obj_set_style_text_color(s_time, lv_color_hex(HY_C_TEXT), 0);
-    lv_label_set_text(s_time, "--:--");
-    lv_obj_align(s_time, LV_ALIGN_TOP_LEFT, HY_MARGIN + 2, (HY_BAR_H - lv_font_get_line_height(hy_type.time)) / 2);
-
-    s_batt = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_batt, hy_type.body, 0);
-    lv_obj_set_style_text_color(s_batt, lv_color_hex(HY_C_TEXT2), 0);
-    lv_label_set_text(s_batt, "\xE2\x80\x94%"); /* battery placeholder until plan 3 */
-    lv_obj_align(s_batt, LV_ALIGN_TOP_RIGHT, -HY_MARGIN, (HY_BAR_H - lv_font_get_line_height(hy_type.body)) / 2);
-
-    s_grid = lv_obj_create(parent);
+    s_grid = lv_obj_create(page);
     lv_obj_remove_style_all(s_grid);
-    lv_obj_set_size(s_grid, HY_SCREEN, HY_SCREEN - HY_BAR_H);
-    lv_obj_set_pos(s_grid, 0, HY_BAR_H);
+    lv_obj_set_size(s_grid, HY_SCREEN, HY_CONTENT_H);
+    lv_obj_set_pos(s_grid, 0, 0);
     lv_obj_set_style_pad_left(s_grid, HY_MARGIN, 0);
     lv_obj_set_style_pad_right(s_grid, HY_MARGIN, 0);
     lv_obj_set_style_pad_top(s_grid, 8, 0);
@@ -416,11 +435,11 @@ void home_create(lv_obj_t *parent)
 static const char *log_error_text(hy_err_t err)
 {
     switch (err) {
-    case HY_E_CLOCK:     return "Set the time first";
-    case HY_E_NOT_FOUND: return "Medicine not found";
-    case HY_E_IO:        return "Storage error";
-    case HY_E_FULL:      return "Too many entries";
-    default:             return "Could not log";
+    case HY_E_CLOCK:     return HY_S_ERR_CLOCK;
+    case HY_E_NOT_FOUND: return HY_S_ERR_NOT_FOUND;
+    case HY_E_IO:        return HY_S_ERR_IO;
+    case HY_E_FULL:      return HY_S_ERR_FULL;
+    default:             return HY_S_ERR_LOG;
     }
 }
 
@@ -450,7 +469,7 @@ void home_tap_med(uint32_t med_id)
             char a[24], b[24], msg[96];
             fmt_dur(since, a, sizeof a);
             fmt_dur(m->min_interval_min, b, sizeof b);
-            snprintf(msg, sizeof msg, "Last dose %s ago, minimum %s. Tap again to log", a, b);
+            snprintf(msg, sizeof msg, HY_S_TOO_SOON, a, b);
             s_pending = true;
             s_pending_id = med_id;
             s_pending_tick = lv_tick_get();
