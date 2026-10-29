@@ -10,6 +10,7 @@ idf_component_register(
         "src/tzlock.c"
         "src/sched.c"
         "src/summary.c"
+        "src/nav.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
