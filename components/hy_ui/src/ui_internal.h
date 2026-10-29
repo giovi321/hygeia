@@ -91,6 +91,9 @@ lv_obj_t *ui_roller(lv_obj_t *parent, const char *opts, lv_roller_mode_t mode, i
 
 /* nav_host.c */
 void      nav_host_init(void);                   /* creates the views in ui_content(), shows the root */
+void      nav_host_warm_start(void);             /* after the splash: create the hidden views one at a time */
+void      nav_host_warm_all(void);               /* create every hidden view now */
+void      due_raise(void);                       /* the due card back above every view */
 void      nav_host_tick(void);                   /* root flags from the clock and the storage state */
 void      ui_show_view(hy_view_t v);             /* nav_host: hides others, runs the view's refresh */
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g);      /* applies hy_nav_gesture and its effect; WAKE = swallowed */

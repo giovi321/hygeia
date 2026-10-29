@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "hy/clock.h"
 #include "hy/ui.h"
 #include "ui_internal.h"
@@ -128,11 +129,14 @@ void ui_qs_slide_done(void)
     lv_obj_set_hidden(s_pager, true);
 }
 
+static void ensure_view(hy_view_t v);
+
 void ui_show_view(hy_view_t v)
 {
     if ((unsigned)v >= N_VIEWS) {
         return;
     }
+    ensure_view(v);
     bool pager = is_pager(v);
     bool under = v == HY_V_QS && s_started && s_shown != HY_V_QS;   /* keep the previous view for the slide */
     for (int i = 0; i < N_VIEWS; i++) {
@@ -285,39 +289,151 @@ void hy_ui_set_storage_ok(bool ok)
     s_storage_down = !ok;   /* read by nav_host_tick in the LVGL task */
 }
 
+/* Views that are not on screen at boot are created after the splash (one every WARM_MS from nav_host_warm_start)
+ * or at their first show, whichever comes first. The splash needs steady frames; each create below is one
+ * blocking LVGL step. With CONFIG_HY_DEBUG_CONSOLE every create logs its cost. */
+typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_N } lazy_t;
+
+#define WARM_MS 250
+
+static bool s_lazy_done[LZ_N];
+static lv_timer_t *s_warm_t;
+
+static lazy_t lazy_of(hy_view_t v, bool *is_lazy)
+{
+    *is_lazy = true;
+    switch (v) {
+    case HY_V_DETAIL:
+        return LZ_DETAIL;
+    case HY_V_NOTE:
+        return LZ_NOTE;
+    case HY_V_EARLIER:
+        return LZ_EARLIER;
+    case HY_V_QS:
+        return LZ_QS;
+    case HY_V_SETTINGS:
+    case HY_V_SET_ZONE:
+    case HY_V_SET_SOUND:
+    case HY_V_SET_DISPLAY:
+    case HY_V_ABOUT:
+        return LZ_SETTINGS;
+    case HY_V_SET_TIME:
+        return LZ_TIME;
+    case HY_V_CLOCK_INVALID:
+        return LZ_INVALID;
+    default:
+        *is_lazy = false;
+        return LZ_N;
+    }
+}
+
+static void create_lazy(lazy_t k)
+{
+    if (s_lazy_done[k]) {
+        return;
+    }
+    s_lazy_done[k] = true;
+#if CONFIG_HY_DEBUG_CONSOLE
+    int64_t t0 = esp_timer_get_time();
+#endif
+    switch (k) {
+    case LZ_DETAIL:
+        detail_create();
+        break;
+    case LZ_NOTE:
+        note_create();
+        break;
+    case LZ_EARLIER:
+        earlier_create();
+        break;
+    case LZ_QS:
+        qs_create();
+        break;
+    case LZ_SETTINGS:
+        settings_create();
+        break;
+    case LZ_TIME:
+        s_views[HY_V_SET_TIME] = ui_view_box();
+        timeset_create(s_views[HY_V_SET_TIME], false);
+        break;
+    case LZ_INVALID:
+        s_views[HY_V_CLOCK_INVALID] = ui_view_box();
+        timeset_create(s_views[HY_V_CLOCK_INVALID], true);
+        break;
+    default:
+        break;
+    }
+    due_raise();   /* the card stays above every view, as when it was created last */
+#if CONFIG_HY_DEBUG_CONSOLE
+    static const char *const names[LZ_N] = {"detail", "note", "earlier", "qs", "settings", "time", "clock-invalid"};
+    ESP_LOGI(TAG, "create %s: %lld us", names[k], (long long)(esp_timer_get_time() - t0));
+#endif
+}
+
+static void ensure_view(hy_view_t v)
+{
+    bool is_lazy;
+    lazy_t k = lazy_of(v, &is_lazy);
+    if (is_lazy) {
+        create_lazy(k);
+    }
+}
+
+static void warm_cb(lv_timer_t *t)
+{
+    for (int k = 0; k < LZ_N; k++) {
+        if (!s_lazy_done[k]) {
+            create_lazy((lazy_t)k);
+            return;
+        }
+    }
+    lv_timer_delete(t);
+    s_warm_t = NULL;
+}
+
+/* LVGL lock held, after the splash: creates the hidden views one per WARM_MS in the LVGL task */
+void nav_host_warm_start(void)
+{
+    if (!s_warm_t) {
+        s_warm_t = lv_timer_create(warm_cb, WARM_MS, NULL);
+    }
+}
+
+/* Creates every hidden view now (the debug console pokes widgets of views that were never shown) */
+void nav_host_warm_all(void)
+{
+    for (int k = 0; k < LZ_N; k++) {
+        create_lazy((lazy_t)k);
+    }
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+#define TIMED(name, call)                                                                \
+    do {                                                                                 \
+        int64_t t0_ = esp_timer_get_time();                                              \
+        call;                                                                            \
+        ESP_LOGI(TAG, "create %s: %lld us", name, (long long)(esp_timer_get_time() - t0_)); \
+    } while (0)
+#else
+#define TIMED(name, call) call
+#endif
+
 void nav_host_init(void)
 {
     hy_nav_init(&s_nav);
-    s_pager = pager_create(ui_content());
+    TIMED("pager", s_pager = pager_create(ui_content()));
     splash_yield();
-    home_create(pager_page(0));
+    TIMED("home", home_create(pager_page(0)));
     splash_yield();
-    overview_create(pager_page(1));
+    TIMED("overview", overview_create(pager_page(1)));
     splash_yield();
-    history_create(pager_page(2));
+    TIMED("history", history_create(pager_page(2)));
     splash_yield();
 
     s_views[HY_V_STORAGE_DOWN] = storage_down_create(ui_content());
     lv_obj_set_hidden(s_views[HY_V_STORAGE_DOWN], true);
     splash_yield();
-    detail_create();
-    splash_yield();
-    note_create();
-    splash_yield();
-    earlier_create();
-    splash_yield();
-    qs_create();
-    splash_yield();
-    settings_create();
-    splash_yield();
-    s_views[HY_V_SET_TIME] = ui_view_box();
-    timeset_create(s_views[HY_V_SET_TIME], false);
-    splash_yield();
-    s_views[HY_V_CLOCK_INVALID] = ui_view_box();
-    timeset_create(s_views[HY_V_CLOCK_INVALID], true);
-    splash_yield();
-
-    due_create();   /* last: above every view, below the toast */
+    due_create();   /* the other views are created later and move the card back to the top */
 
     s_shown = HY_V_HOME;
     hy_nav_set_root_flags(&s_nav, !hy_clock_valid(), s_storage_down);

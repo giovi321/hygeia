@@ -651,6 +651,7 @@ static void job_settz(const char *iana)
 static void run_job(void *arg)
 {
     job_t *j = arg;
+    nav_host_warm_all();   /* the commands below poke widgets of views that may not be created yet */
     switch (j->kind) {
     case J_TAP: {
         uint32_t id;
