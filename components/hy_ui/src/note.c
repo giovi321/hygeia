@@ -16,6 +16,7 @@ LV_FONT_DECLARE(lv_font_montserrat_14);
 
 static lv_obj_t *s_root, *s_name, *s_ta, *s_kb;
 static uint32_t s_med_id;
+static char s_prev[HY_NOTE_MAX * 4 + 1];
 static lv_font_t s_kb_font;   /* Inter 22 with Montserrat as the fallback for the keyboard's symbol keys */
 
 /* Cuts s to at most max bytes on a UTF-8 boundary */
@@ -59,14 +60,48 @@ static void log_click_cb(lv_event_t *e)
     note_submit();
 }
 
+/* The keyboard's OK key and the text area's enter: the same as Log, but never for a stroke that only woke the
+ * dimmed screen */
 static void ready_cb(lv_event_t *e)
 {
     (void)e;
-    note_submit();   /* the keyboard's OK key */
+    if (ui_input_waking()) {
+        ESP_LOGI(TAG, "OK ignored: the stroke only woke the screen");
+        return;
+    }
+    note_submit();
+}
+
+/* The keyboard's close key: back to the detail */
+static void cancel_cb(lv_event_t *e)
+{
+    (void)e;
+    if (ui_input_waking() || ui_current_view() != HY_V_NOTE) {
+        return;
+    }
+    ui_nav_pop();
+}
+
+/* The text before the press, so a stroke that only woke the screen can be taken back after the keyboard typed it */
+static void kb_press_cb(lv_event_t *e)
+{
+    snprintf(s_prev, sizeof s_prev, "%s", lv_textarea_get_text(s_ta));
+    consume_cb(e);
+}
+
+static void kb_value_cb(lv_event_t *e)
+{
+    (void)e;
+    if (ui_input_waking()) {
+        lv_textarea_set_text(s_ta, s_prev);
+    }
 }
 
 void note_submit(void)
 {
+    if (ui_current_view() != HY_V_NOTE) {
+        return;   /* a second event of the same key press, after the view closed */
+    }
     if (toast_logged_visible()) {
         ESP_LOGI(TAG, "log ignored: logged toast is showing");
         return;
@@ -113,6 +148,11 @@ void note_show(uint32_t med_id)
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
+void note_debug_ok(void)
+{
+    ready_cb(NULL);
+}
+
 void note_debug_text(const char *text)
 {
     lv_textarea_set_text(s_ta, text);
@@ -154,6 +194,8 @@ void note_create(void)
     lv_obj_add_event_cb(s_ta, ta_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_ta, consume_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_ta, consume_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(s_ta, ready_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_ta, cancel_cb, LV_EVENT_CANCEL, NULL);
 
     lv_obj_t *log = lv_obj_create(s_root);
     lv_obj_remove_style_all(log);
@@ -188,7 +230,9 @@ void note_create(void)
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_FILL), LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_FILL), LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(HY_C_TEXT), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_add_event_cb(s_kb, consume_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(s_kb, kb_press_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_kb, consume_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(s_kb, kb_value_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_kb, ready_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_kb, cancel_cb, LV_EVENT_CANCEL, NULL);
 }

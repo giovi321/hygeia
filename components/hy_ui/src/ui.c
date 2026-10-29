@@ -8,6 +8,7 @@
 #include "hy/events.h"
 #include "hy/occ.h"
 #include "hy/sched_run.h"
+#include "hy/store.h"
 #include "hy/ui.h"
 #include "ui_internal.h"
 
@@ -42,7 +43,9 @@ static void event_cb(const hy_event_t *ev, void *ctx)
         return;
     }
     history_invalidate();
-    detail_invalidate();
+    if (ev->type == HY_EV_LOG_EDITED) {
+        detail_invalidate();   /* an edit can change an entry older than the scheduler's window */
+    }
     if (ev->type == HY_EV_MEDS_CHANGED) {
         s_rebuild_queued = true;
     }
@@ -115,6 +118,22 @@ uint32_t ui_fnv(uint32_t h, const void *p, size_t n)
         h = (h ^ b[i]) * 16777619u;
     }
     return h;
+}
+
+/* hy_store query_log keeps the earliest entries when it fills the buffer. The newest ones are wanted, so a full
+ * buffer narrows the window from its old end until the answer fits. */
+size_t ui_log_window(uint32_t med_id, int64_t from, int64_t to, hy_log_t *out, size_t cap)
+{
+    const hy_store_port_t *st = hy_store_port();
+    for (;;) {
+        size_t n = st->query_log(NULL, from, to, med_id, out, cap);
+        if (n < cap || to - from <= 3600) {
+            return n;
+        }
+        ESP_LOGW(TAG, "log window of med %u filled %u entries: keeping the newest half", (unsigned)med_id,
+                 (unsigned)cap);
+        from += (to - from) / 2;
+    }
 }
 
 const hy_med_t *ui_find_med(uint32_t id)

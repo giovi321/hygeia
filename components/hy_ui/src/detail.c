@@ -16,7 +16,6 @@
 #include "esp_timer.h"
 #include "hy/occ.h"
 #include "hy/sched_run.h"
-#include "hy/store.h"
 #include "hy/summary.h"
 #include "ui_internal.h"
 
@@ -37,7 +36,6 @@ static const char *TAG = "ui_detail";
 #define BUF_CAP     512             /* logs of one medicine over the 32 day window */
 #define WINDOW_S    (32 * 86400)
 #define OLD_S       (366 * 86400)   /* the look back for the newest entries of a quiet medicine */
-#define OLD_CAP     64
 #define N_RECENT    3
 
 static lv_obj_t *s_root, *s_scroll, *s_arc, *s_code, *s_name, *s_sched, *s_pills, *s_adh, *s_grid;
@@ -63,21 +61,17 @@ static hy_adherence_t s_ad;
 
 /* ---- data ---- */
 
-/* The medicine's last 32 days, and its newest entries even when they are older than that */
+/* The medicine's last 32 days (newest entries when the buffer fills), and its newest entries even when they are
+ * older: 32 day windows walking back until 3 are found or 366 days are covered */
 static void load_logs(const hy_med_t *m, int64_t now)
 {
-    s_nbuf = s_buf ? hy_store_port()->query_log(NULL, now - WINDOW_S, now + 1, m->id, s_buf, BUF_CAP) : 0;
-    if (s_nbuf >= BUF_CAP) {
-        ESP_LOGW(TAG, "log window of med %u filled the %u entry buffer", (unsigned)m->id, BUF_CAP);
-    }
+    s_nbuf = s_buf ? ui_log_window(m->id, now - WINDOW_S, now + 1, s_buf, BUF_CAP) : 0;
     s_nrecent = 0;
-    size_t got = s_nbuf < N_RECENT ? s_nbuf : N_RECENT;
-    for (size_t i = 0; i < got; i++) {
+    for (size_t i = 0; i < s_nbuf && s_nrecent < N_RECENT; i++) {
         s_recent[s_nrecent++] = s_buf[s_nbuf - 1 - i];
     }
-    if (got < N_RECENT && s_buf) {
-        size_t room = BUF_CAP - s_nbuf < OLD_CAP ? BUF_CAP - s_nbuf : OLD_CAP;
-        size_t n = room ? hy_store_port()->query_log(NULL, now - OLD_S, now - WINDOW_S, m->id, s_buf + s_nbuf, room) : 0;
+    for (int64_t to = now - WINDOW_S; s_buf && s_nrecent < N_RECENT && to > now - OLD_S; to -= WINDOW_S) {
+        size_t n = ui_log_window(m->id, to - WINDOW_S, to, s_buf + s_nbuf, BUF_CAP - s_nbuf);   /* scratch tail */
         for (size_t i = 0; i < n && s_nrecent < N_RECENT; i++) {
             s_recent[s_nrecent++] = s_buf[s_nbuf + n - 1 - i];
         }
@@ -279,7 +273,21 @@ static void draw_cells(const hy_med_t *m, bool tracking)
     set_text(s_adh, s_adh_txt, sizeof s_adh_txt, b);
 }
 
-static void render(void)
+static void render(bool allow_defer);
+static lv_timer_t *s_defer;
+
+static void defer_cb(lv_timer_t *t)
+{
+    (void)t;
+    s_defer = NULL;   /* one shot: the timer deletes itself */
+    if (ui_current_view() == HY_V_DETAIL) {
+        render(false);
+    }
+}
+
+/* allow_defer: the medicine is already on screen (a return from note or earlier), so a full recompute waits
+ * 60 ms and the logged toast is drawn first */
+static void render(bool allow_defer)
 {
     if (hy_sched_generation() == 0) {
         return;
@@ -341,6 +349,13 @@ static void render(void)
             }
         }
         full = s_inval || key != s_key;
+        if (full && allow_defer) {
+            if (!s_defer) {
+                s_defer = lv_timer_create(defer_cb, 60, NULL);
+                lv_timer_set_repeat_count(s_defer, 1);
+            }
+            return;
+        }
         if (full) {
             load_logs(m, sn->in.now);
         }
@@ -386,7 +401,8 @@ void detail_hide(void)
 
 void detail_show(uint32_t med_id)
 {
-    if (med_id != s_med_id) {
+    bool same = med_id == s_med_id, was_open = s_open;
+    if (!same) {
         s_med_id = med_id;
         s_static_sig = s_rows_sig = s_cells_sig = 0;
         s_inval = true;
@@ -396,7 +412,7 @@ void detail_show(uint32_t med_id)
         s_open = true;
     }
     hy_sched_run_tick();   /* an action just before this show left the snapshot dirty */
-    render();
+    render(same && was_open);
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -410,7 +426,7 @@ void detail_debug_scroll(void)
 void detail_refresh_if_changed(void)
 {
     if (ui_current_view() == HY_V_DETAIL && hy_sched_generation() != s_gen_seen) {
-        render();
+        render(false);
     }
 }
 

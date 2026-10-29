@@ -114,6 +114,9 @@
 #define HY_S_TODAY_AT      "Today %s"               /* HH:MM */
 #define HY_S_YESTERDAY_AT  "Yesterday %s"           /* HH:MM */
 #define HY_S_LOG_AT        "Log at %s"              /* HH:MM */
+#define HY_S_YESTERDAY_LC  "yesterday %s"           /* HH:MM, inside the logged toast */
+#define HY_S_COLON         ":"
+#define HY_S_EARLIER_BAD   "That time is not valid"
 
 /* ---- quick settings ---- */
 #define HY_S_QS_TITLE      "Quick settings"

@@ -148,14 +148,30 @@ bool ui_input_still(void)
     return !s_waking && s_st.max_dev <= HY_TAP_SLOP_PX;
 }
 
+bool ui_input_waking(void)
+{
+    return s_waking;
+}
+
+/* A stroke that starts in an edge zone (the screen-edge gestures) is never a widget's: EDGE_RIGHT, EDGE_DOWN and
+ * EDGE_UP navigate from any screen, also over scrolling content, the keyboard and sliders. */
 void ui_input_consume(void)
 {
+    if (s_st.x0 < HY_EDGE_PX || s_st.y0 < HY_EDGE_PX || s_st.y0 >= HY_SCREEN_PX - HY_EDGE_PX) {
+        return;
+    }
     s_consumed = true;
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
 /* The same state changes as a real PRESSED then RELEASED, with no read samples in between */
 void input_debug_stroke(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms)
+{
+    input_debug_swipe(x0, y0, x1, y1, ms, false);
+}
+
+/* consume: a scrolling widget under the finger asks for the stroke right after the press, as SCROLL_BEGIN does */
+void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms, bool consume)
 {
     uint32_t now = lv_tick_get();
     s_active = true;
@@ -166,6 +182,9 @@ void input_debug_stroke(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t
     s_st.y0 = y0;
     s_st.t0_ms = now - ms;
     s_st.max_dev = 0;
+    if (consume) {
+        ui_input_consume();
+    }
     finish(x1, y1, now);
 }
 #endif

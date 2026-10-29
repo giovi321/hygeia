@@ -424,9 +424,28 @@ static void job_shot(void)
     heap_caps_free(mem);
 }
 
-/* "gesture <name>": the same path as a classified touch stroke */
-static void job_gesture(const char *name)
+/* "gesture <name> [consumed]": the same path as a classified touch stroke. With "consumed" a real stroke of that
+ * direction is simulated (edge strokes start in their edge zone) and a scrolling widget under the finger asks
+ * for it right after the press, as SCROLL_BEGIN does: an edge stroke must still navigate, any other stays. */
+static void job_gesture(const char *arg)
 {
+    char name[12] = "", opt[12] = "";
+    sscanf(arg, "%11s %11s", name, opt);
+    static const struct { const char *n; int16_t x0, y0, x1, y1; } strokes[] = {
+        {"up", 240, 300, 240, 150}, {"down", 240, 150, 240, 300}, {"left", 300, 240, 150, 240},
+        {"right", 150, 240, 300, 240}, {"edgeup", 240, 460, 240, 300}, {"edgedown", 240, 10, 240, 150},
+        {"edgeright", 10, 240, 150, 240},
+    };
+    if (strcmp(opt, "consumed") == 0) {
+        for (size_t k = 0; k < sizeof strokes / sizeof strokes[0]; k++) {
+            if (strcmp(name, strokes[k].n) == 0) {
+                input_debug_swipe(strokes[k].x0, strokes[k].y0, strokes[k].x1, strokes[k].y1, 150, true);
+                return;
+            }
+        }
+        ESP_LOGE(TAG, "usage: gesture <up|down|left|right|edgeup|edgedown|edgeright> consumed");
+        return;
+    }
     for (int g = HY_G_TAP; g <= HY_G_EDGE_RIGHT; g++) {
         if (strcmp(name, ui_gesture_name((hy_gesture_t)g)) == 0) {
             ESP_LOGI(TAG, "gesture %s", name);
@@ -434,7 +453,7 @@ static void job_gesture(const char *name)
             return;
         }
     }
-    ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright>");
+    ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright> [consumed]");
 }
 
 /* "due slide|skip|snooze|next|flash": the same functions the knob, the Skip tap and the swipes call */
@@ -552,7 +571,16 @@ static void job_note(const char *arg)
         return;
     }
     ui_nav_push(HY_V_NOTE);
-    if (text && *text) {
+    if (text && strcmp(text, "!wake") == 0) {
+        /* the dimmed screen: a stroke wakes it, then the OK key fires on that stroke. Nothing may be logged. Then
+         * a normal stroke and the OK key: that one logs. */
+        note_debug_text("wake test");
+        ui_nav_set_idle(true);
+        input_debug_stroke(240, 240, 242, 241, 80);
+        note_debug_ok();
+        input_debug_stroke(240, 240, 242, 241, 80);
+        note_debug_ok();
+    } else if (text && *text) {
         note_debug_text(text);
         note_submit();
     }
