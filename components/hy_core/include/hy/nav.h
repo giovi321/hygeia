@@ -36,7 +36,8 @@ typedef enum { HY_V_HOME = 0, HY_V_OVERVIEW, HY_V_HISTORY, HY_V_DETAIL, HY_V_NOT
 typedef enum { HY_FX_NONE = 0, HY_FX_WAKE, HY_FX_SNOOZE, HY_FX_DUE_NEXT } hy_nav_fx_t;
 #define HY_NAV_DEPTH 6
 typedef struct { hy_view_t stack[HY_NAV_DEPTH]; uint8_t depth; uint32_t med_id;
-                 bool due, idle, clock_invalid, storage_down; } hy_nav_t;
+                 bool due, idle, clock_invalid, storage_down;
+                 bool poweroff; /* power-off confirmation showing: every gesture is ignored */ } hy_nav_t;
 
 void        hy_nav_init(hy_nav_t *n);                 /* root HOME, depth 1 */
 hy_view_t   hy_nav_view(const hy_nav_t *n);           /* top of the stack */

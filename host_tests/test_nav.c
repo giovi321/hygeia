@@ -330,6 +330,38 @@ static void test_double_tap_exact_and_wrap(void)
     TEST_ASSERT_FALSE(hy_gesture_double(&a, &b));
 }
 
+static void test_poweroff_rule(void)
+{
+    for (int mode = 0; mode < 3; mode++) {          /* plain, due, idle */
+        for (int g = HY_G_NONE; g <= HY_G_EDGE_RIGHT; g++) {
+            hy_nav_t n; hy_nav_init(&n);
+            hy_nav_push(&n, HY_V_SETTINGS);
+            n.poweroff = true; n.due = (mode == 1); n.idle = (mode == 2);
+            TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, (hy_gesture_t)g));
+            TEST_ASSERT_EQUAL(2, n.depth);
+            TEST_ASSERT_EQUAL(HY_V_HOME, n.stack[0]);
+            TEST_ASSERT_EQUAL(HY_V_SETTINGS, hy_nav_view(&n));
+            TEST_ASSERT_EQUAL(mode == 1, n.due);
+            TEST_ASSERT_EQUAL(mode == 2, n.idle);
+            TEST_ASSERT_TRUE(n.poweroff);
+        }
+    }
+    hy_nav_t n; hy_nav_init(&n);
+    TEST_ASSERT_FALSE(n.poweroff);
+}
+
+static void test_off_counts_as_idle(void)
+{
+    hy_gesture_t gs[] = { HY_G_SWIPE_LEFT, HY_G_TAP };
+    for (int i = 0; i < 2; i++) {
+        hy_nav_t n; hy_nav_init(&n);
+        n.idle = true; n.due = true;
+        TEST_ASSERT_EQUAL(HY_FX_WAKE, hy_nav_gesture(&n, gs[i]));
+        TEST_ASSERT_FALSE(n.idle);
+        TEST_ASSERT_TRUE(n.due);
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -349,5 +381,7 @@ int main(void)
     RUN_TEST(test_idle_swallows_on_pushed_stack);
     RUN_TEST(test_classify_exact_boundaries);
     RUN_TEST(test_double_tap_exact_and_wrap);
+    RUN_TEST(test_poweroff_rule);
+    RUN_TEST(test_off_counts_as_idle);
     return UNITY_END();
 }
