@@ -17,6 +17,7 @@ static lv_timer_t *s_timer;
 static int s_mode;
 static uint32_t s_log_id;
 static uint32_t s_start;
+static int s_batt_pending = -1;   /* percent of a held low-battery toast, -1 none */
 
 static const lv_point_precise_t check_pts[] = {{12, 23}, {19, 30}, {32, 15}};
 
@@ -34,6 +35,7 @@ static void tick_cb(lv_timer_t *t)
     uint32_t el = lv_tick_elaps(s_start);
     if (el >= TOAST_MS) {
         hide();
+        ui_battery_toast_flush();   /* the Undo window ended */
         return;
     }
     if (s_mode == MODE_LOGGED) {
@@ -175,6 +177,23 @@ void toast_show_info(const char *text)
     open(MODE_INFO);
 }
 
+void ui_battery_toast(int pct)
+{
+    s_batt_pending = pct;
+    ui_battery_toast_flush();
+}
+
+void ui_battery_toast_flush(void)
+{
+    if (s_batt_pending < 0 || s_mode == MODE_LOGGED || idle_active()) {
+        return;
+    }
+    char b[48];
+    snprintf(b, sizeof b, HY_S_BATT_LOW, s_batt_pending);
+    s_batt_pending = -1;
+    toast_show_info(b);
+}
+
 bool toast_undo_pressed(void)
 {
     if (s_mode != MODE_LOGGED) {
@@ -186,6 +205,8 @@ bool toast_undo_pressed(void)
     ui_log_hwm("undo");
     if (err == HY_E_UNDO_EXPIRED) {
         toast_show_info(HY_S_UNDO_EXPIRED);
+    } else {
+        ui_battery_toast_flush();   /* the Undo toast is gone */
     }
     return true;
 }

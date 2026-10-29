@@ -71,15 +71,14 @@ static void battery_cb(uint32_t flags)
     }
     hy_power_state_t st;
     hy_power_state(&st);
+    int pct = st.pmu_ok ? st.batt.pct : -1;   /* the same reading the widgets show */
     const hy_clock_port_t *ck = hy_clock_port();
-    hy_event_t ev = {.ts = ck->valid(NULL) ? ck->now(NULL) : 0, .value = st.batt.pct};
+    hy_event_t ev = {.ts = ck->valid(NULL) ? ck->now(NULL) : 0, .value = pct};
     if (flags & HY_BATT_EV_LOW) {
         ev.type = HY_EV_BATTERY_LOW;
         ESP_LOGI(TAG, "HY_EV_BATTERY_LOW value=%d", (int)ev.value);
         hy_ev_publish(&ev);
-        char b[48];
-        snprintf(b, sizeof b, HY_S_BATT_LOW, (int)ev.value);
-        toast_show_info(b);
+        ui_battery_toast(pct);
     }
     if (flags & HY_BATT_EV_CRIT) {
         ev.type = HY_EV_BATTERY_CRITICAL;
