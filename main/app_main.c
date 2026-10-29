@@ -250,9 +250,7 @@ void app_main(void)
              (unsigned)settings.brightness, (unsigned)settings.snooze_min);
     if (err == ESP_OK) {
         hy_board_set_brightness(settings.brightness);
-        esp_err_t aerr = hy_audio_init();
-        ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
-        hy_audio_set_volume(settings.volume);
+        hy_audio_set_volume(settings.volume);   /* hy_audio_init runs after the splash */
     }
     if (err == ESP_OK) {
         esp_err_t cerr = hy_clock_init(hy_board_i2c());
@@ -269,6 +267,8 @@ void app_main(void)
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
         ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));
+        esp_err_t aerr = hy_audio_init();   /* about 0.4 s: not on the splash's path */
+        ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
     }
 
 #if CONFIG_HY_DEBUG_CONSOLE
