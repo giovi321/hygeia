@@ -1,0 +1,42 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+#include "hy/battery.h"
+#include "hy/gap.h"
+#include "sdkconfig.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* batt: battery model; pmu_ok: false after a PMU read error, until the next good read;
+ * irq_seen: every HY_PMU_* flag seen since boot (OR) */
+typedef struct { hy_batt_t batt; bool pmu_ok; uint32_t irq_seen; } hy_power_state_t;
+
+esp_err_t hy_power_init(void);                   /* after hy_board_init, hy_store_mount, hy_clock_init */
+void      hy_power_start(void);                  /* after hy_ui_start: starts the task */
+/* Snapshot copy under a spinlock; safe from any task. */
+void      hy_power_state(hy_power_state_t *out);
+/* LVGL-task callbacks registered by the UI; each is called through lv_async_call. */
+typedef struct { void (*battery)(uint32_t flags); void (*pwr_short)(void); void (*pwr_long)(void);
+                 void (*usb)(bool in); } hy_power_ui_t;
+void      hy_power_set_ui(const hy_power_ui_t *ui);
+/* Heartbeat: NVS namespace "power", key "alive" (i64), key "clean" (u8). */
+bool      hy_power_alive_load(hy_alive_t *out);
+void      hy_power_alive_write(int64_t now, bool clean);
+
+#if CONFIG_HY_DEBUG_CONSOLE
+void hy_power_debug_pmu(const char *args);
+void hy_power_debug_batt(const char *args);
+void hy_power_debug_batlog(const char *args);    /* "" prints both files, "clear" deletes them */
+void hy_power_debug_alive(const char *args);
+void hy_power_debug_pkey(const char *args);      /* short | long */
+void hy_power_debug_fakebatt(const char *args);  /* <pct> [usb] | off */
+#endif
+
+#ifdef __cplusplus
+}
+#endif
