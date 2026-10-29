@@ -4,6 +4,8 @@ idf_component_register(
         "src/theme.c"
         "src/topbar.c"
         "src/input.c"
+        "src/idle.c"
+        "src/splash.c"
         "src/pager.c"
         "src/nav_host.c"
         "src/storage_down.c"

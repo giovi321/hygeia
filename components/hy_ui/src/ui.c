@@ -412,11 +412,19 @@ esp_err_t hy_ui_start(void)
     topbar_create();
     nav_host_init();
     toast_create(s_screen);
+    idle_create();
     input_init(hy_board_indev());
-    lv_screen_load(s_screen);
     lv_timer_create(tick_cb, 1000, NULL);
     lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */
     int sub = hy_ev_subscribe(event_cb, NULL);
+    if (splash_remaining_ms() > 0) {
+        hy_board_unlock();
+        splash_wait();   /* without the lock: the splash animations run in the LVGL task */
+        if (!hy_board_lock(2000)) {
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+    splash_finish(s_screen);
     hy_board_unlock();
 
     if (sub < 0) {

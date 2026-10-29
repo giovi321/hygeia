@@ -674,7 +674,11 @@ static void run_job(void *arg)
         ui_nav_log();
         break;
     case J_IDLE:
-        ui_nav_set_idle(strcmp(j->arg, "off") != 0);
+        if (strcmp(j->arg, "off") != 0) {
+            idle_enter();
+        } else {
+            idle_wake();
+        }
         break;
     case J_TAPSTROKE: {
         /* a still 80 ms stroke through the input layer, then the tile's SHORT_CLICKED handler */
