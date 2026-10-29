@@ -9,9 +9,9 @@ idf_component_register(
     REQUIRES
         hy_core
         esp_driver_i2c
-        esp_driver_gpio
     PRIV_REQUIRES
         nvs_flash
+        esp_driver_gpio
 )
 
 # Build epoch (UTC seconds) taken when CMake configures; a time before it is implausible.

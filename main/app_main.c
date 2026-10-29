@@ -86,8 +86,8 @@ static void cmd_alarm(const char *args)
     while (*end == ' ') {
         end++;
     }
-    if (end == args || *end != 0 || secs < 0) {
-        ESP_LOGE(TAG, "usage: alarm <seconds> (0 disables)");
+    if (end == args || *end != 0 || secs < 0 || secs > 31 * 86400) {
+        ESP_LOGE(TAG, "usage: alarm <seconds, at most 31 days> (0 disables)");
         return;
     }
     int64_t at = secs ? (int64_t)time(NULL) + secs : 0;

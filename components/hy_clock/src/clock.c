@@ -52,10 +52,11 @@ static int64_t s_sync_jump;
 static bool s_have_chg;
 static hy_tzchange_t s_chg;
 
-/* Alarm: s_alarm_utc is the programmed value (0 = none), guarded by s_alarm_mutex; the ISR only sets s_alarm_flag */
+/* Alarm: s_alarm_utc is the programmed value (0 = none, ALARM_UNKNOWN after an I2C error), guarded by s_alarm_mutex; the ISR only sets s_alarm_flag */
 static StaticSemaphore_t s_alarm_mutex_buf;
 static SemaphoreHandle_t s_alarm_mutex;
-static int64_t s_alarm_utc;
+#define ALARM_UNKNOWN INT64_MIN /* chip alarm state not known: the next set always writes */
+static int64_t s_alarm_utc = ALARM_UNKNOWN;
 static volatile bool s_alarm_flag;
 
 static StaticSemaphore_t s_tz_mutex_buf;
@@ -247,8 +248,13 @@ static esp_err_t alarm_gpio_init(void)
     if (err != ESP_OK) {
         return err;
     }
+    /* The service may already be installed elsewhere; the driver then logs an error line for
+     * ESP_ERR_INVALID_STATE, which is expected here, so silence its tag around the call. */
+    esp_log_level_t old = esp_log_level_get("gpio");
+    esp_log_level_set("gpio", ESP_LOG_NONE);
     err = gpio_install_isr_service(0);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) { /* already installed elsewhere */
+    esp_log_level_set("gpio", old);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         return err;
     }
     return gpio_isr_handler_add(RTC_INT_GPIO, rtc_int_isr, NULL);
@@ -276,6 +282,13 @@ esp_err_t hy_clock_init(i2c_master_bus_handle_t bus)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC read: %s", esp_err_to_name(err));
         return err;
+    }
+    /* The chip is battery backed and may still hold an armed alarm: disarm it and clear AF once */
+    esp_err_t aerr = pcf85063_alarm_set(NULL);
+    if (aerr == ESP_OK) {
+        s_alarm_utc = 0;
+    } else {
+        ESP_LOGE(TAG, "RTC alarm disarm: %s", esp_err_to_name(aerr));
     }
     esp_err_t gerr = alarm_gpio_init();
     if (gerr != ESP_OK) {
@@ -379,19 +392,33 @@ esp_err_t hy_clock_alarm_set(int64_t utc)
     if (utc != 0 && !hy_rtc_alarm_encode(utc, raw)) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (utc != 0 && !hy_clock_valid()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!s_alarm_mutex) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* A target at or before now + 2 s cannot be armed: the chip matches day of month, so it would
+     * fire about a month late. Disarm and raise the software flag so the next take returns true. */
+    bool due = utc != 0 && utc <= (int64_t)time(NULL) + 2;
+    int64_t want = due ? 0 : utc;
     xSemaphoreTake(s_alarm_mutex, portMAX_DELAY);
     esp_err_t err = ESP_OK;
-    if (utc != s_alarm_utc) {
-        err = pcf85063_alarm_set(utc ? raw : NULL);
+    if (want != s_alarm_utc) {
+        s_alarm_flag = false; /* a stale pending interrupt must not disarm the new alarm */
+        err = pcf85063_alarm_set(want ? raw : NULL);
         if (err == ESP_OK) {
-            s_alarm_utc = utc;
-            ESP_LOGI(TAG, "rtc alarm %s", utc ? "set" : "disabled");
+            s_alarm_utc = want;
         } else {
+            s_alarm_utc = ALARM_UNKNOWN;
             ESP_LOGE(TAG, "RTC alarm write: %s", esp_err_to_name(err));
         }
+    }
+    if (err == ESP_OK) {
+        if (due) {
+            s_alarm_flag = true;
+        }
+        ESP_LOGI(TAG, "rtc alarm %s", due ? "due now" : (want ? "set" : "disabled"));
     }
     xSemaphoreGive(s_alarm_mutex);
     return err;
@@ -402,13 +429,14 @@ bool hy_clock_alarm_take(void)
     if (!s_alarm_flag || !s_alarm_mutex) {
         return false;
     }
-    s_alarm_flag = false;
     xSemaphoreTake(s_alarm_mutex, portMAX_DELAY);
+    s_alarm_flag = false;
     /* One shot: clears AIE and AF so the day-of-month match does not repeat */
     esp_err_t err = pcf85063_alarm_set(NULL);
     if (err == ESP_OK) {
         s_alarm_utc = 0;
     } else {
+        s_alarm_utc = ALARM_UNKNOWN;
         ESP_LOGE(TAG, "RTC alarm clear: %s", esp_err_to_name(err));
     }
     xSemaphoreGive(s_alarm_mutex);

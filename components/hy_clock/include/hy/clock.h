@@ -70,12 +70,16 @@ void hy_clock_last_sync(char *src, size_t src_len, int64_t *at);
 void hy_clock_report(void);
 
 /* Programs the PCF85063 alarm for utc (0 disables it: all AEN bits set, AIE cleared), clears AF, sets AIE.
-   Skips the I2C write when utc equals the value already programmed. The chip matches second, minute,
-   hour and day of month only, so a utc more than a month ahead fires early. ESP_ERR_INVALID_ARG
-   outside 2000..2099. */
+   Skips the I2C write when utc equals the value already programmed (the programmed value is forgotten
+   after any I2C error, so the next call writes again). A utc at or before now + 2 s is not armed on the
+   chip (it would fire a month late): the alarm is disarmed and the next hy_clock_alarm_take returns true
+   at once. The chip matches second, minute, hour and day of month only, so a utc more than a month
+   ahead fires early. A write clears a pending, untaken interrupt. ESP_ERR_INVALID_ARG outside
+   2000..2099; ESP_ERR_INVALID_STATE while the clock is invalid (0 still disarms). */
 esp_err_t hy_clock_alarm_set(int64_t utc);
-/* True once per alarm interrupt (GPIO 13 falling edge); clears AF on the chip and disables the alarm
-   (it would otherwise match again the next day). Call from the LVGL task. */
+/* True once per alarm interrupt (GPIO 13 falling edge) or due alarm; clears AF on the chip and disarms
+   the alarm (it would otherwise match again the next day), so the caller re-arms after every true take.
+   Call from the LVGL task. */
 bool      hy_clock_alarm_take(void);
 
 const hy_clock_port_t *hy_clock_port(void);
