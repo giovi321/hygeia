@@ -48,10 +48,10 @@ lv_color_t hy_med_color(uint8_t idx);
 /* home.c */
 void home_create(lv_obj_t *parent);
 void home_rebuild(void);                 /* meds changed */
-void home_refresh(bool animate);         /* recompute every tile and the clock */
+void home_refresh(bool animate);         /* redraw every tile and the clock from the scheduler snapshot */
 void home_tap_med(uint32_t med_id);      /* the tile tap handler */
 bool home_med_id_by_code(const char *code, uint32_t *id);
-void home_minute_tick(void);             /* about once a second: refreshes when the minute changed */
+void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 
 /* toast.c */
 void toast_create(lv_obj_t *parent);

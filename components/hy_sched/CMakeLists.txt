@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/sched_run.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        hy_core
+        hy_store
+        hy_clock
+        hy_audio
+    PRIV_REQUIRES
+        esp_timer
+        heap
+)

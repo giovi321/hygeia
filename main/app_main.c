@@ -12,6 +12,7 @@
 #include "hy/board.h"
 #include "hy/actions.h"
 #include "hy/clock.h"
+#include "hy/sched_run.h"
 #include "hy/store.h"
 #include "hy/ui.h"
 #include "nvs_flash.h"
@@ -130,6 +131,8 @@ static void cmd_logs(const char *args) { (void)args; hy_ui_debug_logs(); }
 static void cmd_seed4(const char *args) { hy_ui_debug_seed4(args); }
 static void cmd_shot(const char *args) { (void)args; hy_ui_debug_shot(); }
 static void cmd_chime(const char *args) { (void)args; hy_audio_chime(); }
+static void cmd_remindtest(const char *args) { hy_ui_debug_remindtest(args); }
+static void cmd_perf(const char *args) { (void)args; hy_ui_debug_perf(); }
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -230,6 +233,8 @@ void app_main(void)
     }
 
     init_storage();
+    esp_err_t rerr = hy_sched_run_init();
+    ESP_LOGI(TAG, "hy_sched_run_init: %s", esp_err_to_name(rerr));
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
         ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));
@@ -248,13 +253,8 @@ void app_main(void)
     console_register("seed4", cmd_seed4);
     console_register("shot", cmd_shot);
     console_register("chime", cmd_chime);
+    console_register("remindtest", cmd_remindtest);
+    console_register("perf", cmd_perf);
     console_start();
 #endif
-    /* Until the reminder runner (Task 11) polls from the UI task */
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        if (hy_clock_alarm_take()) {
-            ESP_LOGI(TAG, "rtc alarm fired at %lld", (long long)time(NULL));
-        }
-    }
 }

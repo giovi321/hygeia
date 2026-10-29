@@ -1,5 +1,6 @@
 #include "hy/tzlock.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,15 +42,23 @@ bool hy_tz_enter(hy_saved_tz_t *saved, const char *posix_tz)
         }
         memcpy(saved->value, cur, n + 1);
     }
-    setenv("TZ", posix_tz ? posix_tz : "UTC0", 1);
-    tzset();
+    const char *want = posix_tz ? posix_tz : "UTC0";
+    /* Already in force (the common case: the clock's own zone): setenv + tzset would only re-parse it */
+    if (!cur || strcmp(cur, want) != 0) {
+        setenv("TZ", want, 1);
+        tzset();
+    }
     return true;
 }
 
 void hy_tz_leave(const hy_saved_tz_t *saved)
 {
-    if (saved->had) setenv("TZ", saved->value, 1);
-    else unsetenv("TZ");
-    tzset();
+    const char *cur = getenv("TZ");
+    bool same = saved->had ? (cur && strcmp(cur, saved->value) == 0) : cur == NULL;
+    if (!same) {
+        if (saved->had) setenv("TZ", saved->value, 1);
+        else unsetenv("TZ");
+        tzset();
+    }
     hy_tz_unlock();
 }

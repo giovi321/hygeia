@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "unity.h"
 #include "hy/med.h"
 #include "hy/occ.h"
@@ -122,6 +123,26 @@ static void test_tz_restored_inside_lock(void)
     TEST_ASSERT_EQUAL_STRING("UTC0", h.tz_at_unlock);
 }
 
+/* The zone already in force is not set again: the environment entry stays the caller's own string
+ * (putenv), which a setenv would replace. A different zone is still applied and restored. */
+static void test_same_zone_leaves_env_alone(void)
+{
+    static char env_tz[] = "TZ=" TZ_ZURICH;
+    putenv(env_tz);
+    tzset();
+    const char *before = getenv("TZ");
+    char buf[32];
+    hy_format_local(T_2026_11_02_0700Z, TZ_ZURICH, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_STRING("Mon 02 Nov 08:00", buf);
+    TEST_ASSERT_EQUAL_PTR(before, getenv("TZ"));
+    hy_format_local(T_2026_11_02_0700Z, TZ_NY, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_STRING("Mon 02 Nov 02:00", buf);
+    TEST_ASSERT_EQUAL_STRING(TZ_ZURICH, getenv("TZ"));
+    TEST_ASSERT_EQUAL_INT(0, h.depth);
+    setenv("TZ", "UTC0", 1);   /* stop using the static string */
+    tzset();
+}
+
 static void test_no_lock_registered_is_safe(void)
 {
     hy_tz_set_lock(NULL, NULL, NULL);
@@ -144,6 +165,7 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_occ_functions_take_the_lock);
     RUN_TEST(test_tz_restored_inside_lock);
+    RUN_TEST(test_same_zone_leaves_env_alone);
     RUN_TEST(test_no_lock_registered_is_safe);
     return UNITY_END();
 }

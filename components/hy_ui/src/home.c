@@ -8,15 +8,16 @@
 #include "hy/actions.h"
 #include "hy/clock.h"
 #include "hy/occ.h"
+#include "hy/sched_run.h"
 #include "hy/store.h"
+#include "hy/summary.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_home";
 
 #define DAY_S 86400
 #define LOG_MAX 128
-#define OCC_MAX 64
-#define RING_MAX 1000
+#define RING_MAX HY_RING_MAX
 #define RING_ANIM_MS 200
 #define TILE_BORDER 3
 
@@ -31,8 +32,8 @@ typedef struct {
 static tile_t s_tiles[HY_MAX_MEDS];
 static size_t s_ntiles;
 static lv_obj_t *s_grid, *s_time, *s_batt;
-static int64_t s_last_minute = -1;
-static hy_log_t *s_logs;   /* LOG_MAX entries, PSRAM */
+static uint32_t s_gen_seen;
+static hy_log_t *s_logs;   /* LOG_MAX entries, PSRAM: the as-needed too-soon check only */
 
 static uint32_t s_pending_id;
 static uint32_t s_pending_tick;
@@ -119,17 +120,8 @@ static int64_t as_needed_from(const hy_med_t *m, int64_t now)
     return now - span;
 }
 
-/* latest taken dose at or before now; 0 if none */
-static int64_t last_taken(size_t n, int64_t now)
-{
-    int64_t best = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (s_logs[i].status == HY_TAKEN && s_logs[i].ts <= now && s_logs[i].ts > best) {
-            best = s_logs[i].ts;
-        }
-    }
-    return best;
-}
+/* Tile status text; local define until the strings live in strings.h */
+#define STR_TILE_SNOOZED "Snoozed \xC2\xB7 %s"
 
 typedef struct {
     int32_t ring;      /* 0..RING_MAX */
@@ -138,63 +130,21 @@ typedef struct {
     char text[32];
 } view_t;
 
-static int32_t frac(int64_t from, int64_t span_s, int64_t now)
-{
-    if (from <= 0 || span_s <= 0) {
-        return 0;
-    }
-    int64_t v = (now - from) * RING_MAX / span_s;
-    return v < 0 ? 0 : v > RING_MAX ? RING_MAX : (int32_t)v;
-}
-
-static void compute(const hy_med_t *m, int64_t now, const char *tz, view_t *v)
+static void view_of(const hy_med_t *m, const hy_snapshot_t *sn, view_t *v)
 {
     memset(v, 0, sizeof *v);
-    if (m->type == HY_SCHED_AS_NEEDED) {
-        size_t na = load_logs(m, as_needed_from(m, now), now);
-        int64_t taken = last_taken(na, now);
-        v->ring = m->min_interval_min ? frac(taken, (int64_t)m->min_interval_min * 60, now) : 0;
+    hy_tile_view_t tv;
+    hy_tile_view(m, &sn->in, sn->sched, &tv);
+    v->ring = tv.ring;
+    switch (tv.kind) {
+    case HY_TILE_AS_NEEDED:
         snprintf(v->text, sizeof v->text, "as needed");
-        return;
-    }
-
-    /* previous slot over 8 days (covers a weekly schedule), logs only from its early window on */
-    static int64_t next_occ[OCC_MAX];
-    int64_t prev = hy_prev_occurrence(m, now, tz);
-    int64_t log_from = prev ? prev - (int64_t)m->early_window_min * 60 : now - DAY_S;
-    size_t n = load_logs(m, log_from, now);
-    int64_t taken = last_taken(n, now);
-    size_t nn = hy_occurrences(m, now + 1, now + 8 * DAY_S, tz, next_occ, OCC_MAX);
-    int64_t next = nn ? next_occ[0] : 0;
-
-    hy_occ_state_t st = HY_OCC_TAKEN;
-    if (prev) {
-        st = hy_occ_state(m, prev, next, now, tz, s_logs, n, NULL, 0, NULL);
-        /* a dose taken early for the upcoming slot settles the display */
-        if (next && (st == HY_OCC_DUE || st == HY_OCC_LATE || st == HY_OCC_MISSED)) {
-            hy_occ_state_t sn = hy_occ_state(m, next, 0, now, tz, s_logs, n, NULL, 0, NULL);
-            if (sn == HY_OCC_TAKEN || sn == HY_OCC_SKIPPED) {
-                st = HY_OCC_TAKEN;
-            }
-        }
-    }
-    if (st == HY_OCC_DUE || st == HY_OCC_LATE) {
-        v->ring = RING_MAX;
-        v->due = true;
-        v->style = 1;
-        snprintf(v->text, sizeof v->text, st == HY_OCC_DUE ? "Due now" : "Late");
-        return;
-    }
-    if (st == HY_OCC_MISSED) {
-        v->ring = RING_MAX;
-        v->style = 2;
-        snprintf(v->text, sizeof v->text, "Missed");
-        return;
-    }
-    int64_t from = taken ? taken : prev;
-    v->ring = (from && next && next > from) ? frac(from, next - from, now) : 0;
-    if (taken) {
-        int64_t min = (now - taken) / 60;
+        break;
+    case HY_TILE_NO_DOSE:
+        snprintf(v->text, sizeof v->text, "no dose yet");
+        break;
+    case HY_TILE_SINCE: {
+        int64_t min = (sn->in.now - tv.last_taken) / 60;
         if (min < 1) {
             snprintf(v->text, sizeof v->text, "just now");
         } else {
@@ -202,8 +152,25 @@ static void compute(const hy_med_t *m, int64_t now, const char *tz, view_t *v)
             fmt_dur(min, d, sizeof d);
             snprintf(v->text, sizeof v->text, "%s ago", d);
         }
-    } else {
-        snprintf(v->text, sizeof v->text, "no dose yet");
+        break;
+    }
+    case HY_TILE_DUE:
+    case HY_TILE_LATE:
+        v->due = true;
+        v->style = 1;
+        snprintf(v->text, sizeof v->text, tv.kind == HY_TILE_DUE ? "Due now" : "Late");
+        break;
+    case HY_TILE_SNOOZED: {
+        char hhmm[8];
+        fmt_hhmm(tv.snoozed_until, sn->in.tz, hhmm, sizeof hhmm);
+        v->style = 1;
+        snprintf(v->text, sizeof v->text, STR_TILE_SNOOZED, hhmm);
+        break;
+    }
+    case HY_TILE_MISSED:
+        v->style = 2;
+        snprintf(v->text, sizeof v->text, "Missed");
+        break;
     }
 }
 
@@ -336,20 +303,28 @@ static void set_status(tile_t *t, const char *text, int style)
     lv_obj_align(t->status, LV_ALIGN_TOP_MID, 0, 153 - TILE_BORDER - lv_font_get_line_height(f) / 2);
 }
 
+/* The medicine as the snapshot saw it; the live list for a tile the snapshot does not know yet */
+static const hy_med_t *snap_med(const hy_snapshot_t *sn, uint32_t id)
+{
+    for (size_t i = 0; i < sn->in.n_meds; i++) {
+        if (sn->in.meds[i].id == id) {
+            return &sn->in.meds[i];
+        }
+    }
+    return find_med(id);
+}
+
 void home_refresh(bool animate)
 {
     int64_t t0 = esp_timer_get_time();
-    const hy_clock_port_t *ck = hy_clock_port();
-    bool valid = ck->valid(NULL);
-    int64_t now = valid ? ck->now(NULL) : 0;
-    char tz[HY_TZ_LEN];
-    hy_clock_tz_copy(tz, sizeof tz); /* the port pointer may be replaced by a zone change */
-    update_time(now, valid, tz);
-    s_last_minute = valid ? now / 60 : -1;
+    const hy_snapshot_t *sn = hy_sched_snapshot();
+    s_gen_seen = hy_sched_generation();
+    bool valid = sn->tracking;
+    update_time(sn->in.now, valid, sn->in.tz);
 
     for (size_t i = 0; i < s_ntiles; i++) {
         tile_t *t = &s_tiles[i];
-        const hy_med_t *m = find_med(t->med_id);
+        const hy_med_t *m = snap_med(sn, t->med_id);
         if (!m) {
             continue;
         }
@@ -360,7 +335,7 @@ void home_refresh(bool animate)
             continue;
         }
         view_t v;
-        compute(m, now, tz, &v);
+        view_of(m, sn, &v);
         set_ring(t, v.ring, animate);
         set_status(t, v.text, v.style);
         lv_obj_set_style_border_opa(t->tile, v.due ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
@@ -370,6 +345,13 @@ void home_refresh(bool animate)
     ESP_LOG_LEVEL(first ? ESP_LOG_INFO : ESP_LOG_DEBUG, TAG, "home_refresh: %u tiles in %u ms",
                   (unsigned)s_ntiles, (unsigned)((us + 500) / 1000));
     first = false;
+}
+
+void home_refresh_if_changed(void)
+{
+    if (hy_sched_generation() != s_gen_seen) {
+        home_refresh(true);
+    }
 }
 
 void home_rebuild(void)
@@ -491,16 +473,5 @@ void home_tap_med(uint32_t med_id)
         ui_log_hwm("log");
     } else {
         toast_show_info(log_error_text(err));
-    }
-}
-
-/* ---- minute refresh ---- */
-
-void home_minute_tick(void)
-{
-    const hy_clock_port_t *ck = hy_clock_port();
-    int64_t minute = ck->valid(NULL) ? ck->now(NULL) / 60 : -1;
-    if (minute != s_last_minute) {
-        home_refresh(true);
     }
 }
