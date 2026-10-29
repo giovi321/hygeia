@@ -13,6 +13,8 @@ idf_component_register(
         "src/nav.c"
         "src/tzdb.c"
         "src/tzdb_data.c"
+        "src/chime.c"
+        "src/settings.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
