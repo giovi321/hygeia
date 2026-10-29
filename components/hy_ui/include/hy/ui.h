@@ -53,6 +53,7 @@ void hy_ui_debug_due(const char *arg);    /* "slide|skip|snooze|next": the due c
 void hy_ui_debug_qs(const char *arg);     /* "sound|dnd|bright <n>|time <y> <m> <d> <h> <mi>": tile taps and slider release; "view <name>": pushes qs, settings, zone, time, sound, display, about or invalid; "" opens Quick settings */
 void hy_ui_debug_settz(const char *iana); /* the zone picker's Set with that IANA name */
 void hy_ui_debug_settings(void);          /* logs the settings in the RAM copy (what NVS holds after a reboot) */
+void hy_ui_debug_gaps(void);              /* the stored untracked gaps of the last 30 days */
 #endif
 
 #ifdef __cplusplus
