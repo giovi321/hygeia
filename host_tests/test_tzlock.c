@@ -91,7 +91,7 @@ static void test_occ_functions_take_the_lock(void)
     hy_prev_occurrence(&m, T_2026_11_02_0700Z + 60, TZ_ZURICH);
     ASSERT_LOCKED_AND_BALANCED("hy_prev_occurrence");
 
-    hy_match_slot(&m, T_2026_11_02_0700Z, TZ_ZURICH, NULL, 0);
+    hy_match_slot(&m, T_2026_11_02_0700Z, TZ_ZURICH, NULL, 0, NULL);
     ASSERT_LOCKED_AND_BALANCED("hy_match_slot");
 
     hy_occ_state(&m, T_2026_11_02_0700Z + DAY, 0, T_2026_11_02_0700Z + DAY, TZ_ZURICH,
