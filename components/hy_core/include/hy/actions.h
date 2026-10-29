@@ -60,7 +60,7 @@ hy_err_t hy_act_med_archive(uint32_t id, bool archived);
 /*
  * Records a taken dose. ts 0 = now. HY_E_CLOCK if the clock is invalid;
  * HY_E_NOT_FOUND for an unknown or archived medicine. Fills tz (clock port), slot
- * (hy_match_slot over the store's logs for this medicine in
+ * (hy_match_slot, with the clock port's last_change, over the store's logs for this medicine in
  * [ts - 8 days, max(ts + early window, now)]; the bound includes now because a backdated
  * ts can precede entries written later) and
  * delta_min ((ts - slot) / 60 toward zero, 0 for a free log). A HY_MISSED entry for
@@ -111,6 +111,7 @@ typedef struct { uint32_t med_id; int64_t slot; int64_t until; } hy_snooze_t;
  * for (med, slot) exists (including a MISSED one): HY_OK, *out_log_id = 0, nothing
  * written, no event. Otherwise publishes HY_EV_MISSED with slot and drops a snooze for
  * that slot. Not undoable. HY_E_FULL when the look-back query is truncated.
+ * The caller owns the timing: no missed-deadline check is made here.
  */
 hy_err_t hy_act_mark_missed(uint32_t med_id, int64_t slot, uint32_t *out_log_id);
 
@@ -121,11 +122,15 @@ hy_err_t hy_act_mark_missed(uint32_t med_id, int64_t slot, uint32_t *out_log_id)
  * until = min(now + minutes*60, base + missed_after_min*60). Replaces an existing
  * snooze for the medicine. Publishes HY_EV_SNOOZED (ts now, slot). HY_E_CLOCK,
  * HY_E_NOT_FOUND as for log_taken (and for as-needed medicines, as for mark_missed).
+ * HY_E_FULL (nothing written) when the look-back query returns 128 logs (possibly
+ * truncated), as for log_taken.
  */
 hy_err_t hy_act_snooze(uint32_t med_id, uint16_t minutes, hy_source_t src, int64_t *out_until);
 
 /* Snoozes whose until is after now, at most HY_MAX_MEDS. Pointer valid until the next
- * action or call. A taken or skipped entry for a snoozed slot drops that snooze. */
+ * action or call. Archived medicines are skipped. A taken or skipped entry for a
+ * snoozed slot drops that snooze (a successful undo restores it unless it has expired);
+ * archiving a medicine or changing its schedule through upsert drops it too. */
 size_t hy_snoozes(const hy_snooze_t **out);
 
 /* Sets edited = true, update_log, publishes HY_EV_LOG_EDITED. No clock needed. */

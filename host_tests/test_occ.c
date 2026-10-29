@@ -257,9 +257,9 @@ static void test_early_window(void)
     m.active_from = 20261102;
     int64_t s = T_2026_11_02_0700Z;
     int64_t ts = s - 60 * MIN; /* 07:00 local */
-    TEST_ASSERT_EQUAL_INT64(s, hy_match_slot(&m, ts, TZ_ZURICH, NULL, 0));
+    TEST_ASSERT_EQUAL_INT64(s, hy_match_slot(&m, ts, TZ_ZURICH, NULL, 0, NULL));
     TEST_ASSERT_EQUAL_INT64(-60, (ts - s) / 60);
-    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, s - 61 * MIN, TZ_ZURICH, NULL, 0)); /* 06:59 */
+    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, s - 61 * MIN, TZ_ZURICH, NULL, 0, NULL)); /* 06:59 */
 }
 
 /* 2026-11-02 Zurich, slots 08:00 and 14:00. */
@@ -269,10 +269,10 @@ static void test_earliest_unsatisfied(void)
     hy_log_t logs[1];
     make_med(&m, 8 * 60, 14 * 60);
     int64_t s8 = T_2026_11_02_0700Z, s14 = s8 + 6 * HOUR;
-    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 5 * MIN, TZ_ZURICH, NULL, 0));
+    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 5 * MIN, TZ_ZURICH, NULL, 0, NULL));
     make_log(&logs[0], 1, m.id, s8 + 5 * MIN, TZ_ZURICH, HY_TAKEN, s8);
-    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, s8 + 10 * MIN, TZ_ZURICH, logs, 1));
-    TEST_ASSERT_EQUAL_INT64(s14, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, logs, 1));
+    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, s8 + 10 * MIN, TZ_ZURICH, logs, 1, NULL));
+    TEST_ASSERT_EQUAL_INT64(s14, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, logs, 1, NULL));
 }
 
 /* 2026-11-02 Zurich, slots 08:00 and 20:00. */
@@ -284,7 +284,7 @@ static void test_taken_after_missed(void)
     int64_t s = T_2026_11_02_0700Z, next = s + 12 * HOUR;
     make_log(&logs[0], 1, m.id, s + 2 * HOUR, TZ_ZURICH, HY_MISSED, s);
     /* the missed log does not satisfy the slot, so an 11:00 dose still matches it */
-    TEST_ASSERT_EQUAL_INT64(s, hy_match_slot(&m, s + 3 * HOUR, TZ_ZURICH, logs, 1));
+    TEST_ASSERT_EQUAL_INT64(s, hy_match_slot(&m, s + 3 * HOUR, TZ_ZURICH, logs, 1, NULL));
     TEST_ASSERT_EQUAL_INT(HY_OCC_MISSED,
                           hy_occ_state(&m, s, next, s + 3 * HOUR, TZ_ZURICH, logs, 1, NULL, 0, NULL));
     make_log(&logs[1], 2, m.id, s + 3 * HOUR, TZ_ZURICH, HY_TAKEN, s);
@@ -361,6 +361,25 @@ static void test_occ_base_matches_state(void)
     TEST_ASSERT_EQUAL_INT64(s, hy_occ_base(&m, s, TZ_ZURICH, NULL));
 }
 
+/* R10 deadline counts from the east-rule base: at change + 5 min (12:05 Zurich) the
+ * 08:00 slot is DUE, so the 13:00 slot's early window must not win. */
+static void test_match_slot_uses_east_base(void)
+{
+    hy_med_t m;
+    make_med(&m, 8 * 60, 13 * 60);
+    hy_tzchange_t ch;
+    memset(&ch, 0, sizeof ch);
+    ch.at = T_2026_07_15_1000Z;
+    strcpy(ch.old_tz, TZ_NY);
+    strcpy(ch.new_tz, TZ_ZURICH);
+    int64_t s8 = T_2026_07_15_0600Z;
+    int64_t s13 = s8 + 5 * HOUR;
+    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, ch.at + 5 * MIN, TZ_ZURICH, NULL, 0, &ch));
+    TEST_ASSERT_EQUAL_INT64(s13, hy_match_slot(&m, ch.at + 5 * MIN, TZ_ZURICH, NULL, 0, NULL));
+    /* once the base deadline (change + 120 min) has passed, the later slot wins again */
+    TEST_ASSERT_EQUAL_INT64(s13, hy_match_slot(&m, ch.at + 121 * MIN, TZ_ZURICH, NULL, 0, &ch));
+}
+
 /* 2026-11-02: taken 08:05 Zurich for the 08:00 slot, then change to New York;
  * the New York 08:00 slot of the same calendar day is already taken. */
 static void test_west_no_repeat(void)
@@ -429,10 +448,10 @@ static void test_match_free_for_as_needed_and_archived(void)
     hy_med_t m;
     make_med(&m, 8 * 60, 0xFFFF);
     m.type = HY_SCHED_AS_NEEDED;
-    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, T_2026_11_02_0700Z, TZ_ZURICH, NULL, 0));
+    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, T_2026_11_02_0700Z, TZ_ZURICH, NULL, 0, NULL));
     make_med(&m, 8 * 60, 0xFFFF);
     m.archived = true;
-    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, T_2026_11_02_0700Z, TZ_ZURICH, NULL, 0));
+    TEST_ASSERT_EQUAL_INT64(0, hy_match_slot(&m, T_2026_11_02_0700Z, TZ_ZURICH, NULL, 0, NULL));
 }
 
 /* A saved TZ too long for the fixed save buffer is never clobbered. */
@@ -463,7 +482,7 @@ static void test_match_prefers_upcoming_over_missed_daily(void)
     make_med(&m, 8 * 60, 0xFFFF);
     int64_t today = T_2026_11_02_0700Z, yday = today - DAY;
     make_log(&logs[0], 1, m.id, yday + 2 * HOUR, TZ_ZURICH, HY_MISSED, yday);
-    TEST_ASSERT_EQUAL_INT64(today, hy_match_slot(&m, today - 15 * MIN, TZ_ZURICH, logs, 1));
+    TEST_ASSERT_EQUAL_INT64(today, hy_match_slot(&m, today - 15 * MIN, TZ_ZURICH, logs, 1, NULL));
 }
 
 /* 2026-11-02 Zurich, slots 08:00 and 14:00, the 08:00 slot MISSED. A dose at
@@ -476,8 +495,8 @@ static void test_match_prefers_upcoming_over_missed_same_day(void)
     make_med(&m, 8 * 60, 14 * 60);
     int64_t s8 = T_2026_11_02_0700Z, s14 = s8 + 6 * HOUR;
     make_log(&logs[0], 1, m.id, s8 + 2 * HOUR, TZ_ZURICH, HY_MISSED, s8);
-    TEST_ASSERT_EQUAL_INT64(s14, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, logs, 1));
-    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 3 * HOUR, TZ_ZURICH, logs, 1));
+    TEST_ASSERT_EQUAL_INT64(s14, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, logs, 1, NULL));
+    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 3 * HOUR, TZ_ZURICH, logs, 1, NULL));
 }
 
 /* Same slots, missed_after_min 360 (08:00 deadline 14:00): at 13:30 the 08:00
@@ -488,7 +507,7 @@ static void test_match_earliest_wins_before_missed_deadline(void)
     make_med(&m, 8 * 60, 14 * 60);
     m.missed_after_min = 360;
     int64_t s8 = T_2026_11_02_0700Z;
-    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, NULL, 0));
+    TEST_ASSERT_EQUAL_INT64(s8, hy_match_slot(&m, s8 + 5 * HOUR + 30 * MIN, TZ_ZURICH, NULL, 0, NULL));
 }
 
 /* A logged miss wins over a gap that would make the slot untracked. */
@@ -539,6 +558,7 @@ int main(void)
     RUN_TEST(test_untracked_gap);
     RUN_TEST(test_east_jump_due_on_arrival);
     RUN_TEST(test_occ_base_matches_state);
+    RUN_TEST(test_match_slot_uses_east_base);
     RUN_TEST(test_west_no_repeat);
     RUN_TEST(test_west_rule_other_day);
     RUN_TEST(test_min_interval);

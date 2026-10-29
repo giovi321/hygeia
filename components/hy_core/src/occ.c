@@ -264,7 +264,7 @@ int64_t hy_prev_occurrence(const hy_med_t *m, int64_t now, const char *posix_tz)
 }
 
 int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
-                      const hy_log_t *logs, size_t n_logs)
+                      const hy_log_t *logs, size_t n_logs, const hy_tzchange_t *last_change)
 {
     if (!m || m->archived || m->type != HY_SCHED_FIXED) return 0;
     if (!logs) n_logs = 0;
@@ -286,8 +286,9 @@ int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
             if (slot_satisfied(m, s, logs, n_logs)) continue;
             if (cand == 0) {
                 cand = s;
-                /* Not yet past its missed deadline: the earliest slot wins. */
-                if (ts < cand + missed) return cand;
+                /* Not yet past its missed deadline (counted from the east-rule base):
+                 * the earliest slot wins. */
+                if (ts < hy_occ_base(m, cand, posix_tz, last_change) + missed) return cand;
                 continue;
             }
             /* The earliest candidate is already missed: a later unsatisfied slot

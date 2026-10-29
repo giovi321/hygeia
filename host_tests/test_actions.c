@@ -813,6 +813,11 @@ static void test_snooze_clipped_at_missed(void)
     int64_t until = 0;
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
     TEST_ASSERT_EQUAL_INT64(D0 + H(10, 0), until);
+    const hy_snooze_t *sn;
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_INT64(D0 + H(10, 0), sn[0].until);
+    TEST_ASSERT_EQUAL_INT(HY_EV_SNOOZED, evs[0].type);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), evs[0].slot);
 }
 
 static void test_snooze_rejected_when_upcoming_or_missed(void)
@@ -859,6 +864,103 @@ static void test_snooze_after_east_jump(void)
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
     TEST_ASSERT_EQUAL_INT64(clk.now + 15 * 60, until);
     TEST_ASSERT_EQUAL_INT64(T_R6_0600Z, evs[0].slot);
+}
+
+
+static void init_zurich_two_slots(void)
+{
+    st.meds[0].times[1] = 13 * 60;
+    st.meds[0].n_times = 2;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port_zurich, NULL));
+}
+
+static void test_snooze_east_two_slots(void)
+{
+    init_zurich_two_slots();
+    clk.now = T_R6_1000Z + 5 * 60;
+    int64_t until = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
+    TEST_ASSERT_EQUAL_INT64(clk.now + 15 * 60, until);
+    TEST_ASSERT_EQUAL_INT64(T_R6_0600Z, evs[0].slot);
+}
+
+static void test_taken_east_two_slots(void)
+{
+    init_zurich_two_slots();
+    clk.now = T_R6_1000Z + 5 * 60;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT64(T_R6_0600Z, st.logs[0].slot);
+}
+
+static void test_snooze_east_clipped(void)
+{
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port_zurich, NULL));
+    clk.now = T_R6_1000Z + 110 * 60;
+    int64_t until = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
+    TEST_ASSERT_EQUAL_INT64(T_R6_1000Z + 120 * 60, until);
+}
+
+static void test_undo_restores_snooze(void)
+{
+    const hy_snooze_t *sn;
+    int64_t until = 0;
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, &id));
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+    clk.now += 2;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_UINT32(1, sn[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), sn[0].slot);
+    TEST_ASSERT_EQUAL_INT64(until, sn[0].until);
+
+    /* skipped, then undone */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_skip(1, HY_SRC_SCREEN, &id));
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+    clk.now += 2;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+}
+
+static void test_undo_does_not_restore_expired_snooze(void)
+{
+    const hy_snooze_t *sn;
+    uint32_t id = 0;
+    clk.now = D0 + H(8, 5);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 1, HY_SRC_SCREEN, NULL)); /* until 08:06:00 */
+    clk.now = D0 + H(8, 5) + 58;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, &id));
+    clk.now += 4; /* 08:06:02, inside the undo window, past the snooze */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+}
+
+static void test_archive_and_schedule_change_drop_snooze(void)
+{
+    const hy_snooze_t *sn;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(3, 15, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_size_t(2, hy_snoozes(&sn));
+
+    /* a name change keeps the snooze */
+    hy_med_t upd = *med_by_id(1);
+    strcpy(upd.name, "Antibiotic 2");
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&upd));
+    TEST_ASSERT_EQUAL_size_t(2, hy_snoozes(&sn));
+
+    /* a time change drops it */
+    upd.times[0] = 9 * 60;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&upd));
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_UINT32(3, sn[0].med_id);
+
+    /* archiving drops it */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_archive(3, true));
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_archive(3, false));
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
 }
 
 int main(void)
@@ -912,5 +1014,11 @@ int main(void)
     RUN_TEST(test_taken_drops_snooze);
     RUN_TEST(test_mark_missed_drops_snooze);
     RUN_TEST(test_snooze_after_east_jump);
+    RUN_TEST(test_snooze_east_two_slots);
+    RUN_TEST(test_taken_east_two_slots);
+    RUN_TEST(test_snooze_east_clipped);
+    RUN_TEST(test_undo_restores_snooze);
+    RUN_TEST(test_undo_does_not_restore_expired_snooze);
+    RUN_TEST(test_archive_and_schedule_change_drop_snooze);
     return UNITY_END();
 }

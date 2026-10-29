@@ -35,15 +35,16 @@ typedef struct { int64_t at; char old_tz[HY_TZ_LEN]; char new_tz[HY_TZ_LEN]; } h
  * following occurrence of the same medicine. A slot is satisfied by a log for
  * this medicine with status HY_TAKEN or HY_SKIPPED and that slot (a HY_MISSED
  * log does not satisfy it). Exception: if that earliest unsatisfied slot is
- * already past its missed deadline at ts (ts >= slot + missed_after_min) and a
+ * already past its missed deadline at ts (ts >= hy_occ_base(slot) + missed_after_min,
+ * so a forward zone change in last_change delays the deadline) and a
  * later unsatisfied slot's early window [s - early_window_min, s) contains ts,
  * the later slot wins, so a dose taken early for the upcoming slot is not
  * attributed to a missed one. Occurrences in [ts - 8 days, ts + early_window_min]
  * are considered. Returns the slot, or 0 for a free log, an as-needed or an
- * archived medicine.
+ * archived medicine. last_change may be NULL.
  */
 int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
-                      const hy_log_t *logs, size_t n_logs);
+                      const hy_log_t *logs, size_t n_logs, const hy_tzchange_t *last_change);
 
 /* The instant an occurrence's state clock counts from (east rule), as hy_occ_state
  * uses it: the slot, or last_change->at when the slot lies in the skipped wall-clock

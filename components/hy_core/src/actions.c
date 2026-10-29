@@ -17,6 +17,8 @@ typedef struct {
     bool pill_dec;       /* a pill was taken off pills_left */
     bool converted;      /* a MISSED entry was updated in place */
     hy_log_t original;   /* valid when converted */
+    bool had_snooze;     /* the entry dropped a snooze */
+    hy_snooze_t snooze;  /* valid when had_snooze */
 } undo_rec_t;
 
 static const hy_store_port_t *store;
@@ -34,6 +36,7 @@ static hy_log_t qbuf[QUERY_MAX];
 static hy_snooze_t snz[HY_MAX_MEDS];
 static size_t n_snz;
 static hy_snooze_t snz_out[HY_MAX_MEDS];
+static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out);
 
 static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id, int64_t slot)
 {
@@ -103,6 +106,7 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
 
     memcpy(scratch, meds, n_meds * sizeof meds[0]);
     size_t n = n_meds;
+    bool drop_snooze = false;
     hy_med_t entry = *m;
     if (m->id == 0) {
         if (n_meds >= HY_MAX_MEDS) return HY_E_FULL;
@@ -120,6 +124,11 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
          * the caller turns counting on, when its value is the starting count. */
         if (!(m->pills_enabled && !scratch[i].pills_enabled))
             entry.pills_left = scratch[i].pills_left;
+        const hy_med_t *old = &scratch[i];
+        drop_snooze = entry.archived || entry.type != old->type || entry.n_times != old->n_times ||
+                      memcmp(entry.times, old->times, entry.n_times * sizeof entry.times[0]) != 0 ||
+                      entry.weekdays != old->weekdays || entry.active_from != old->active_from ||
+                      entry.active_until != old->active_until;
         scratch[i] = entry;
     }
     sort_meds(scratch, n);
@@ -127,6 +136,7 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
 
     memcpy(meds, scratch, n * sizeof meds[0]);
     n_meds = n;
+    if (drop_snooze) snooze_drop(entry.id, 0, NULL);
     m->id = entry.id;
     publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, entry.id, 0, 0);
     return HY_OK;
@@ -183,14 +193,38 @@ static undo_rec_t *undo_add(void)
 
 /* ---- snoozes ---- */
 
-static void snooze_drop(uint32_t med_id, int64_t slot)
+/* Drops the snooze of med_id (when slot is not 0, only if it is for that slot). Returns
+ * true and fills *out when one was dropped. */
+static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out)
 {
     for (size_t i = 0; i < n_snz; i++) {
-        if (snz[i].med_id == med_id && snz[i].slot == slot) {
+        if (snz[i].med_id == med_id && (slot == 0 || snz[i].slot == slot)) {
+            if (out) *out = snz[i];
             snz[i] = snz[--n_snz];
-            return;
+            return true;
         }
     }
+    return false;
+}
+
+/* Sets the snooze of a medicine, replacing an existing one. */
+static hy_err_t snooze_set(const hy_snooze_t *s)
+{
+    size_t i;
+    for (i = 0; i < n_snz; i++)
+        if (snz[i].med_id == s->med_id) break;
+    if (i == n_snz) {
+        if (n_snz >= HY_MAX_MEDS) return HY_E_FULL;
+        n_snz++;
+    }
+    snz[i] = *s;
+    return HY_OK;
+}
+
+/* The clock port's last zone change, or NULL (*buf is the storage). */
+static const hy_tzchange_t *last_change_of(hy_tzchange_t *buf)
+{
+    return (clk->last_change && clk->last_change(clk_ctx, buf)) ? buf : NULL;
 }
 
 /* ---- taken and skipped ---- */
@@ -224,7 +258,8 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
         if (now > hi) hi = now;
         n = store->query_log(store_ctx, ts - LOOKBACK_S, hi + 1, med_id, qbuf, QUERY_MAX);
         if (n >= QUERY_MAX) return HY_E_FULL; /* possibly truncated: do not match on partial data */
-        slot = hy_match_slot(med, ts, tz, qbuf, n);
+        hy_tzchange_t chbuf;
+        slot = hy_match_slot(med, ts, tz, qbuf, n, last_change_of(&chbuf));
     }
     if (status == HY_SKIPPED && slot == 0) return HY_E_INVALID;
 
@@ -269,7 +304,7 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
         rec.pill_dec = true;
     }
 
-    if (slot != 0) snooze_drop(med_id, slot);
+    if (slot != 0) rec.had_snooze = snooze_drop(med_id, slot, &rec.snooze);
 
     undo_rec_t *r = undo_add();
     *r = rec;
@@ -343,7 +378,7 @@ hy_err_t hy_act_mark_missed(uint32_t med_id, int64_t slot, uint32_t *out_log_id)
     e.source = HY_SRC_AUTO;
     if (store->append_log(store_ctx, &e) != HY_OK) return HY_E_IO;
 
-    snooze_drop(med_id, slot);
+    snooze_drop(med_id, slot, NULL);
     if (out_log_id) *out_log_id = e.id;
     publish(HY_EV_MISSED, now, med_id, e.id, slot);
     return HY_OK;
@@ -365,28 +400,21 @@ hy_err_t hy_act_snooze(uint32_t med_id, uint16_t minutes, hy_source_t src, int64
     int64_t hi = now + (int64_t)med->early_window_min * 60;
     size_t n = store->query_log(store_ctx, now - LOOKBACK_S, hi + 1, med_id, qbuf, QUERY_MAX);
     if (n >= QUERY_MAX) return HY_E_FULL;
-    int64_t slot = hy_match_slot(med, now, tz, qbuf, n);
+    hy_tzchange_t ch;
+    const hy_tzchange_t *lc = last_change_of(&ch);
+    int64_t slot = hy_match_slot(med, now, tz, qbuf, n, lc);
     if (slot == 0) return HY_E_INVALID;
 
-    hy_tzchange_t ch;
-    bool have_ch = clk->last_change && clk->last_change(clk_ctx, &ch);
-    int64_t base = hy_occ_base(med, slot, tz, have_ch ? &ch : NULL);
+    int64_t base = hy_occ_base(med, slot, tz, lc);
     int64_t deadline = base + (int64_t)med->missed_after_min * 60;
     if (now < base || now >= deadline) return HY_E_INVALID;
 
     int64_t until = now + (int64_t)minutes * 60;
     if (until > deadline) until = deadline;
 
-    size_t i;
-    for (i = 0; i < n_snz; i++)
-        if (snz[i].med_id == med_id) break;
-    if (i == n_snz) {
-        if (n_snz >= HY_MAX_MEDS) return HY_E_FULL;
-        n_snz++;
-    }
-    snz[i].med_id = med_id;
-    snz[i].slot = slot;
-    snz[i].until = until;
+    hy_snooze_t ns = { med_id, slot, until };
+    hy_err_t serr = snooze_set(&ns);
+    if (serr != HY_OK) return serr;
 
     if (out_until) *out_until = until;
     publish(HY_EV_SNOOZED, now, med_id, 0, slot);
@@ -399,7 +427,10 @@ size_t hy_snoozes(const hy_snooze_t **out)
     if (inited && clk->valid(clk_ctx)) {
         int64_t now = clk->now(clk_ctx);
         for (size_t i = 0; i < n_snz; i++)
-            if (snz[i].until > now) snz_out[k++] = snz[i];
+            if (snz[i].until > now) {
+                const hy_med_t *med = find_med(snz[i].med_id);
+                if (med && !med->archived) snz_out[k++] = snz[i];
+            }
     }
     if (out) *out = snz_out;
     return k;
@@ -425,7 +456,11 @@ hy_err_t hy_act_undo(uint32_t log_id)
     int64_t ts = r->ts;
     int64_t slot = r->slot;
     bool dec = r->pill_dec;
+    bool had_snooze = r->had_snooze;
+    hy_snooze_t snooze = r->snooze;
     r->used = false;
+
+    if (had_snooze && snooze.until > now) (void)snooze_set(&snooze);
 
     if (dec) {
         hy_med_t *med = find_med(med_id);
