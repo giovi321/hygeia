@@ -31,6 +31,9 @@ static undo_rec_t undo[UNDO_SLOTS];
 static size_t undo_next;
 static bool inited;
 static hy_log_t qbuf[QUERY_MAX];
+static hy_snooze_t snz[HY_MAX_MEDS];
+static size_t n_snz;
+static hy_snooze_t snz_out[HY_MAX_MEDS];
 
 static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id, int64_t slot)
 {
@@ -64,6 +67,7 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
 {
     memset(meds, 0, sizeof meds);
     memset(undo, 0, sizeof undo);
+    n_snz = 0;
     n_meds = 0;
     undo_next = 0;
     inited = false;
@@ -177,6 +181,18 @@ static undo_rec_t *undo_add(void)
     return r;
 }
 
+/* ---- snoozes ---- */
+
+static void snooze_drop(uint32_t med_id, int64_t slot)
+{
+    for (size_t i = 0; i < n_snz; i++) {
+        if (snz[i].med_id == med_id && snz[i].slot == slot) {
+            snz[i] = snz[--n_snz];
+            return;
+        }
+    }
+}
+
 /* ---- taken and skipped ---- */
 
 /* Common path of log_taken and skip. A skip passes ts 0 (now) and needs a matched slot. */
@@ -253,6 +269,8 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
         rec.pill_dec = true;
     }
 
+    if (slot != 0) snooze_drop(med_id, slot);
+
     undo_rec_t *r = undo_add();
     *r = rec;
     r->used = true;
@@ -276,6 +294,115 @@ hy_err_t hy_act_log_taken(uint32_t med_id, int64_t ts, const char *note,
 hy_err_t hy_act_skip(uint32_t med_id, hy_source_t src, uint32_t *out_log_id)
 {
     return write_entry(med_id, HY_SKIPPED, 0, NULL, src, out_log_id);
+}
+
+/* Copies the clock port's zone once (see write_entry). */
+static void copy_tz(char tz[HY_TZ_LEN])
+{
+    const char *ptz = clk->tz(clk_ctx);
+    strncpy(tz, ptz ? ptz : "UTC0", HY_TZ_LEN - 1);
+    tz[HY_TZ_LEN - 1] = '\0';
+}
+
+hy_err_t hy_act_mark_missed(uint32_t med_id, int64_t slot, uint32_t *out_log_id)
+{
+    if (!inited) return HY_E_INVALID;
+    if (!clk->valid(clk_ctx)) return HY_E_CLOCK;
+    hy_med_t *med = find_med(med_id);
+    if (!med || med->archived || med->type != HY_SCHED_FIXED) return HY_E_NOT_FOUND;
+
+    int64_t now = clk->now(clk_ctx);
+    char tz[HY_TZ_LEN];
+    copy_tz(tz);
+
+    int64_t occ[1];
+    if (hy_occurrences(med, slot, slot + 1, tz, occ, 1) != 1 || occ[0] != slot) return HY_E_INVALID;
+
+    /* Any entry for the slot (taken, skipped or missed) means nothing to do. Entries are
+     * indexed by their own ts, which can be backdated, so the range reaches back 8 days
+     * and forward to the later of now and the end of the early window. */
+    int64_t hi = slot + (int64_t)med->early_window_min * 60;
+    if (now > hi) hi = now;
+    size_t n = store->query_log(store_ctx, slot - LOOKBACK_S, hi + 1, med_id, qbuf, QUERY_MAX);
+    if (n >= QUERY_MAX) return HY_E_FULL;
+    for (size_t i = 0; i < n; i++) {
+        if (qbuf[i].med_id == med_id && qbuf[i].slot == slot) {
+            if (out_log_id) *out_log_id = 0;
+            return HY_OK;
+        }
+    }
+
+    hy_log_t e;
+    memset(&e, 0, sizeof e);
+    e.med_id = med_id;
+    e.ts = now;
+    memcpy(e.tz, tz, sizeof e.tz);
+    e.status = HY_MISSED;
+    e.slot = slot;
+    e.delta_min = (int32_t)((now - slot) / 60);
+    e.source = HY_SRC_AUTO;
+    if (store->append_log(store_ctx, &e) != HY_OK) return HY_E_IO;
+
+    snooze_drop(med_id, slot);
+    if (out_log_id) *out_log_id = e.id;
+    publish(HY_EV_MISSED, now, med_id, e.id, slot);
+    return HY_OK;
+}
+
+hy_err_t hy_act_snooze(uint32_t med_id, uint16_t minutes, hy_source_t src, int64_t *out_until)
+{
+    (void)src;
+    if (!inited) return HY_E_INVALID;
+    if (!clk->valid(clk_ctx)) return HY_E_CLOCK;
+    hy_med_t *med = find_med(med_id);
+    if (!med || med->archived || med->type != HY_SCHED_FIXED) return HY_E_NOT_FOUND;
+    if (minutes < 1 || minutes > 120) return HY_E_INVALID;
+
+    int64_t now = clk->now(clk_ctx);
+    char tz[HY_TZ_LEN];
+    copy_tz(tz);
+
+    int64_t hi = now + (int64_t)med->early_window_min * 60;
+    size_t n = store->query_log(store_ctx, now - LOOKBACK_S, hi + 1, med_id, qbuf, QUERY_MAX);
+    if (n >= QUERY_MAX) return HY_E_FULL;
+    int64_t slot = hy_match_slot(med, now, tz, qbuf, n);
+    if (slot == 0) return HY_E_INVALID;
+
+    hy_tzchange_t ch;
+    bool have_ch = clk->last_change && clk->last_change(clk_ctx, &ch);
+    int64_t base = hy_occ_base(med, slot, tz, have_ch ? &ch : NULL);
+    int64_t deadline = base + (int64_t)med->missed_after_min * 60;
+    if (now < base || now >= deadline) return HY_E_INVALID;
+
+    int64_t until = now + (int64_t)minutes * 60;
+    if (until > deadline) until = deadline;
+
+    size_t i;
+    for (i = 0; i < n_snz; i++)
+        if (snz[i].med_id == med_id) break;
+    if (i == n_snz) {
+        if (n_snz >= HY_MAX_MEDS) return HY_E_FULL;
+        n_snz++;
+    }
+    snz[i].med_id = med_id;
+    snz[i].slot = slot;
+    snz[i].until = until;
+
+    if (out_until) *out_until = until;
+    publish(HY_EV_SNOOZED, now, med_id, 0, slot);
+    return HY_OK;
+}
+
+size_t hy_snoozes(const hy_snooze_t **out)
+{
+    size_t k = 0;
+    if (inited && clk->valid(clk_ctx)) {
+        int64_t now = clk->now(clk_ctx);
+        for (size_t i = 0; i < n_snz; i++)
+            if (snz[i].until > now) snz_out[k++] = snz[i];
+    }
+    if (out) *out = snz_out;
+    return k;
 }
 
 hy_err_t hy_act_undo(uint32_t log_id)

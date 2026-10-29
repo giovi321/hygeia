@@ -75,6 +75,22 @@ static int64_t c_now(void *c) { (void)c; return clk.now; }
 static const char *c_tz(void *c) { (void)c; return "UTC0"; }
 static bool c_valid(void *c) { (void)c; return clk.valid; }
 static const hy_clock_port_t clock_port = { c_now, c_tz, c_valid, NULL };
+/* Zurich clock with a recorded change from New York (plan-1 R6 setup, 2026-07-15). */
+#define TZ_ZURICH "CET-1CEST,M3.5.0,M10.5.0/3"
+#define TZ_NY     "EST5EDT,M3.2.0,M11.1.0"
+#define T_R6_0600Z 1784095200LL /* 08:00 CEST Zurich */
+#define T_R6_1000Z 1784109600LL /* change instant */
+static const char *cz_tz(void *c) { (void)c; return TZ_ZURICH; }
+static bool cz_last(void *c, hy_tzchange_t *out)
+{
+    (void)c;
+    memset(out, 0, sizeof *out);
+    out->at = T_R6_1000Z;
+    strcpy(out->old_tz, TZ_NY);
+    strcpy(out->new_tz, TZ_ZURICH);
+    return true;
+}
+static const hy_clock_port_t clock_port_zurich = { c_now, cz_tz, c_valid, cz_last };
 
 /* ---- event recorder ---- */
 static hy_event_t evs[32]; static int n_evs; static int sub;
@@ -685,6 +701,166 @@ static void test_events_carry_slot(void)
     TEST_ASSERT_EQUAL_INT64(0, evs[0].slot);
 }
 
+
+/* ---- missed and snooze ---- */
+
+static void test_mark_missed_writes_auto_entry(void)
+{
+    clk.now = D0 + H(10, 0);
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_mark_missed(1, D0 + H(8, 0), &id));
+    TEST_ASSERT_EQUAL_size_t(1, st.n_logs);
+    TEST_ASSERT_TRUE(id != 0);
+    TEST_ASSERT_EQUAL_UINT32(id, st.logs[0].id);
+    TEST_ASSERT_EQUAL_INT(HY_MISSED, st.logs[0].status);
+    TEST_ASSERT_EQUAL_INT(HY_SRC_AUTO, st.logs[0].source);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), st.logs[0].slot);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(10, 0), st.logs[0].ts);
+    TEST_ASSERT_EQUAL_INT32(120, st.logs[0].delta_min);
+    TEST_ASSERT_EQUAL_STRING("UTC0", st.logs[0].tz);
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL_INT(HY_EV_MISSED, evs[0].type);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), evs[0].slot);
+    TEST_ASSERT_EQUAL_UINT32(1, evs[0].med_id);
+}
+
+static void test_mark_missed_idempotent(void)
+{
+    clk.now = D0 + H(10, 0);
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_mark_missed(1, D0 + H(8, 0), &id));
+    n_evs = 0;
+    id = 77;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_mark_missed(1, D0 + H(8, 0), &id));
+    TEST_ASSERT_EQUAL_UINT32(0, id);
+    TEST_ASSERT_EQUAL_size_t(1, st.n_logs);
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+
+    /* same when a taken entry exists for the slot */
+    clk.now = D0 + H(8, 30);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(3, 0, NULL, HY_SRC_SCREEN, NULL));
+    n_evs = 0;
+    id = 77;
+    clk.now = D0 + H(10, 0);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_mark_missed(3, D0 + H(8, 0), &id));
+    TEST_ASSERT_EQUAL_UINT32(0, id);
+    TEST_ASSERT_EQUAL_size_t(2, st.n_logs);
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void test_mark_missed_rejects_non_slot(void)
+{
+    clk.now = D0 + H(10, 0);
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_mark_missed(1, D0 + H(8, 0) + 60, NULL));
+    TEST_ASSERT_EQUAL_size_t(0, st.n_logs);
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void test_mark_missed_errors(void)
+{
+    clk.now = D0 + H(10, 0);
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_mark_missed(99, D0 + H(8, 0), NULL));
+    st.meds[2].type = HY_SCHED_AS_NEEDED; st.meds[2].n_times = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_mark_missed(3, D0 + H(8, 0), NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_archive(1, true));
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_mark_missed(1, D0 + H(8, 0), NULL));
+    clk.valid = false;
+    TEST_ASSERT_EQUAL_INT(HY_E_CLOCK, hy_act_mark_missed(2, D0 + H(8, 0), NULL));
+    TEST_ASSERT_EQUAL_size_t(0, st.n_logs);
+}
+
+static void test_snooze_basic(void)
+{
+    int64_t until = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 20), until);
+    const hy_snooze_t *sn;
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_UINT32(1, sn[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), sn[0].slot);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 20), sn[0].until);
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL_INT(HY_EV_SNOOZED, evs[0].type);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), evs[0].slot);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 5), evs[0].ts);
+    TEST_ASSERT_EQUAL_size_t(0, st.n_logs);
+
+    /* replaces the existing snooze, and expires */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 30, HY_SRC_SCREEN, &until));
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 35), sn[0].until);
+    clk.now = D0 + H(8, 35);
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+}
+
+static void test_snooze_bad_args(void)
+{
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_snooze(1, 0, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_snooze(1, 121, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_snooze(99, 10, HY_SRC_SCREEN, NULL));
+    st.meds[2].type = HY_SCHED_AS_NEEDED; st.meds[2].n_times = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_snooze(3, 10, HY_SRC_SCREEN, NULL));
+    clk.valid = false;
+    TEST_ASSERT_EQUAL_INT(HY_E_CLOCK, hy_act_snooze(1, 10, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void test_snooze_clipped_at_missed(void)
+{
+    clk.now = D0 + H(9, 50);
+    int64_t until = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
+    TEST_ASSERT_EQUAL_INT64(D0 + H(10, 0), until);
+}
+
+static void test_snooze_rejected_when_upcoming_or_missed(void)
+{
+    clk.now = D0 + H(7, 30);
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_snooze(1, 15, HY_SRC_SCREEN, NULL));
+    clk.now = D0 + H(10, 0);
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_snooze(1, 15, HY_SRC_SCREEN, NULL));
+    const hy_snooze_t *sn;
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void test_taken_drops_snooze(void)
+{
+    const hy_snooze_t *sn;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+    /* skipped drops it too */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(3, 15, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_skip(3, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+}
+
+static void test_mark_missed_drops_snooze(void)
+{
+    const hy_snooze_t *sn;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(3, 15, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_size_t(2, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_mark_missed(1, D0 + H(8, 0), NULL));
+    TEST_ASSERT_EQUAL_size_t(1, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_UINT32(3, sn[0].med_id);
+}
+
+static void test_snooze_after_east_jump(void)
+{
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port_zurich, NULL));
+    clk.now = T_R6_1000Z + 5 * 60;
+    int64_t until = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(1, 15, HY_SRC_SCREEN, &until));
+    TEST_ASSERT_EQUAL_INT64(clk.now + 15 * 60, until);
+    TEST_ASSERT_EQUAL_INT64(T_R6_0600Z, evs[0].slot);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -725,5 +901,16 @@ int main(void)
     RUN_TEST(test_upsert_enabling_pills_takes_caller_count);
     RUN_TEST(test_pills_set);
     RUN_TEST(test_events_carry_slot);
+    RUN_TEST(test_mark_missed_writes_auto_entry);
+    RUN_TEST(test_mark_missed_idempotent);
+    RUN_TEST(test_mark_missed_rejects_non_slot);
+    RUN_TEST(test_mark_missed_errors);
+    RUN_TEST(test_snooze_basic);
+    RUN_TEST(test_snooze_bad_args);
+    RUN_TEST(test_snooze_clipped_at_missed);
+    RUN_TEST(test_snooze_rejected_when_upcoming_or_missed);
+    RUN_TEST(test_taken_drops_snooze);
+    RUN_TEST(test_mark_missed_drops_snooze);
+    RUN_TEST(test_snooze_after_east_jump);
     return UNITY_END();
 }

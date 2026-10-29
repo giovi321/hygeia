@@ -356,6 +356,12 @@ static int64_t state_base(int64_t slot, const char *posix_tz, const hy_tzchange_
     return slot;
 }
 
+int64_t hy_occ_base(const hy_med_t *m, int64_t slot, const char *posix_tz, const hy_tzchange_t *last_change)
+{
+    (void)m;
+    return state_base(slot, posix_tz, last_change);
+}
+
 hy_occ_state_t hy_occ_state(const hy_med_t *m, int64_t slot, int64_t next_slot, int64_t now,
                             const char *posix_tz,
                             const hy_log_t *logs, size_t n_logs,
