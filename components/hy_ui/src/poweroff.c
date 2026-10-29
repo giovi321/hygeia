@@ -19,22 +19,18 @@
 #include "hy/sched_run.h"
 #include "hy/store.h"
 #include "hy/summary.h"
+#include "slide.h"
 #include "ui_internal.h"
 
 static const char *TAG = "poweroff";
 
 #define TRACK_X       26
 #define TRACK_Y       250
-#define TRACK_W       (HY_SCREEN - 2 * TRACK_X)
-#define TRACK_H       88
-#define KNOB_D        72
-#define KNOB_PAD      ((TRACK_H - KNOB_D) / 2)
-#define TRAVEL        (TRACK_W - 2 * KNOB_PAD - KNOB_D)
-#define COMPLETE_PCT  90
+#define TRACK_W       SLIDE_TRACK_W
+#define TRACK_H       SLIDE_TRACK_H
 #define CANCEL_Y      370
 #define CANCEL_H      64
 #define FADE_MS       150
-#define BACK_MS       150
 #define TIMEOUT_MS    30000
 #define COUNTDOWN_S   60
 #define TICK_MS       500
@@ -48,9 +44,7 @@ static lv_timer_t *s_tmr;
 static uint32_t s_cd_t0;     /* lv_tick at the countdown start */
 static int s_cd_shown = -1;  /* seconds on the label */
 
-/* knob drag */
-static bool s_drag;
-static int32_t s_x0, s_off0, s_off;
+static slide_t s_slide;
 
 static const lv_point_precise_t power_line[] = {{36, 18}, {36, 37}};
 
@@ -59,17 +53,9 @@ static void opa_exec(void *o, int32_t v)
     lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0);
 }
 
-static void x_exec(void *o, int32_t v)
-{
-    lv_obj_set_x((lv_obj_t *)o, v);
-}
-
 static void knob_reset(void)
 {
-    lv_anim_delete(s_knob, x_exec);
-    lv_obj_set_x(s_knob, KNOB_PAD);
-    s_off = 0;
-    s_drag = false;
+    slide_reset(&s_slide);
 }
 
 bool poweroff_visible(void)
@@ -107,7 +93,7 @@ static void open_common(void)
 }
 
 /* Closes either mode. No log of its own: the callers say why. */
-static void close_overlay(void)
+static void close_overlay(bool flush_toast)
 {
     s_mode = M_NONE;
     knob_reset();
@@ -116,7 +102,9 @@ static void close_overlay(void)
     lv_obj_set_hidden(s_ov, true);
     ui_nav_set_poweroff(false);
     idle_set_hold(false);
-    ui_battery_toast_flush();   /* a low-battery toast held while the overlay was up */
+    if (flush_toast) {
+        ui_battery_toast_flush();   /* a low-battery toast held while the overlay was up */
+    }
 }
 
 static bool warn_needed(void)
@@ -167,7 +155,7 @@ void poweroff_cancel(void)
     if (s_mode != M_CONFIRM) {
         return;
     }
-    close_overlay();
+    close_overlay(true);
     ESP_LOGI(TAG, "poweroff: hide");
 }
 
@@ -177,7 +165,11 @@ static void failed(void)
     idle_brightness_stop();
     hy_board_set_brightness(hy_settings()->brightness);
     lv_obj_invalidate(lv_screen_active());
-    close_overlay();
+    int64_t wake = hy_sched_run_next_wake();   /* hy_power_off cleared the RTC alarm: arm it again */
+    if (wake) {
+        hy_clock_alarm_set(wake);
+    }
+    close_overlay(false);   /* a held low-battery toast stays pending: the failed toast's end flushes it */
     ESP_LOGE(TAG, "poweroff: failed, still running");
     toast_show_info(HY_S_POWEROFF_FAILED);
 }
@@ -211,7 +203,7 @@ void poweroff_countdown_show(void)
     lv_obj_set_pos(s_title, 0, 120);
     lv_obj_set_style_text_font(s_line1, hy_type.body, 0);
     lv_obj_set_style_text_color(s_line1, lv_color_hex(HY_C_TEXT), 0);
-    lv_obj_set_pos(s_line1, 0, 176);
+    lv_obj_set_pos(s_line1, 0, 176);   /* the labels are as tall as their text: no clipping when the font changes */
     lv_label_set_text(s_line2, HY_S_CRIT_HINT);
     lv_obj_set_pos(s_line2, 0, 220);
     lv_obj_set_hidden(s_track, true);
@@ -226,7 +218,7 @@ void poweroff_countdown_show(void)
 
 static void countdown_cancel_usb(void)
 {
-    close_overlay();
+    close_overlay(true);
     ESP_LOGI(TAG, "poweroff: countdown cancelled (usb)");
 }
 
@@ -240,7 +232,7 @@ void poweroff_usb(bool in)
 static void countdown_done(void)
 {
     if (hy_power_fake_active()) {
-        close_overlay();
+        close_overlay(true);
         ESP_LOGI(TAG, "poweroff: countdown done (fake, not powering off)");
         return;
     }
@@ -252,7 +244,7 @@ static void tmr_cb(lv_timer_t *t)
 {
     (void)t;
     if (s_mode == M_CONFIRM) {
-        if (!s_drag && lv_display_get_inactive_time(NULL) >= TIMEOUT_MS) {
+        if (!s_slide.drag && lv_display_get_inactive_time(NULL) >= TIMEOUT_MS) {
             ESP_LOGI(TAG, "poweroff: timeout");
             poweroff_cancel();
         }
@@ -302,64 +294,16 @@ static void slide_complete(void)
     power_off_now();
 }
 
-static void drag_end(bool released)
+/* The slide helper calls these: begin refuses a stroke that only wakes the screen or comes outside the confirmation */
+static bool slide_begin(void)
 {
-    s_drag = false;
-    bool complete = released && s_off * 100 >= TRAVEL * COMPLETE_PCT;
-    ESP_LOGI(TAG, "poweroff: knob released at %d of %d px: %s", (int)s_off, TRAVEL, complete ? "complete" : "back");
-    if (complete) {
-        slide_complete();
-        return;
-    }
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, s_knob);
-    lv_anim_set_exec_cb(&a, x_exec);
-    lv_anim_set_values(&a, lv_obj_get_x(s_knob), KNOB_PAD);
-    lv_anim_set_duration(&a, BACK_MS);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-    lv_anim_start(&a);
-    s_off = 0;
+    return s_mode == M_CONFIRM && !ui_input_waking();
 }
 
-/* As the due card knob: it owns the stroke from the first sample; a stroke that only wakes the dimmed screen
- * never moves it. */
-static void knob_cb(lv_event_t *e)
+static void slide_done(bool complete)
 {
-    lv_event_code_t c = lv_event_get_code(e);
-    lv_point_t p;
-    switch (c) {
-    case LV_EVENT_PRESSED:
-        if (s_mode != M_CONFIRM || ui_input_waking()) {
-            return;
-        }
-        ui_input_consume();
-        s_drag = true;
-        lv_anim_delete(s_knob, x_exec);
-        s_off = lv_obj_get_x(s_knob) - KNOB_PAD;
-        lv_indev_get_point(lv_event_get_indev(e), &p);
-        s_x0 = p.x;
-        s_off0 = s_off;
-        break;
-    case LV_EVENT_PRESSING: {
-        if (!s_drag) {
-            return;
-        }
-        ui_input_consume();
-        lv_indev_get_point(lv_event_get_indev(e), &p);
-        int32_t off = s_off0 + (p.x - s_x0);
-        s_off = off < 0 ? 0 : off > TRAVEL ? TRAVEL : off;
-        lv_obj_set_x(s_knob, KNOB_PAD + s_off);
-        break;
-    }
-    case LV_EVENT_RELEASED:
-    case LV_EVENT_PRESS_LOST:
-        if (s_drag) {
-            drag_end(c == LV_EVENT_RELEASED);
-        }
-        break;
-    default:
-        break;
+    if (complete) {
+        slide_complete();
     }
 }
 
@@ -376,7 +320,7 @@ static lv_obj_t *centred(lv_obj_t *parent, const lv_font_t *f, uint32_t color)
     lv_obj_t *l = ui_label(parent, f, color, "");
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_size(l, HY_SCREEN, lv_font_get_line_height(f));
+    lv_obj_set_size(l, HY_SCREEN, LV_SIZE_CONTENT);   /* the height follows the font set later */
     return l;
 }
 
@@ -405,16 +349,14 @@ void poweroff_create(void)
     lv_obj_center(ui_label(s_track, hy_type.body, HY_C_TEXT2, HY_S_POWEROFF_SLIDE));
 
     s_knob = ui_plain(s_track);
-    lv_obj_set_size(s_knob, KNOB_D, KNOB_D);
-    lv_obj_set_pos(s_knob, KNOB_PAD, KNOB_PAD);
+    lv_obj_set_size(s_knob, SLIDE_KNOB_D, SLIDE_KNOB_D);
+    lv_obj_set_pos(s_knob, SLIDE_KNOB_PAD, SLIDE_KNOB_PAD);
     lv_obj_set_style_radius(s_knob, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(s_knob, lv_color_hex(HY_C_MISS), 0);
     lv_obj_set_style_bg_opa(s_knob, LV_OPA_COVER, 0);
     lv_obj_set_clickable(s_knob, true);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_PRESSING, NULL);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_PRESS_LOST, NULL);
+    s_slide = (slide_t){.knob = s_knob, .tag = TAG, .begin = slide_begin, .end = slide_done};
+    slide_attach(&s_slide);
 
     /* power glyph in black: an arc of 270 degrees open at the top and a vertical line, 3 px */
     lv_obj_t *glyph = lv_arc_create(s_knob);

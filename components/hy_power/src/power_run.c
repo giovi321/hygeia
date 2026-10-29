@@ -183,11 +183,15 @@ static void stop_begin(void)
     alive_unlock();
 }
 
-/* The power is still on: heartbeats resume. */
+/* The power is still on: heartbeats resume, and the clean flag written by stop_begin goes back to false so a crash
+ * from here on reads as unclean. */
 static void stop_abort(void)
 {
     alive_lock();
     s_stopping = false;
+    if (s_alive_on && hy_clock_valid()) {
+        alive_write_locked((int64_t)time(NULL), false);
+    }
     alive_unlock();
 }
 
