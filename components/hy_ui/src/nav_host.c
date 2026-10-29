@@ -128,6 +128,18 @@ void ui_qs_slide_done(void)
     lv_obj_set_hidden(s_pager, true);
 }
 
+/* The clock state when quick settings opened over a picker: the picker is refreshed on return only when the
+ * time or the zone changed in between (a zone change shifts the wall time the rollers show). */
+static uint32_t s_qs_seq;
+static char s_qs_zone[HY_ZONE_LEN];
+
+static bool clock_changed_since_qs(void)
+{
+    char zone[HY_ZONE_LEN];
+    hy_clock_zone_copy(zone, sizeof zone);
+    return hy_clock_sync_seq(NULL) != s_qs_seq || strcmp(zone, s_qs_zone) != 0;
+}
+
 void ui_show_view(hy_view_t v)
 {
     if ((unsigned)v >= N_VIEWS) {
@@ -154,8 +166,13 @@ void ui_show_view(hy_view_t v)
         detail_hide();
     }
     bool from_qs = s_shown == HY_V_QS;
+    if (v == HY_V_QS && s_shown != HY_V_QS) {
+        s_qs_seq = hy_clock_sync_seq(NULL);
+        hy_clock_zone_copy(s_qs_zone, sizeof s_qs_zone);
+    }
     s_shown = v;   /* before the refresh: the page refreshes only while it is the shown view */
-    if (from_qs && (v == HY_V_SET_TIME || v == HY_V_CLOCK_INVALID || v == HY_V_SET_ZONE)) {
+    if (from_qs && (v == HY_V_SET_TIME || v == HY_V_CLOCK_INVALID || v == HY_V_SET_ZONE) &&
+        !clock_changed_since_qs()) {
         return;   /* quick settings was only pulled over the pickers: keep what the user turned */
     }
     refresh_view(v);
