@@ -652,14 +652,18 @@ static void job_settz(const char *iana)
 static void job_gaps(void)
 {
     enum { GAPS_MAX = 64 };
-    static hy_gap_t g[GAPS_MAX];
-    static uint8_t why[GAPS_MAX];
+    static hy_gap_t g[GAPS_MAX + 1];      /* one more than shown: tells whether more exist */
+    static uint8_t why[GAPS_MAX + 1];
     if (!hy_clock_valid()) {
         ESP_LOGW(TAG, "gaps: clock invalid");
         return;
     }
     int64_t now = (int64_t)time(NULL);
-    size_t n = hy_store_port()->query_gaps(NULL, now - 30 * 86400LL, now + 1, g, why, GAPS_MAX);
+    size_t n = hy_store_port()->query_gaps(NULL, now - 30 * 86400LL, now + 1, g, why, GAPS_MAX + 1);
+    bool more = n > GAPS_MAX;
+    if (more) {
+        n = GAPS_MAX;
+    }
     char tz[HY_TZ_LEN];
     hy_clock_tz_copy(tz, sizeof tz);
     for (size_t i = 0; i < n; i++) {
@@ -669,7 +673,7 @@ static void job_gaps(void)
         ESP_LOGI(TAG, "gap %u: %s .. %s (%s) %lld s", (unsigned)(i + 1), a, b,
                  hy_gap_reason_str((hy_gap_reason_t)why[i]), (long long)(g[i].end - g[i].start));
     }
-    ESP_LOGI(TAG, "gaps: %u in the last 30 days%s", (unsigned)n, n == GAPS_MAX ? " (first 64 shown)" : "");
+    ESP_LOGI(TAG, "gaps: %u in the last 30 days%s", (unsigned)n, more ? " (first 64 shown, more exist)" : "");
 }
 
 static void run_job(void *arg)
