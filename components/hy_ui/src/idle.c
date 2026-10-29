@@ -65,8 +65,8 @@ static bool slot_done(const hy_snapshot_t *sn, const hy_med_t *m, int64_t slot)
         if (l->ts < sn->in.now - 86400) {
             break;
         }
-        if (l->med_id == m->id && l->status != HY_MISSED &&
-            hy_match_slot(m, l->ts, sn->in.tz, sn->in.logs, sn->in.n_logs, sn->in.last_change) == slot) {
+        /* the log carries the slot it satisfied: no re-matching (the log set contains the log itself) */
+        if (l->med_id == m->id && l->slot == slot && (l->status == HY_TAKEN || l->status == HY_SKIPPED)) {
             return true;
         }
     }
