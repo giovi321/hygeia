@@ -20,6 +20,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
+#include "esp_attr.h"
+#include "esp_lcd_panel_ops.h"
 #include "esp_lv_adapter.h"
 
 static const char *TAG = "hy_board";
@@ -31,6 +33,9 @@ static lv_display_t *s_disp;
 static bool s_ready;          /* set only at the end of a successful init */
 static esp_err_t s_init_err = ESP_OK; /* first init failure, returned on later calls */
 static lv_indev_t *s_indev;
+static esp_lcd_panel_handle_t s_panel;
+static void (*volatile s_touch_hook)(void);
+static void touch_isr(esp_lcd_touch_handle_t tp, void *ctx);
 static lv_display_flush_cb_t s_orig_flush;
 static uint32_t s_flush_count;
 static int64_t s_verbose_until_us;
@@ -164,17 +169,210 @@ static void power_gate(void)
 
 void hy_board_power_report(void)
 {
-    uint8_t now = 0xFF;
-    if (s_axp) {
-        axp_read(AXP_REG_PWRON, &now);
+    uint8_t now = 0;
+    esp_err_t err = s_axp ? axp_read(AXP_REG_PWRON, &now) : ESP_ERR_INVALID_STATE;
+    char now_txt[48];
+    if (err == ESP_OK) {
+        snprintf(now_txt, sizeof now_txt, "0x%02x", now);
+    } else {
+        snprintf(now_txt, sizeof now_txt, "read failed: %s", esp_err_to_name(err));
     }
     if (s_boot_would_off < 0) {
-        ESP_LOGI(TAG, "power report: boot gate skipped (no AXP2101 match); now pwron_status=0x%02x", now);
+        ESP_LOGI(TAG, "power report: boot gate skipped (no AXP2101 match); now pwron_status=%s", now_txt);
         return;
     }
-    ESP_LOGI(TAG, "power report: boot pwron_status=0x%02x reset_reason=%d power_off=%d; now pwron_status=0x%02x",
-             s_boot_pwron, s_boot_reset, s_boot_would_off, now);
+    ESP_LOGI(TAG, "power report: boot pwron_status=0x%02x reset_reason=%d power_off=%d; now pwron_status=%s",
+             s_boot_pwron, s_boot_reset, s_boot_would_off, now_txt);
 }
+
+/* ---- PMU access after the gate. Register facts: XPowersLib (MIT, lewisxhe) commit
+ * d6997586e68f65afd51baa775903df930db39821: src/REG/AXP2101Constants.h (addresses), src/XPowersAXP2101.hpp
+ * (disableTSPinMeasure, enableBattVoltageMeasure, setChargerConstantCurr, setChargeTargetVoltage,
+ * clearIrqStatus, readRegisterH5L8) and src/XPowersParams.hpp (XPOWERS_AXP2101_CHG_CUR_150MA = 6,
+ * XPOWERS_AXP2101_CHG_VOL_4V2 = 3). */
+#define AXP_REG_TS_PIN_CTRL 0x50 /* XPOWERS_AXP2101_TS_PIN_CTRL */
+#define AXP_REG_IPRECHG     0x61 /* XPOWERS_AXP2101_IPRECHG_SET */
+#define AXP_REG_ICC_CHG     0x62 /* XPOWERS_AXP2101_ICC_CHG_SET: bits 4..0 constant current code */
+#define AXP_REG_ITERM_CHG   0x63 /* XPOWERS_AXP2101_ITERM_CHG_SET_CTRL */
+#define AXP_REG_CV_CHG      0x64 /* XPOWERS_AXP2101_CV_CHG_VOL_SET: bits 2..0 target voltage code */
+#define AXP_CHG_CUR_150MA   0x06
+#define AXP_CHG_VOL_4V2     0x03
+
+static esp_err_t axp_write(uint8_t reg, uint8_t v)
+{
+    uint8_t buf[2] = {reg, v};
+    return i2c_master_transmit(s_axp, buf, sizeof buf, 100);
+}
+
+/* v = (v & and_mask) | or_mask, written only when it changes; logged either way */
+static esp_err_t axp_rmw(uint8_t reg, uint8_t and_mask, uint8_t or_mask)
+{
+    uint8_t v = 0;
+    esp_err_t err = axp_read(reg, &v);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "pmu: reg 0x%02x read: %s", reg, esp_err_to_name(err));
+        return err;
+    }
+    uint8_t nv = (uint8_t)((v & and_mask) | or_mask);
+    if (nv == v) {
+        ESP_LOGI(TAG, "pmu: reg 0x%02x 0x%02x unchanged", reg, v);
+        return ESP_OK;
+    }
+    err = axp_write(reg, nv);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "pmu: reg 0x%02x write 0x%02x: %s", reg, nv, esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "pmu: reg 0x%02x 0x%02x -> 0x%02x", reg, v, nv);
+    return ESP_OK;
+}
+
+static bool pmu_present(void)
+{
+    return s_axp != NULL && s_boot_would_off >= 0;
+}
+
+esp_err_t hy_board_pmu_charger_setup(void)
+{
+    if (!pmu_present()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err;
+    /* disableTSPinMeasure: TS_PIN_CTRL &= 0xF0, | 0x10; then clear ADC_CHANNEL_CTRL bit 1 */
+    if ((err = axp_rmw(AXP_REG_TS_PIN_CTRL, 0xF0, 0x10)) != ESP_OK) {
+        return err;
+    }
+    if ((err = axp_rmw(HY_AXP_REG_ADC_CTRL, (uint8_t)~0x02u, 0x00)) != ESP_OK) {
+        return err;
+    }
+    /* setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2): CV_CHG_VOL_SET &= 0xF8, | 3 */
+    if ((err = axp_rmw(AXP_REG_CV_CHG, 0xF8, AXP_CHG_VOL_4V2)) != ESP_OK) {
+        return err;
+    }
+    /* setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_150MA): ICC_CHG_SET &= 0xE0, | 6 */
+    return axp_rmw(AXP_REG_ICC_CHG, 0xE0, AXP_CHG_CUR_150MA);
+}
+
+esp_err_t hy_board_pmu_init(void)
+{
+    if (!pmu_present()) {
+        ESP_LOGE(TAG, "pmu: no AXP2101, setup skipped");
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t first = ESP_OK, err;
+    uint8_t en[3];
+    hy_axp_irq_enable_mask(en);
+    for (int i = 0; i < 3; i++) {
+        err = axp_rmw((uint8_t)(HY_AXP_REG_INTEN1 + i), 0x00, en[i]);
+        first = first != ESP_OK ? first : err;
+    }
+    /* clearIrqStatus: 0xFF to INTSTS1..3 (write 1 to clear) */
+    for (int i = 0; i < 3; i++) {
+        err = axp_write((uint8_t)(HY_AXP_REG_INTSTS1 + i), 0xFF);
+        first = first != ESP_OK ? first : err;
+    }
+    ESP_LOGI(TAG, "pmu: irq status cleared");
+    uint8_t kt = 0;
+    err = axp_read(HY_AXP_REG_KEY_TIMING, &kt);
+    if (err == ESP_OK) {
+        err = axp_rmw(HY_AXP_REG_KEY_TIMING, 0x00, hy_axp_key_timing(kt));
+    }
+    first = first != ESP_OK ? first : err;
+    /* enableBattVoltageMeasure: ADC_CHANNEL_CTRL bit 0 */
+    err = axp_rmw(HY_AXP_REG_ADC_CTRL, 0xFF, 0x01);
+    first = first != ESP_OK ? first : err;
+#if CONFIG_HY_PMU_CHARGER_SETUP
+    err = hy_board_pmu_charger_setup();
+    first = first != ESP_OK ? first : err;
+#else
+    ESP_LOGI(TAG, "pmu: charger setup off (CONFIG_HY_PMU_CHARGER_SETUP)");
+#endif
+    uint8_t c[4] = {0};
+    bool ok = true;
+    for (int i = 0; i < 4 && ok; i++) {
+        ok = axp_read((uint8_t)(AXP_REG_IPRECHG + i), &c[i]) == ESP_OK;
+    }
+    if (ok) {
+        ESP_LOGI(TAG, "pmu: charger 0x61=0x%02x 0x62=0x%02x 0x63=0x%02x 0x64=0x%02x", c[0], c[1], c[2], c[3]);
+    }
+    return first;
+}
+
+uint32_t hy_board_pmu_irq(void)
+{
+    if (!pmu_present()) {
+        return 0;
+    }
+    uint8_t sts[3];
+    for (int i = 0; i < 3; i++) {
+        if (axp_read((uint8_t)(HY_AXP_REG_INTSTS1 + i), &sts[i]) != ESP_OK) {
+            return 0;
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        if (sts[i] && axp_write((uint8_t)(HY_AXP_REG_INTSTS1 + i), sts[i]) != ESP_OK) {
+            return 0;
+        }
+    }
+    return hy_axp_decode_irq(sts);
+}
+
+esp_err_t hy_board_pmu_read(hy_batt_raw_t *out)
+{
+    if (!pmu_present()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    static const uint8_t regs[5] = {HY_AXP_REG_STATUS1, HY_AXP_REG_STATUS2, HY_AXP_REG_BAT_PERCENT,
+                                    HY_AXP_REG_ADC_VBAT_H, HY_AXP_REG_ADC_VBAT_L};
+    uint8_t v[5];
+    for (int i = 0; i < 5; i++) {
+        esp_err_t err = axp_read(regs[i], &v[i]);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    hy_axp_decode_status(v[0], v[1], v[2], (uint16_t)(((v[3] & 0x1F) << 8) | v[4]), out);
+    return ESP_OK;
+}
+
+void hy_board_pmu_power_off(void)
+{
+    if (!s_axp) {
+        ESP_LOGE(TAG, "power off: no AXP2101 device");
+        return;
+    }
+    axp_power_off();
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+void hy_board_pmu_dump(void)
+{
+    static const uint8_t regs[] = {HY_AXP_REG_STATUS1, HY_AXP_REG_STATUS2, HY_AXP_REG_BAT_PERCENT,
+                                   HY_AXP_REG_ADC_VBAT_H, HY_AXP_REG_ADC_VBAT_L, HY_AXP_REG_INTEN1,
+                                   HY_AXP_REG_INTEN2, HY_AXP_REG_INTEN3, HY_AXP_REG_PWROFF_EN,
+                                   HY_AXP_REG_KEY_TIMING, HY_AXP_REG_ADC_CTRL, AXP_REG_TS_PIN_CTRL,
+                                   AXP_REG_IPRECHG, AXP_REG_ICC_CHG, AXP_REG_ITERM_CHG, AXP_REG_CV_CHG};
+    uint8_t v[sizeof regs];
+    if (!pmu_present()) {
+        ESP_LOGE(TAG, "pmu: no AXP2101");
+        return;
+    }
+    for (size_t i = 0; i < sizeof regs; i++) {
+        esp_err_t err = axp_read(regs[i], &v[i]);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "pmu: read failed at reg 0x%02x: %s", regs[i], esp_err_to_name(err));
+            return;
+        }
+    }
+    hy_batt_raw_t r;
+    hy_axp_decode_status(v[0], v[1], v[2], (uint16_t)(((v[3] & 0x1F) << 8) | v[4]), &r);
+    ESP_LOGI(TAG, "pmu: status1=0x%02x (vbus good %d, battery %d) status2=0x%02x (charger %d) 0xA4=0x%02x (%d%%) %u mV",
+             v[0], r.vbus, r.present, v[1], v[1] & 0x07, v[2], r.pct, (unsigned)r.mv);
+    ESP_LOGI(TAG, "pmu: inten 0x%02x 0x%02x 0x%02x, 0x22=0x%02x 0x27=0x%02x 0x30=0x%02x 0x50=0x%02x",
+             v[5], v[6], v[7], v[8], v[9], v[10], v[11]);
+    ESP_LOGI(TAG, "pmu: charger 0x61=0x%02x 0x62=0x%02x 0x63=0x%02x 0x64=0x%02x", v[12], v[13], v[14], v[15]);
+}
+#endif
 
 static void i2c_scan(void)
 {
@@ -236,6 +434,7 @@ static esp_err_t board_init_once(void)
         ESP_LOGE(TAG, "panel init: %s", esp_err_to_name(err));
         return err;
     }
+    s_panel = panel;
 
     size_t free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     esp_lv_adapter_display_config_t disp_cfg = {
@@ -278,6 +477,7 @@ static esp_err_t board_init_once(void)
         return err;
     }
     esp_lv_adapter_touch_config_t touch_cfg = ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(s_disp, tp);
+    touch_cfg.callbacks.on_interrupt = touch_isr;
     s_indev = esp_lv_adapter_register_touch(&touch_cfg);
     if (!s_indev) {
         ESP_LOGE(TAG, "register touch failed");
@@ -299,6 +499,42 @@ static esp_err_t board_init_once(void)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     ESP_LOGI(TAG, "board ready, brightness 80%%");
     return ESP_OK;
+}
+
+void hy_board_display_power(bool on)
+{
+    if (!s_panel) {
+        return;
+    }
+    esp_err_t e1, e2;
+    if (on) {
+        e1 = esp_lcd_panel_disp_sleep(s_panel, false);
+        e2 = esp_lcd_panel_disp_on_off(s_panel, true);
+    } else {
+        e1 = esp_lcd_panel_disp_on_off(s_panel, false);
+        e2 = esp_lcd_panel_disp_sleep(s_panel, true);
+    }
+    if (e1 != ESP_OK || e2 != ESP_OK) {
+        ESP_LOGE(TAG, "display power %s: %s, %s", on ? "on" : "off", esp_err_to_name(e1), esp_err_to_name(e2));
+    } else {
+        ESP_LOGI(TAG, "display power %s", on ? "on" : "off");
+    }
+}
+
+/* Runs inside the LVGL adapter's touch ISR (callbacks.on_interrupt); the adapter's handling is unchanged */
+static void IRAM_ATTR touch_isr(esp_lcd_touch_handle_t tp, void *ctx)
+{
+    (void)tp;
+    (void)ctx;
+    void (*fn)(void) = s_touch_hook;
+    if (fn) {
+        fn();
+    }
+}
+
+void hy_board_set_touch_isr_hook(void (*fn)(void))
+{
+    s_touch_hook = fn;
 }
 
 lv_display_t *hy_board_display(void)

@@ -12,6 +12,7 @@
 #include "hy/board.h"
 #include "hy/actions.h"
 #include "hy/clock.h"
+#include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
 #include "hy/ui.h"
@@ -258,6 +259,10 @@ void app_main(void)
     }
 
     init_storage();
+    if (err == ESP_OK) {
+        esp_err_t perr = hy_power_init();
+        ESP_LOGI(TAG, "hy_power_init: %s", esp_err_to_name(perr));
+    }
     esp_err_t rerr = hy_sched_run_init();
     if (rerr == ESP_OK) {
         ESP_LOGI(TAG, "hy_sched_run_init: %s", esp_err_to_name(rerr));
@@ -267,6 +272,7 @@ void app_main(void)
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
         ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));
+        hy_power_start();
         esp_err_t aerr = hy_audio_init();   /* about 0.4 s: not on the splash's path */
         ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
     }
@@ -299,6 +305,12 @@ void app_main(void)
     console_register("qs", cmd_qs);
     console_register("settz", cmd_settz);
     console_register("settings", cmd_settings);
+    console_register("pmu", hy_power_debug_pmu);
+    console_register("batt", hy_power_debug_batt);
+    console_register("batlog", hy_power_debug_batlog);
+    console_register("alive", hy_power_debug_alive);
+    console_register("pkey", hy_power_debug_pkey);
+    console_register("fakebatt", hy_power_debug_fakebatt);
     console_start();
 #endif
 }

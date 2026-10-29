@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "src/power_run.c"
+        "src/batlog.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        hy_core
+        esp_common
+    PRIV_REQUIRES
+        hy_board
+        hy_clock
+        lvgl__lvgl
+        nvs_flash
+        esp_timer
+        freertos
+)
