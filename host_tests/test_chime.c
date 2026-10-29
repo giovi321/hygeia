@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "unity.h"
 #include "hy/chime.h"
@@ -44,7 +45,9 @@ static void test_chime_shape(void)
             if ((b[i - 1] < 0 && b[i] >= 0) || (b[i - 1] >= 0 && b[i] < 0)) cross++;
         }
         double f = cross / 2.0 / ((double)len / HY_CHIME_RATE);
-        TEST_ASSERT_TRUE(fabs(f - FREQ[t]) <= FREQ[t] * 0.03);
+        char msg[64];
+        snprintf(msg, sizeof msg, "tone %d measured %.1f Hz, expected %.0f", t, f, FREQ[t]);
+        TEST_ASSERT_TRUE_MESSAGE(fabs(f - FREQ[t]) <= FREQ[t] * 0.03, msg);
         pos += len;
         if (t < 2) {
             size_t gap = ms(70);
