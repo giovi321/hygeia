@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/clock.h"
@@ -42,8 +43,13 @@ static uint8_t s_scr;               /* batlog scr column: 0 on, 1 dim, 2 off; 0 
 static bool s_fake, s_fake_usb, s_fake_changed, s_force_read;
 static int8_t s_fake_pct;
 
-static int8_t s_clean_cached = -1; /* last "clean" written, -1 unknown */
-static bool s_stopping;             /* a power-off is in progress: no heartbeat (it would clear clean); s_mux */
+/* Heartbeat writes come from the power task, the runner (LVGL task) and the console. s_alive_mu serialises
+ * the checks below, the NVS write and the cache update; NVS cannot run inside a portMUX critical section. */
+static SemaphoreHandle_t s_alive_mu;
+static StaticSemaphore_t s_alive_mu_buf;
+static int8_t s_clean_cached = -1; /* last "clean" written, -1 unknown; s_alive_mu */
+static bool s_stopping;             /* a power-off is in progress: no write may clear clean; s_alive_mu */
+static bool s_alive_on;             /* the runner tracks: the power task's periodic heartbeat runs; s_alive_mu */
 
 static int64_t mono_s(void)
 {
@@ -71,8 +77,25 @@ bool hy_power_alive_load(hy_alive_t *out)
     return ok;
 }
 
-void hy_power_alive_write(int64_t now, bool clean)
+static void alive_lock(void)
 {
+    if (!s_alive_mu) {
+        s_alive_mu = xSemaphoreCreateMutexStatic(&s_alive_mu_buf);   /* hy_power_init creates it first */
+    }
+    xSemaphoreTake(s_alive_mu, portMAX_DELAY);
+}
+
+static void alive_unlock(void)
+{
+    xSemaphoreGive(s_alive_mu);
+}
+
+/* Under s_alive_mu. */
+static void alive_write_locked(int64_t now, bool clean)
+{
+    if (s_stopping && !clean) {
+        return;   /* the power-off has written clean = true: keep it */
+    }
     nvs_handle_t h;
     esp_err_t err = nvs_open(NS, NVS_READWRITE, &h);
     if (err == ESP_OK) {
@@ -91,6 +114,30 @@ void hy_power_alive_write(int64_t now, bool clean)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "alive write: %s", esp_err_to_name(err));
     }
+}
+
+void hy_power_alive_write(int64_t now, bool clean)
+{
+    alive_lock();
+    alive_write_locked(now, clean);
+    alive_unlock();
+}
+
+void hy_power_alive_enable(bool on)
+{
+    alive_lock();
+    s_alive_on = on;
+    alive_unlock();
+}
+
+/* The power task's periodic heartbeat: only while the runner tracks and no power-off is in progress. */
+static void alive_tick(void)
+{
+    alive_lock();
+    if (s_alive_on && hy_clock_valid()) {
+        alive_write_locked((int64_t)time(NULL), false);
+    }
+    alive_unlock();
 }
 
 static int32_t rate_load(void)
@@ -344,12 +391,9 @@ static void power_task(void *arg)
             }
         }
 
-        portENTER_CRITICAL(&s_mux);
-        bool stopping = s_stopping;
-        portEXIT_CRITICAL(&s_mux);
-        if (!stopping && hy_clock_valid() && mono - last_alive >= ALIVE_EVERY_S) {
+        if (mono - last_alive >= ALIVE_EVERY_S) {
             last_alive = mono;
-            hy_power_alive_write((int64_t)time(NULL), false);
+            alive_tick();
         }
     }
 }
@@ -358,6 +402,9 @@ esp_err_t hy_power_init(void)
 {
     if (s_inited) {
         return ESP_OK;
+    }
+    if (!s_alive_mu) {
+        s_alive_mu = xSemaphoreCreateMutexStatic(&s_alive_mu_buf);
     }
     batlog_init();
     esp_err_t err = hy_board_pmu_init();
@@ -445,20 +492,20 @@ void hy_power_debug_alive(const char *args)
 void hy_power_debug_poweroff(const char *args)
 {
     (void)args;
-    portENTER_CRITICAL(&s_mux);
+    alive_lock();
     s_stopping = true;
-    portEXIT_CRITICAL(&s_mux);
     if (hy_clock_valid()) {
-        hy_power_alive_write((int64_t)time(NULL), true);
+        alive_write_locked((int64_t)time(NULL), true);
     } else {
         ESP_LOGW(TAG, "poweroff: clock invalid, heartbeat not written");
     }
+    alive_unlock();
     ESP_LOGI(TAG, "power: off (debug)");
     hy_board_pmu_power_off();
     ESP_LOGE(TAG, "poweroff: still running");
-    portENTER_CRITICAL(&s_mux);
+    alive_lock();
     s_stopping = false;
-    portEXIT_CRITICAL(&s_mux);
+    alive_unlock();
 }
 
 void hy_power_debug_pkey(const char *args)

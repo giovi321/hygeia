@@ -26,7 +26,12 @@ typedef struct { void (*battery)(uint32_t flags); void (*pwr_short)(void); void 
 void      hy_power_set_ui(const hy_power_ui_t *ui);
 /* Heartbeat: NVS namespace "power", key "alive" (i64), key "clean" (u8). */
 bool      hy_power_alive_load(hy_alive_t *out);
+/* Serialised across tasks; while a power-off is in progress a write with clean = false is skipped. */
 void      hy_power_alive_write(int64_t now, bool clean);
+/* The power task's 60 s heartbeat runs only while on: the runner turns it on once tracking has started
+ * (after its own first write) and off when the clock turns invalid, so a crash before that keeps the
+ * previous record for the next boot's gap. Off at boot. */
+void      hy_power_alive_enable(bool on);
 
 #if CONFIG_HY_DEBUG_CONSOLE
 void hy_power_debug_pmu(const char *args);
