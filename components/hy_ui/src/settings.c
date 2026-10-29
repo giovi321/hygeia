@@ -45,6 +45,7 @@ static void save(const hy_settings_t *s)
 
 void settings_brightness_live(int32_t pct)
 {
+    idle_brightness_stop();
     hy_board_set_brightness((uint8_t)pct);
 }
 

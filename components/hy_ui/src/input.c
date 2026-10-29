@@ -66,6 +66,7 @@ static void indev_cb(lv_event_t *e)
             return;   /* LVGL searched a new widget mid-stroke: the stroke keeps its start */
         }
         s_active = true;
+        lv_display_trigger_activity(NULL);
         s_waking = ui_nav_idle();
         /* while the logged toast and its scrim are up a swipe does not navigate */
         s_consumed = toast_logged_visible();
@@ -182,6 +183,7 @@ void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t 
 {
     uint32_t now = lv_tick_get();
     s_active = true;
+    lv_display_trigger_activity(NULL);
     s_waking = ui_nav_idle();
     s_consumed = toast_logged_visible();
     s_last_tap = false;

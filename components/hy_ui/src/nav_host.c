@@ -1,5 +1,5 @@
 /* Navigation host: owns the hy_nav_t, keeps one view per hy_view_t inside ui_content() and shows the top of
- * the stack. The idle view (Task 17) is not here yet. */
+ * the stack. The idle clock overlay is idle.c. */
 
 #include <stdio.h>
 #include <string.h>
@@ -60,8 +60,8 @@ void ui_register_view(hy_view_t v, lv_obj_t *obj)
     }
 }
 
-/* fx handlers: the idle module (Task 17) replaces the wake stub */
-static void fx_wake(void) { ESP_LOGI(TAG, "fx WAKE (idle module not present)"); }
+/* fx handlers */
+static void fx_wake(void) { idle_wake(); }
 static void fx_snooze(void) { due_snooze(); }
 static void fx_due_next(void) { due_next(); }
 
@@ -215,7 +215,6 @@ bool ui_nav_idle(void)
 void ui_nav_set_idle(bool idle)
 {
     s_nav.idle = idle;
-    ESP_LOGI(TAG, "idle flag %s (stub until the idle module)", idle ? "set" : "cleared");
 }
 
 void ui_nav_set_due(bool due)
@@ -292,6 +291,7 @@ void nav_host_init(void)
     home_create(pager_page(0));
     overview_create(pager_page(1));
     history_create(pager_page(2));
+    splash_yield();
 
     s_views[HY_V_STORAGE_DOWN] = storage_down_create(ui_content());
     lv_obj_set_hidden(s_views[HY_V_STORAGE_DOWN], true);

@@ -44,6 +44,9 @@ static void tick_cb(lv_timer_t *t)
 static void undo_click_cb(lv_event_t *e)
 {
     (void)e;
+    if (ui_input_waking()) {
+        return;   /* the stroke only woke the dimmed screen */
+    }
     toast_undo_pressed();
 }
 

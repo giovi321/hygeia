@@ -96,7 +96,7 @@ void      ui_show_view(hy_view_t v);             /* nav_host: hides others, runs
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g);      /* applies hy_nav_gesture and its effect; WAKE = swallowed */
 hy_view_t ui_current_view(void);                  /* the view shown now */
 bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
-void      ui_nav_set_idle(bool idle);            /* stub until the idle module (Task 17) */
+void      ui_nav_set_idle(bool idle);            /* the raw nav flag; idle.c owns it (the debug note wake test sets it alone) */
 void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2, and the idle timer is held */
 void      ui_nav_push(hy_view_t v);
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -213,6 +213,21 @@ void home_tile_click(uint32_t med_id);   /* a tile's SHORT_CLICKED: logs only wh
 bool home_med_id_by_code(const char *code, uint32_t *id);
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */
+
+/* idle.c: the idle clock overlay on lv_layer_top; the nav idle flag is set and cleared with it */
+void idle_create(void);                          /* after topbar_create */
+void idle_enter(void);
+void idle_wake(void);                            /* a touch (fx WAKE): overlay off, brightness back in 200 ms */
+void idle_wake_due(void);                        /* a due entry shows: the same, logged as "wake (due)" */
+bool idle_active(void);
+void idle_brightness_stop(void);                 /* whoever sets the brightness itself stops a running idle fade first */
+
+/* splash.c */
+bool splash_active(void);
+int  splash_remaining_ms(void);                  /* ms until the splash has run 1000 ms, 0 when over or not running */
+void splash_wait(void);                          /* blocks (LVGL lock not held) until the splash has run 1000 ms */
+void splash_yield(void);                         /* LVGL lock held: lets the LVGL task draw a splash frame between build steps */
+void splash_finish(lv_obj_t *next);              /* LVGL lock held: loads next with the 200 ms fade */
 
 /* due.c: the due card, an overlay inside ui_content() above every view */
 void due_create(void);

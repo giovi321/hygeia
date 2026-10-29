@@ -126,6 +126,7 @@ static void drag_end(bool released);
 static void flash_apply(bool bright)
 {
     ESP_LOGI(TAG, "due: flash %s", bright ? "bright" : "back");
+    idle_brightness_stop();
     hy_board_set_brightness(bright ? 100 : hy_settings()->brightness);
     lv_obj_set_style_arc_opa(s_ring, bright ? LV_OPA_COVER : LV_OPA_40, LV_PART_INDICATOR);
 }
@@ -137,6 +138,7 @@ static void flash_stop(void)
     }
     if (s_flash_on) {
         s_flash_on = false;
+        idle_brightness_stop();
         hy_board_set_brightness(hy_settings()->brightness);
         lv_obj_set_style_arc_opa(s_ring, LV_OPA_COVER, LV_PART_INDICATOR);
     }
@@ -216,7 +218,7 @@ static void show_card(void)
     s_visible = true;
     knob_reset();
     ui_nav_set_due(true);
-    ui_nav_set_idle(false);   /* a due dose wakes the dimmed screen */
+    idle_wake_due();   /* a due dose wakes the dimmed screen */
     lv_obj_set_style_opa(s_card, LV_OPA_TRANSP, 0);
     lv_obj_set_hidden(s_card, false);
     lv_obj_move_foreground(s_card);

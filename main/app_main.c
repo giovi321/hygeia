@@ -237,6 +237,9 @@ void app_main(void)
 
     esp_err_t err = hy_board_init();
     ESP_LOGI(TAG, "hy_board_init: %s", esp_err_to_name(err));
+    if (err == ESP_OK) {
+        hy_ui_splash_start();
+    }
 
     init_nvs();
     hy_settings_t settings;

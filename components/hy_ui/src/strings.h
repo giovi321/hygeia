@@ -165,6 +165,7 @@
 /* ---- idle clock ---- */
 #define HY_S_IDLE_NEXT     "Next: %s at %s"         /* code, HH:MM */
 #define HY_S_IDLE_NONE     "No doses scheduled"
+#define HY_S_IDLE_SET_TIME "Set the time"
 #define HY_S_IDLE_STATUS   HY_S_DASH "%" HY_S_DOT "Wi-Fi off"
 
 #endif /* HY_UI_STRINGS_H */
