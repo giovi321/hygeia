@@ -57,20 +57,42 @@ bool idle_active(void)
     return s_active;
 }
 
-/* earliest upcoming slot of the active fixed medicines within 8 days; 0 when none */
+/* a slot an early taken or skipped dose already satisfies */
+static bool slot_done(const hy_snapshot_t *sn, const hy_med_t *m, int64_t slot)
+{
+    for (size_t i = sn->in.n_logs; i-- > 0;) {
+        const hy_log_t *l = &sn->in.logs[i];
+        if (l->ts < sn->in.now - 86400) {
+            break;
+        }
+        if (l->med_id == m->id && l->status != HY_MISSED &&
+            hy_match_slot(m, l->ts, sn->in.tz, sn->in.logs, sn->in.n_logs, sn->in.last_change) == slot) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* earliest upcoming slot of the active fixed medicines within 8 days that no logged dose satisfies; 0 when none */
 static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
 {
     int64_t best = 0;
     for (size_t i = 0; i < sn->in.n_meds; i++) {
-        int64_t occ[2];
+        int64_t occ[8];
         const hy_med_t *m = &sn->in.meds[i];
         if (m->type != HY_SCHED_FIXED) {
             continue;
         }
-        if (hy_occurrences(m, sn->in.now + 1, sn->in.now + 8 * 86400, sn->in.tz, occ, 1) > 0 &&
-            (!best || occ[0] < best)) {
-            best = occ[0];
-            *code = m->code;
+        size_t n = hy_occurrences(m, sn->in.now + 1, sn->in.now + 8 * 86400, sn->in.tz, occ, 8);
+        for (size_t k = 0; k < n; k++) {
+            if (best && occ[k] >= best) {
+                break;
+            }
+            if (!slot_done(sn, m, occ[k])) {
+                best = occ[k];
+                *code = m->code;
+                break;
+            }
         }
     }
     return best;
@@ -110,7 +132,7 @@ static void render(void)
 
 void idle_enter(void)
 {
-    if (s_active || !s_ov) {
+    if (s_active || !s_ov || due_visible()) {
         return;
     }
     s_active = true;

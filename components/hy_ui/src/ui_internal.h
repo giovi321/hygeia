@@ -223,7 +223,6 @@ bool idle_active(void);
 void idle_brightness_stop(void);                 /* whoever sets the brightness itself stops a running idle fade first */
 
 /* splash.c */
-bool splash_active(void);
 int  splash_remaining_ms(void);                  /* ms until the splash has run 1000 ms, 0 when over or not running */
 void splash_wait(void);                          /* blocks (LVGL lock not held) until the splash has run 1000 ms */
 void splash_yield(void);                         /* LVGL lock held: lets the LVGL task draw a splash frame between build steps */
