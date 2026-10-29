@@ -436,6 +436,21 @@ static void job_gesture(const char *arg)
         {"right", 150, 240, 300, 240}, {"edgeup", 240, 460, 240, 300}, {"edgedown", 240, 10, 240, 150},
         {"edgeright", 10, 240, 150, 240},
     };
+    if (strcmp(name, "hold") == 0) {
+        input_debug_hold(300, 240);
+        return;
+    }
+    if (strcmp(name, "release") == 0) {
+        /* the end point of the named stroke, from the same start as "hold" (300,240): left ends at 150,240 */
+        for (size_t k = 0; k < sizeof strokes / sizeof strokes[0]; k++) {
+            if (strcmp(opt, strokes[k].n) == 0) {
+                input_debug_release(strokes[k].x1, strokes[k].y1);
+                return;
+            }
+        }
+        input_debug_release(300, 240);
+        return;
+    }
     if (strcmp(opt, "consumed") == 0) {
         for (size_t k = 0; k < sizeof strokes / sizeof strokes[0]; k++) {
             if (strcmp(name, strokes[k].n) == 0) {

@@ -101,9 +101,17 @@ static void finish(int32_t x, int32_t y, uint32_t t)
     ESP_LOGI(TAG, "stroke dx=%d dy=%d ms=%u -> %s (max_dev %u%s)", s_st.x1 - s_st.x0, s_st.y1 - s_st.y0,
              (unsigned)(s_st.t1_ms - s_st.t0_ms), ui_gesture_name(g), (unsigned)s_st.max_dev,
              s_consumed ? ", consumed" : "");
-    if (!s_consumed || s_waking) {
-        /* NONE too: on the dimmed screen every touch wakes */
-        if (ui_nav_gesture(g) == HY_FX_WAKE || s_waking) {
+    if (s_waking) {
+        /* the stroke began on the dimmed screen: it only wakes. When a due card woke the screen under the
+         * finger the navigation is no longer idle and the stroke is dropped, so it cannot snooze or step it. */
+        if (ui_nav_idle()) {
+            ui_nav_gesture(g);
+        } else {
+            ESP_LOGI(TAG, "waking stroke dropped: the screen woke under the finger");
+        }
+        s_last_tap = false;
+    } else if (!s_consumed) {
+        if (ui_nav_gesture(g) == HY_FX_WAKE) {
             s_last_tap = false;
         }
     }
@@ -195,5 +203,30 @@ void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t 
         ui_input_consume();
     }
     finish(x1, y1, now);
+}
+
+/* A stroke held down: the press without the release. A due entry that arrives before input_debug_release
+ * (remindtest) wakes the screen under the finger. */
+void input_debug_hold(int16_t x0, int16_t y0)
+{
+    s_active = true;
+    lv_display_trigger_activity(NULL);
+    s_waking = ui_nav_idle();
+    s_consumed = toast_logged_visible();
+    s_last_tap = false;
+    s_st.x0 = x0;
+    s_st.y0 = y0;
+    s_st.t0_ms = lv_tick_get();
+    s_st.max_dev = 0;
+    ESP_LOGI(TAG, "hold: stroke down at %d,%d%s", x0, y0, s_waking ? " (waking)" : "");
+}
+
+void input_debug_release(int16_t x1, int16_t y1)
+{
+    if (!s_active) {
+        ESP_LOGW(TAG, "release: no held stroke");
+        return;
+    }
+    finish(x1, y1, lv_tick_get());
 }
 #endif
