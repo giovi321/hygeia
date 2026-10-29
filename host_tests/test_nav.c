@@ -6,7 +6,7 @@ void tearDown(void) {}
 
 static hy_stroke_t stroke(int x0, int y0, int dx, int dy, uint32_t ms)
 {
-    hy_stroke_t s = { (int16_t)x0, (int16_t)y0, (int16_t)(x0 + dx), (int16_t)(y0 + dy), 1000, 1000 + ms };
+    hy_stroke_t s = { (int16_t)x0, (int16_t)y0, (int16_t)(x0 + dx), (int16_t)(y0 + dy), 1000, 1000 + ms, 0 };
     return s;
 }
 
@@ -118,8 +118,8 @@ static void test_edges_from_everywhere(void)
     hy_nav_open_detail(&n, 7);
     hy_nav_gesture(&n, HY_G_EDGE_RIGHT);
     TEST_ASSERT_EQUAL(HY_V_OVERVIEW, hy_nav_view(&n));
-    hy_nav_gesture(&n, HY_G_EDGE_RIGHT); /* at root: nothing */
-    TEST_ASSERT_EQUAL(HY_V_OVERVIEW, hy_nav_view(&n));
+    hy_nav_gesture(&n, HY_G_EDGE_RIGHT); /* pager root at depth 1: pages back */
+    TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
 
     hy_nav_init(&n);
     hy_nav_push(&n, HY_V_SETTINGS);
@@ -230,6 +230,106 @@ static void test_idle_drift_bounds(void)
     TEST_ASSERT_TRUE(ax != bx || ay != by);
 }
 
+static void test_round_trip_drag_is_not_tap(void)
+{
+    hy_stroke_t s = stroke(200, 200, 0, 0, 100);
+    s.max_dev = 40;
+    TEST_ASSERT_NOT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+    TEST_ASSERT_NOT_EQUAL(HY_G_LONG_PRESS, hy_gesture_classify(&s));
+    s = stroke(200, 200, 0, 0, 800);
+    s.max_dev = 40;
+    TEST_ASSERT_NOT_EQUAL(HY_G_LONG_PRESS, hy_gesture_classify(&s));
+    TEST_ASSERT_NOT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+    s = stroke(200, 200, 0, 0, 100);
+    s.max_dev = 17;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s.max_dev = 16;
+    TEST_ASSERT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+    s = stroke(200, 200, 0, 0, 600);
+    s.max_dev = 16;
+    TEST_ASSERT_EQUAL(HY_G_LONG_PRESS, hy_gesture_classify(&s));
+    /* swipes still classify from the endpoints */
+    s = stroke(200, 200, -60, 0, 200);
+    s.max_dev = 90;
+    TEST_ASSERT_EQUAL(HY_G_SWIPE_LEFT, hy_gesture_classify(&s));
+}
+
+static void test_edge_right_on_pager_pages_back(void)
+{
+    hy_nav_t n; hy_nav_init(&n);
+    hy_nav_gesture(&n, HY_G_SWIPE_LEFT);
+    hy_nav_gesture(&n, HY_G_SWIPE_LEFT);
+    TEST_ASSERT_EQUAL(HY_V_HISTORY, hy_nav_view(&n));
+    hy_nav_gesture(&n, HY_G_EDGE_RIGHT);
+    TEST_ASSERT_EQUAL(HY_V_OVERVIEW, hy_nav_view(&n));
+    hy_nav_gesture(&n, HY_G_EDGE_RIGHT);
+    TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
+    hy_nav_gesture(&n, HY_G_EDGE_RIGHT);
+    TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
+    TEST_ASSERT_EQUAL(1, n.depth);
+}
+
+static void test_qs_opens_on_full_stack(void)
+{
+    hy_nav_t n; hy_nav_init(&n);
+    for (int i = 0; i < 10; i++) hy_nav_push(&n, HY_V_SETTINGS);
+    TEST_ASSERT_EQUAL(HY_NAV_DEPTH, n.depth);
+    hy_nav_gesture(&n, HY_G_EDGE_DOWN);
+    TEST_ASSERT_EQUAL(HY_V_QS, hy_nav_view(&n));
+    TEST_ASSERT_EQUAL(HY_NAV_DEPTH, n.depth);
+    hy_nav_gesture(&n, HY_G_SWIPE_UP);
+    TEST_ASSERT_EQUAL(HY_NAV_DEPTH - 1, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_SETTINGS, hy_nav_view(&n));
+}
+
+static void test_idle_swallows_on_pushed_stack(void)
+{
+    for (int due = 0; due < 2; due++) {
+        for (int g = HY_G_NONE; g <= HY_G_EDGE_RIGHT; g++) {
+            hy_nav_t n; hy_nav_init(&n);
+            hy_nav_gesture(&n, HY_G_SWIPE_LEFT);
+            hy_nav_open_detail(&n, 5);
+            hy_nav_push(&n, HY_V_QS);
+            n.idle = true; n.due = due;
+            TEST_ASSERT_EQUAL(HY_FX_WAKE, hy_nav_gesture(&n, (hy_gesture_t)g));
+            TEST_ASSERT_EQUAL(HY_V_QS, hy_nav_view(&n));
+            TEST_ASSERT_EQUAL(3, n.depth);
+            TEST_ASSERT_EQUAL(HY_V_OVERVIEW, n.stack[0]);
+            TEST_ASSERT_FALSE(n.idle);
+            TEST_ASSERT_EQUAL(due, n.due);
+        }
+    }
+}
+
+static void test_classify_exact_boundaries(void)
+{
+    hy_stroke_t s;
+    s = stroke(200, 200, 60, 40, 200);   TEST_ASSERT_EQUAL(HY_G_SWIPE_RIGHT, hy_gesture_classify(&s));
+    s = stroke(200, 200, 60, 60, 200);   TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s = stroke(200, 200, 0, 0, 0);
+    s.t0_ms = 2000; s.t1_ms = 1000;      /* t1 < t0: treated as a long duration, never a crash */
+    TEST_ASSERT_NOT_EQUAL(HY_G_SWIPE_LEFT, hy_gesture_classify(&s));
+}
+
+static void test_double_tap_exact_and_wrap(void)
+{
+    hy_stroke_t a = stroke(200, 200, 0, 0, 50);
+    hy_stroke_t b = stroke(240, 200, 0, 0, 50);
+    b.t0_ms = a.t1_ms + 300; b.t1_ms = b.t0_ms + 50;
+    TEST_ASSERT_TRUE(hy_gesture_double(&a, &b));
+    b.t0_ms = a.t1_ms + 301;
+    TEST_ASSERT_FALSE(hy_gesture_double(&a, &b));
+    /* millisecond counter wrapping between the taps */
+    a = stroke(200, 200, 0, 0, 50);
+    a.t0_ms = 0xFFFFFF00u; a.t1_ms = 0xFFFFFF40u;
+    b = stroke(210, 200, 0, 0, 50);
+    b.t0_ms = a.t1_ms + 200; b.t1_ms = b.t0_ms + 50;
+    TEST_ASSERT_TRUE(b.t0_ms < a.t1_ms);
+    TEST_ASSERT_TRUE(hy_gesture_double(&a, &b));
+    b.t0_ms = a.t1_ms - 5;
+    TEST_ASSERT_FALSE(hy_gesture_double(&a, &b));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -243,5 +343,11 @@ int main(void)
     RUN_TEST(test_due_gestures);
     RUN_TEST(test_root_flags);
     RUN_TEST(test_idle_drift_bounds);
+    RUN_TEST(test_round_trip_drag_is_not_tap);
+    RUN_TEST(test_edge_right_on_pager_pages_back);
+    RUN_TEST(test_qs_opens_on_full_stack);
+    RUN_TEST(test_idle_swallows_on_pushed_stack);
+    RUN_TEST(test_classify_exact_boundaries);
+    RUN_TEST(test_double_tap_exact_and_wrap);
     return UNITY_END();
 }

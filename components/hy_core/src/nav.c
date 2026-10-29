@@ -10,7 +10,9 @@ hy_gesture_t hy_gesture_classify(const hy_stroke_t *s)
     int dy = (int)s->y1 - (int)s->y0;
     int adx = abs(dx), ady = abs(dy);
 
-    if (adx <= HY_TAP_SLOP_PX && ady <= HY_TAP_SLOP_PX) {
+    int move = adx > ady ? adx : ady;
+    if (s->max_dev > move) move = s->max_dev;
+    if (move <= HY_TAP_SLOP_PX) {
         uint32_t dur = s->t1_ms - s->t0_ms;
         return dur < HY_LONG_PRESS_MS ? HY_G_TAP : HY_G_LONG_PRESS;
     }
@@ -22,13 +24,13 @@ hy_gesture_t hy_gesture_classify(const hy_stroke_t *s)
     }
     if (ady < HY_SWIPE_MIN_PX || 2 * ady < 3 * adx) return HY_G_NONE;
     if (dy > 0) return s->y0 < HY_EDGE_PX ? HY_G_EDGE_DOWN : HY_G_SWIPE_DOWN;
-    return s->y0 >= 480 - HY_EDGE_PX ? HY_G_EDGE_UP : HY_G_SWIPE_UP;
+    return s->y0 >= HY_SCREEN_PX - HY_EDGE_PX ? HY_G_EDGE_UP : HY_G_SWIPE_UP;
 }
 
 bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap)
 {
-    if (tap->t0_ms < prev_tap->t1_ms) return false;
-    if (tap->t0_ms - prev_tap->t1_ms > HY_DOUBLE_TAP_MS) return false;
+    int32_t gap = (int32_t)(tap->t0_ms - prev_tap->t1_ms); /* wrap-safe */
+    if (gap < 0 || gap > HY_DOUBLE_TAP_MS) return false;
     int dx = (int)tap->x0 - (int)prev_tap->x1;
     int dy = (int)tap->y0 - (int)prev_tap->y1;
     return dx * dx + dy * dy <= HY_DOUBLE_TAP_PX * HY_DOUBLE_TAP_PX;
@@ -100,7 +102,8 @@ hy_nav_fx_t hy_nav_gesture(hy_nav_t *n, hy_gesture_t g)
             return HY_FX_NONE;
         }
     } else if (g == HY_G_EDGE_DOWN) {
-        hy_nav_push(n, HY_V_QS);
+        if (n->depth >= HY_NAV_DEPTH) n->stack[HY_NAV_DEPTH - 1] = HY_V_QS; /* QS always opens */
+        else hy_nav_push(n, HY_V_QS);
         return HY_FX_NONE;
     }
     /* 5. EDGE_UP elsewhere: back to the root, pager root becomes HOME */
@@ -111,8 +114,12 @@ hy_nav_fx_t hy_nav_gesture(hy_nav_t *n, hy_gesture_t g)
     }
     /* 6. EDGE_RIGHT above the root: pop one level */
     if (g == HY_G_EDGE_RIGHT) {
-        pop(n);
-        return HY_FX_NONE;
+        if (n->depth > 1) {
+            pop(n);
+            return HY_FX_NONE;
+        }
+        if (is_pager(n->stack[0])) g = HY_G_SWIPE_RIGHT; /* pager root: page back */
+        else return HY_FX_NONE;
     }
     /* 7. pager at depth 1 */
     if (n->depth == 1 && is_pager(n->stack[0])) {
