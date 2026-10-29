@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "esp_log.h"
 #include "hy/audio.h"
@@ -74,6 +77,22 @@ static void cmd_time(const char *args)
     }
     esp_err_t err = hy_clock_set(epoch, *end ? end : NULL, "serial");
     ESP_LOGI(TAG, "time: %s", esp_err_to_name(err));
+}
+
+static void cmd_alarm(const char *args)
+{
+    char *end;
+    long long secs = strtoll(args, &end, 10);
+    while (*end == ' ') {
+        end++;
+    }
+    if (end == args || *end != 0 || secs < 0) {
+        ESP_LOGE(TAG, "usage: alarm <seconds> (0 disables)");
+        return;
+    }
+    int64_t at = secs ? (int64_t)time(NULL) + secs : 0;
+    esp_err_t err = hy_clock_alarm_set(at);
+    ESP_LOGI(TAG, "alarm: %s, utc %lld", esp_err_to_name(err), (long long)at);
 }
 
 static void cmd_zone(const char *args)
@@ -221,6 +240,7 @@ void app_main(void)
     console_register("powerstat", cmd_powerstat);
     console_register("time", cmd_time);
     console_register("zone", cmd_zone);
+    console_register("alarm", cmd_alarm);
     console_register("clock", cmd_clock);
     console_register("tap", cmd_tap);
     console_register("undo", cmd_undo);
@@ -230,4 +250,11 @@ void app_main(void)
     console_register("chime", cmd_chime);
     console_start();
 #endif
+    /* Until the reminder runner (Task 11) polls from the UI task */
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (hy_clock_alarm_take()) {
+            ESP_LOGI(TAG, "rtc alarm fired at %lld", (long long)time(NULL));
+        }
+    }
 }

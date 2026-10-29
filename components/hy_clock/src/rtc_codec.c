@@ -77,3 +77,17 @@ bool hy_rtc_encode(int64_t epoch, uint8_t raw[7])
     raw[6] = dec2bcd(y - 2000);
     return true;
 }
+
+bool hy_rtc_alarm_encode(int64_t epoch, uint8_t raw[5])
+{
+    uint8_t t[7];
+    if (!hy_rtc_encode(epoch, t)) {
+        return false;
+    }
+    raw[0] = t[0] & 0x7F; /* AEN clear: field enabled */
+    raw[1] = t[1] & 0x7F;
+    raw[2] = t[2] & 0x3F;
+    raw[3] = t[3] & 0x3F;
+    raw[4] = 0x80;        /* weekday disabled */
+    return true;
+}

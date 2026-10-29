@@ -119,6 +119,16 @@ static void test_os_flag_ignored_on_decode_and_clear_on_encode(void)
     TEST_ASSERT_EQUAL_HEX8(0x06, out[0]);
 }
 
+static void test_alarm_encode(void)
+{
+    uint8_t raw[5];
+    const uint8_t want[5] = { 0x05, 0x00, 0x07, 0x02, 0x80 };
+    TEST_ASSERT_TRUE(hy_rtc_alarm_encode(1793602805LL, raw)); /* 2026-11-02T07:00:05Z */
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, raw, 5);
+    TEST_ASSERT_FALSE(hy_rtc_alarm_encode(946684799LL, raw)); /* 1999-12-31T23:59:59Z */
+    TEST_ASSERT_FALSE(hy_rtc_alarm_encode(4102444800LL, raw)); /* 2100-01-01T00:00:00Z */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -131,5 +141,6 @@ int main(void)
     RUN_TEST(test_rejects_feb_30_and_feb_29_non_leap);
     RUN_TEST(test_rejects_invalid_bcd_and_ranges);
     RUN_TEST(test_os_flag_ignored_on_decode_and_clear_on_encode);
+    RUN_TEST(test_alarm_encode);
     return UNITY_END();
 }
