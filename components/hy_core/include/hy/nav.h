@@ -13,15 +13,19 @@ extern "C" {
 #define HY_LONG_PRESS_MS  500
 #define HY_DOUBLE_TAP_MS  300
 #define HY_DOUBLE_TAP_PX  40
+#define HY_SCREEN_PX      480
 
 typedef enum { HY_G_NONE = 0, HY_G_TAP, HY_G_LONG_PRESS, HY_G_SWIPE_LEFT, HY_G_SWIPE_RIGHT, HY_G_SWIPE_UP,
                HY_G_SWIPE_DOWN, HY_G_EDGE_DOWN, HY_G_EDGE_UP, HY_G_EDGE_RIGHT } hy_gesture_t;
-typedef struct { int16_t x0, y0, x1, y1; uint32_t t0_ms, t1_ms; } hy_stroke_t;
+/* max_dev: the largest |x - x0| or |y - y0| seen during the stroke, updated by the input layer on every
+   sample. 0 means the caller does not track it and the endpoints decide. */
+typedef struct { int16_t x0, y0, x1, y1; uint32_t t0_ms, t1_ms; uint16_t max_dev; } hy_stroke_t;
 
-/* Tap: movement <= 16 px both axes and duration < 500 ms. Long press: <= 16 px and >= 500 ms.
+/* Tap: movement <= 16 px and duration < 500 ms. Long press: <= 16 px and >= 500 ms. Movement is the larger of
+   max_dev and the endpoint displacement on either axis, so a drag that returns to its start is not a tap.
    Swipe: dominant axis >= 60 px and >= 1.5x the other axis, else NONE. Edge variants: EDGE_DOWN when a
    downward swipe starts at y0 < 40; EDGE_UP when an upward swipe starts at y0 >= 440; EDGE_RIGHT when a
-   rightward swipe starts at x0 < 40. Screen 480x480. */
+   rightward swipe starts at x0 < 40. Screen HY_SCREEN_PX x HY_SCREEN_PX. */
 hy_gesture_t hy_gesture_classify(const hy_stroke_t *s);
 /* Two taps within 300 ms (prev t1 to cur t0) and 40 px. */
 bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap);
