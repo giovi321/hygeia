@@ -288,22 +288,33 @@ void nav_host_init(void)
 {
     hy_nav_init(&s_nav);
     s_pager = pager_create(ui_content());
+    splash_yield();
     home_create(pager_page(0));
+    splash_yield();
     overview_create(pager_page(1));
+    splash_yield();
     history_create(pager_page(2));
     splash_yield();
 
     s_views[HY_V_STORAGE_DOWN] = storage_down_create(ui_content());
     lv_obj_set_hidden(s_views[HY_V_STORAGE_DOWN], true);
+    splash_yield();
     detail_create();
+    splash_yield();
     note_create();
+    splash_yield();
     earlier_create();
+    splash_yield();
     qs_create();
+    splash_yield();
     settings_create();
+    splash_yield();
     s_views[HY_V_SET_TIME] = ui_view_box();
     timeset_create(s_views[HY_V_SET_TIME], false);
+    splash_yield();
     s_views[HY_V_CLOCK_INVALID] = ui_view_box();
     timeset_create(s_views[HY_V_CLOCK_INVALID], true);
+    splash_yield();
 
     due_create();   /* last: above every view, below the toast */
 

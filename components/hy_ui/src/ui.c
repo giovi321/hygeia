@@ -410,13 +410,10 @@ esp_err_t hy_ui_start(void)
     lv_obj_set_clickable(s_content, false);
 
     topbar_create();
+    splash_yield();
     nav_host_init();
     toast_create(s_screen);
-    idle_create();
-    input_init(hy_board_indev());
-    lv_timer_create(tick_cb, 1000, NULL);
-    lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */
-    int sub = hy_ev_subscribe(event_cb, NULL);
+    splash_yield();
     if (splash_remaining_ms() > 0) {
         hy_board_unlock();
         splash_wait();   /* without the lock: the splash animations run in the LVGL task */
@@ -425,6 +422,12 @@ esp_err_t hy_ui_start(void)
         }
     }
     splash_finish(s_screen);
+    /* input, the 1 s tick, the first evaluation (a due card and its chime) and the idle timer start with the content */
+    idle_create();
+    input_init(hy_board_indev());
+    lv_timer_create(tick_cb, 1000, NULL);
+    lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */
+    int sub = hy_ev_subscribe(event_cb, NULL);
     hy_board_unlock();
 
     if (sub < 0) {
