@@ -22,7 +22,7 @@ static const char *TAG = "ui_overview";
 #define ROWS_Y       50
 #define ROWS_W       (HY_SCREEN - ROWS_X - 22)
 #define ROW_H        30
-#define ROWS_H       (4 * ROW_H + ROW_H / 2)   /* a partial fifth row is the scroll cue */
+#define ROWS_H       (4 * ROW_H + 8)   /* a partial fifth row is the scroll cue; the viewport ends at y 178, above the timeline dots */
 #define DOT_D        10
 #define TL_Y         191          /* timeline y on the page, from the mockup */
 #define TL_X0        24
