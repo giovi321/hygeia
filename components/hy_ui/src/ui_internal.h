@@ -68,6 +68,11 @@ lv_obj_t *ui_content(void);                      /* y 56..480 container hosting 
 void      ui_log_hwm(const char *what);          /* logs the LVGL task stack margin once per `what` */
 void      ui_fmt_hhmm(int64_t ts, const char *tz, char *out, size_t len); /* "HH:MM" of ts in tz */
 
+/* ui.c: widget helpers shared by the pages */
+lv_obj_t *ui_plain(lv_obj_t *parent);            /* unstyled, non-scrolling, non-clickable box */
+lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *text);
+uint32_t  ui_fnv(uint32_t h, const void *p, size_t n); /* FNV-1a step over n bytes, seed 2166136261u */
+
 /* nav_host.c */
 void      nav_host_init(void);                   /* creates the views in ui_content(), shows the root */
 void      nav_host_tick(void);                   /* root flags from the clock and the storage state */
@@ -118,10 +123,14 @@ void overview_timing(uint32_t *us);
 void history_create(lv_obj_t *page);
 void history_refresh(void);
 void history_refresh_if_changed(void);
-void history_show(void);                 /* the page became visible: recompute everything */
+void history_show(void);                 /* the page became visible: refresh when something changed */
+void history_hide(void);                 /* the page left the screen: cancel the pending row tap */
 void history_invalidate(void);           /* a log, medicine or zone changed: recompute everything on the next refresh */
 void history_toggle_range(void);         /* 7 <-> 30 days, redrawn from the LVGL loop */
 void history_tap(uint32_t med_id);       /* a TAP ended on a row (med_id) or on the page (0) */
+#if CONFIG_HY_DEBUG_CONSOLE
+void history_debug_press(bool down);    /* debug: a finger held on / released from the page */
+#endif
 void history_timing(uint32_t *view_us, uint32_t *lvgl_us);
 
 /* storage_down.c */

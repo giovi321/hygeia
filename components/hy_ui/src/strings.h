@@ -74,6 +74,10 @@
 /* ---- overview ---- */
 #define HY_S_OV_TITLE      "Today"
 #define HY_S_OV_DOSES      "doses"
+#define HY_S_OV_COUNT      "%u/%u"                  /* taken, total */
+#define HY_S_OV_TL_0       "00"                     /* timeline hour labels */
+#define HY_S_OV_TL_12      "12"
+#define HY_S_OV_TL_24      "24"
 #define HY_S_OV_DUE        "due"
 #define HY_S_OV_LATE       "late"
 #define HY_S_OV_MISSED     "missed"
