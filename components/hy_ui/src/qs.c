@@ -138,8 +138,10 @@ void qs_create(void)
     int bw = (HY_SCREEN - 2 * MARGIN - GAP) / 2;
     lv_obj_t *b = ui_button(s_root, bw, 64, hy_type.status_bold, HY_S_QS_SETTINGS, settings_tap, NULL);
     lv_obj_set_pos(b, MARGIN, y);
+    lv_obj_align(lv_obj_get_child(b, 0), LV_ALIGN_LEFT_MID, 16, 0);   /* left-aligned as in the mockup */
     b = ui_button(s_root, bw, 64, hy_type.status_bold, HY_S_QS_QR, qr_tap, NULL);
     lv_obj_set_pos(b, MARGIN + bw + GAP, y);
+    lv_obj_align(lv_obj_get_child(b, 0), LV_ALIGN_LEFT_MID, 16, 0);
     lv_obj_set_style_opa(b, LV_OPA_40, 0);
 }
 

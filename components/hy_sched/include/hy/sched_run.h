@@ -39,7 +39,7 @@ uint32_t  hy_sched_generation(void);  /* +1 per evaluation */
 /* Returns the latched flash request and clears it (the UI calls it when it starts the flash). */
 bool      hy_sched_take_flash(void);
 
-/* Debug: the next hy_sched_run_tick evaluates. */
+/* The next hy_sched_run_tick evaluates (also after a zone set, which bumps no sync seq). */
 void      hy_sched_run_invalidate(void);
 /* Debug: duration of the log query in the last evaluation (us). */
 uint32_t  hy_sched_run_query_us(void);

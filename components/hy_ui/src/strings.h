@@ -149,6 +149,8 @@
 #define HY_S_ABOUT_SYNCED  "Clock synced %s ago via %s" /* duration, source */
 #define HY_S_ABOUT_UNSYNCED "Clock not synced"
 #define HY_S_ABOUT_STORAGE "Storage %s of %s"
+#define HY_S_KB            "%u KB"
+#define HY_S_MB            "%u.%u MB"
 #define HY_S_ABOUT_MEDS    "Medicines %u active, %u archived"
 #define HY_S_MONTHS        "Jan\nFeb\nMar\nApr\nMay\nJun\nJul\nAug\nSep\nOct\nNov\nDec" /* roller options */
 
@@ -156,6 +158,7 @@
 #define HY_S_TIME_TITLE    "Set the time"
 #define HY_S_TIME_BODY     "Reminders are paused and logging is off until the time is set."
 #define HY_S_TIME_BAD_DATE "That date does not exist"
+#define HY_S_TIME_BAD_TIME "That time does not exist"
 #define HY_S_TIME_TOO_EARLY "Date is before this firmware was built"
 #define HY_S_TIME_ZONE_LINE "Time zone %s"          /* IANA name or POSIX string */
 

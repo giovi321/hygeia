@@ -77,10 +77,13 @@ static void display_live(int32_t pct)
 static void play_tap(void *ud)
 {
     (void)ud;
-    hy_audio_chime();   /* plays whatever the Sound and Do not disturb toggles say */
+    hy_audio_chime();   /* plays regardless of the Sound and Do not disturb toggles */
 }
 
 /* ---- time zone ---- */
+
+/* Etc/GMT+5 follows the IANA sign convention and means UTC-5; those entries show as "GMT+5" in the city roller. */
+static bool s_need_change;   /* no stored zone matched: Set waits for a roller turn */
 
 static void build_cities(size_t region)
 {
@@ -97,11 +100,10 @@ static void build_cities(size_t region)
             total += strlen(iana) - rl;   /* the name after the slash plus one separator */
         }
     }
-    s_city_first = first;
-    s_city_n = n;
     char *buf = malloc(total + 1);
     if (!buf) {
         ESP_LOGE(TAG, "no memory for the city list");
+        s_city_n = 0;   /* the roller keeps its old options: Set must not map them to the new region */
         return;
     }
     size_t o = 0;
@@ -119,17 +121,43 @@ static void build_cities(size_t region)
     buf[o] = '\0';
     lv_roller_set_options(s_city, buf, LV_ROLLER_MODE_NORMAL);
     lv_roller_set_selected(s_city, 0, LV_ANIM_OFF);
+    s_city_first = first;
+    s_city_n = n;
     free(buf);
+}
+
+static void city_changed_cb(lv_event_t *e)
+{
+    (void)e;
+    s_need_change = false;
 }
 
 static void region_changed_cb(lv_event_t *e)
 {
     (void)e;
+    s_need_change = false;
     build_cities(lv_roller_get_selected(s_region));
 }
 
-static void select_zone(const char *iana)
+static void select_zone(const char *iana_in)
 {
+    const char *iana = iana_in;
+    s_need_change = false;
+    if (!iana[0]) {
+        /* only a POSIX string is stored: find the first table zone with the same rules */
+        char tz[HY_TZ_LEN];
+        hy_clock_tz_copy(tz, sizeof tz);
+        s_need_change = true;
+        for (size_t i = 0; i < hy_tzdb_count(); i++) {
+            const char *n, *p;
+            hy_tzdb_at(i, &n, &p);
+            if (strcmp(p, tz) == 0) {
+                iana = n;
+                s_need_change = false;
+                break;
+            }
+        }
+    }
     size_t ri = 0;
     const char *slash = strchr(iana, '/');
     if (slash) {
@@ -171,7 +199,7 @@ static void zone_set_tap(void *ud)
 {
     (void)ud;
     uint32_t c = lv_roller_get_selected(s_city);
-    if (c >= s_city_n) {
+    if (s_need_change || c >= s_city_n) {
         return;
     }
     const char *iana;
@@ -200,7 +228,7 @@ static void zone_create(void)
     }
     s_region = ui_roller(s_zone_root, opts, LV_ROLLER_MODE_NORMAL, 150, hy_type.body_bold, region_changed_cb);
     lv_obj_set_pos(s_region, MARGIN, 60);
-    s_city = ui_roller(s_zone_root, "-", LV_ROLLER_MODE_NORMAL, HY_SCREEN - 2 * MARGIN - 150 - 12, hy_type.body_bold, NULL);
+    s_city = ui_roller(s_zone_root, "-", LV_ROLLER_MODE_NORMAL, HY_SCREEN - 2 * MARGIN - 150 - 12, hy_type.body_bold, city_changed_cb);
     lv_obj_set_pos(s_city, MARGIN + 150 + 12, 60);
     lv_obj_t *b = ui_button(s_zone_root, ROW_W, 66, hy_type.body_bold, HY_S_SET_SET, zone_set_tap, NULL);
     lv_obj_set_pos(b, MARGIN, 346);
@@ -238,10 +266,10 @@ static void fmt_bytes(size_t b, char *out, size_t len)
 {
     const size_t mib = 1024u * 1024u;
     if (b < mib) {
-        snprintf(out, len, "%u KB", (unsigned)((b + 1023) / 1024));
+        snprintf(out, len, HY_S_KB, (unsigned)((b + 1023) / 1024));
     } else {
         unsigned tenths = (unsigned)(((uint64_t)b * 10 + mib / 2) / mib);
-        snprintf(out, len, "%u.%u MB", tenths / 10, tenths % 10);
+        snprintf(out, len, HY_S_MB, tenths / 10, tenths % 10);
     }
 }
 
@@ -374,6 +402,26 @@ static void list_refresh(void)
     lv_label_set_text(s_val[R_ABOUT], esp_app_get_description()->version);
 }
 
+/* The Date and time value follows the clock while the list is open */
+static void clock_row_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (ui_current_view() != HY_V_SETTINGS) {
+        return;
+    }
+    char tz[HY_TZ_LEN], b[48];
+    hy_clock_tz_copy(tz, sizeof tz);
+    const hy_clock_port_t *ck = hy_clock_port();
+    if (ck->valid(NULL)) {
+        hy_format_local(ck->now(NULL), tz, b, sizeof b);
+    } else {
+        snprintf(b, sizeof b, "%s", HY_S_DASH);
+    }
+    if (strcmp(lv_label_get_text(s_val[R_DATETIME]), b) != 0) {
+        lv_label_set_text(s_val[R_DATETIME], b);
+    }
+}
+
 void settings_show(hy_view_t v)
 {
     const hy_settings_t *st = hy_settings();
@@ -430,6 +478,7 @@ void settings_create(void)
     make_row(R_WIFI, HY_S_SET_WIFI);
     make_row(R_ABOUT, HY_S_SET_ABOUT);
 
+    lv_timer_create(clock_row_cb, 1000, NULL);
     zone_create();
     sound_create();
     display_create();

@@ -153,7 +153,11 @@ void ui_show_view(hy_view_t v)
     if (in_detail_group(s_shown) && !in_detail_group(v)) {
         detail_hide();
     }
+    bool from_qs = s_shown == HY_V_QS;
     s_shown = v;   /* before the refresh: the page refreshes only while it is the shown view */
+    if (from_qs && (v == HY_V_SET_TIME || v == HY_V_CLOCK_INVALID || v == HY_V_SET_ZONE)) {
+        return;   /* quick settings was only pulled over the pickers: keep what the user turned */
+    }
     refresh_view(v);
 }
 
