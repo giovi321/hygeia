@@ -72,15 +72,6 @@ static void fmt_dur(int64_t min, char *buf, size_t len)
     }
 }
 
-/* "HH:MM" of ts in tz: the tail of hy_format_local's "Tue 27 Oct 22:04" */
-static void fmt_hhmm(int64_t ts, const char *tz, char *out, size_t len)
-{
-    char full[32];
-    hy_format_local(ts, tz, full, sizeof full);
-    size_t n = strlen(full);
-    snprintf(out, len, "%s", n >= 5 ? full + n - 5 : full);
-}
-
 static const hy_med_t *find_med(uint32_t id)
 {
     const hy_med_t *ms;
@@ -163,7 +154,7 @@ static void view_of(const hy_med_t *m, const hy_snapshot_t *sn, view_t *v)
         break;
     case HY_TILE_SNOOZED: {
         char hhmm[8];
-        fmt_hhmm(tv.snoozed_until, sn->in.tz, hhmm, sizeof hhmm);
+        ui_fmt_hhmm(tv.snoozed_until, sn->in.tz, hhmm, sizeof hhmm);
         v->style = 1;
         snprintf(v->text, sizeof v->text, HY_S_TILE_SNOOZED, hhmm);
         break;
@@ -207,14 +198,26 @@ static void set_ring(tile_t *t, int32_t target, bool animate)
 
 /* SHORT_CLICKED also follows a swipe that started on the tile (the pager does not scroll): only a stroke the
  * input layer classified as TAP logs. */
-static void tile_click_cb(lv_event_t *e)
+void home_tile_click(uint32_t id)
 {
-    uint32_t id = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
     if (!ui_input_last_was_tap()) {
+        ESP_LOGI(TAG, "tile click ignored: med %u, stroke was not a tap", (unsigned)id);
         return;
     }
     ESP_LOGI(TAG, "tile tap: med %u", (unsigned)id);
     home_tap_med(id);
+}
+
+static void tile_click_cb(lv_event_t *e)
+{
+    home_tile_click((uint32_t)(uintptr_t)lv_event_get_user_data(e));
+}
+
+/* A stroke that scrolls the grid is the grid's: it must not also page the pager */
+static void grid_scroll_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_input_consume();
 }
 
 static void tile_long_cb(lv_event_t *e)
@@ -457,6 +460,7 @@ void home_create(lv_obj_t *page)
     lv_obj_set_flex_flow(s_grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_scroll_dir(s_grid, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_grid, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_event_cb(s_grid, grid_scroll_cb, LV_EVENT_SCROLL_BEGIN, NULL);
     lv_obj_set_scroll_elastic(s_grid, false);
     lv_obj_set_scroll_momentum(s_grid, false);
     home_rebuild();
@@ -519,7 +523,7 @@ void home_tap_med(uint32_t med_id)
     ESP_LOGI(TAG, "log_taken med %s: %s (%d), log id %u", code, hy_err_str(err), (int)err, (unsigned)log_id);
     if (err == HY_OK) {
         char hhmm[8];
-        fmt_hhmm(now, tz, hhmm, sizeof hhmm);
+        ui_fmt_hhmm(now, tz, hhmm, sizeof hhmm);
         toast_show_logged(code, hhmm, log_id);
         ui_log_hwm("log");
     } else {

@@ -37,6 +37,8 @@ void hy_ui_debug_perf(void);              /* times one forced scheduler evaluati
 void hy_ui_debug_gesture(const char *name); /* tap|long|left|right|up|down|edgedown|edgeup|edgeright -> ui_nav_gesture */
 void hy_ui_debug_nav(void);               /* logs the navigation stack, e.g. "nav: HOME > QS" */
 void hy_ui_debug_storefail(const char *arg); /* "": storage-down root; "off": storage ok again */
+void hy_ui_debug_idle(const char *arg);   /* "": sets the nav idle flag (stub until the idle module); "off": clears it */
+void hy_ui_debug_tapstroke(const char *code); /* a still stroke through the input layer, then that tile's click handler */
 #endif
 
 #ifdef __cplusplus

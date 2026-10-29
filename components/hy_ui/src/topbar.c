@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "hy/clock.h"
-#include "hy/occ.h"
 #include "ui_internal.h"
 
 #define PAD_X     24
@@ -46,6 +45,8 @@ static void wifi_arc(lv_obj_t *parent, int32_t d)
     lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
 }
 
+/* The top bar is the first child of lv_layer_top. Overlays that must cover it (idle clock, due card fade)
+ * are created on lv_layer_top after topbar_create, or on lv_layer_sys. */
 void topbar_create(void)
 {
     s_bar = plain(lv_layer_top());
@@ -91,11 +92,9 @@ void topbar_refresh(void)
     const hy_clock_port_t *ck = hy_clock_port();
     char b[32];
     if (ck->valid(NULL)) {
-        char tz[HY_TZ_LEN], full[32];
+        char tz[HY_TZ_LEN];
         hy_clock_tz_copy(tz, sizeof tz);
-        hy_format_local(ck->now(NULL), tz, full, sizeof full);  /* "Tue 27 Oct 22:04" */
-        size_t n = strlen(full);
-        snprintf(b, sizeof b, "%s", n >= 5 ? full + n - 5 : full);
+        ui_fmt_hhmm(ck->now(NULL), tz, b, sizeof b);
     } else {
         snprintf(b, sizeof b, "%s", HY_S_TIME_UNSET);
     }

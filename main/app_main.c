@@ -136,6 +136,8 @@ static void cmd_perf(const char *args) { (void)args; hy_ui_debug_perf(); }
 static void cmd_gesture(const char *args) { hy_ui_debug_gesture(args); }
 static void cmd_nav(const char *args) { (void)args; hy_ui_debug_nav(); }
 static void cmd_storefail(const char *args) { hy_ui_debug_storefail(args); }
+static void cmd_idle(const char *args) { hy_ui_debug_idle(args); }
+static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -267,6 +269,8 @@ void app_main(void)
     console_register("gesture", cmd_gesture);
     console_register("nav", cmd_nav);
     console_register("storefail", cmd_storefail);
+    console_register("idle", cmd_idle);
+    console_register("tapstroke", cmd_tapstroke);
     console_start();
 #endif
 }

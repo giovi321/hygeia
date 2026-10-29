@@ -150,7 +150,7 @@ static void show_top(void)
     ui_show_view(hy_nav_view(&s_nav));
 }
 
-void ui_nav_gesture(hy_gesture_t g)
+hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
 {
     hy_nav_fx_t fx = hy_nav_gesture(&s_nav, g);
     switch (fx) {
@@ -170,6 +170,18 @@ void ui_nav_gesture(hy_gesture_t g)
         show_top();
     }
     ui_nav_log();
+    return fx;
+}
+
+bool ui_nav_idle(void)
+{
+    return s_nav.idle;
+}
+
+void ui_nav_set_idle(bool idle)
+{
+    s_nav.idle = idle;
+    ESP_LOGI(TAG, "idle flag %s (stub until the idle module)", idle ? "set" : "cleared");
 }
 
 void ui_nav_push(hy_view_t v)
