@@ -49,15 +49,13 @@ static void test_low_once_per_crossing(void)
     TEST_ASSERT_TRUE(feed(false, 15, T0 + 1) & HY_BATT_EV_LOW);
     TEST_ASSERT_FALSE(feed(false, 14, T0 + 2) & HY_BATT_EV_LOW);
     TEST_ASSERT_FALSE(feed(false, 13, T0 + 3) & HY_BATT_EV_LOW);
-    /* rise of 4 over 13 is accepted as a swap, shown 17: still below the re-arm level */
+    /* rise of 4 is accepted (battery swapped), shown 17: still below the re-arm level */
     TEST_ASSERT_FALSE(feed(false, 17, T0 + 4) & HY_BATT_EV_LOW);
     TEST_ASSERT_EQUAL_INT(17, B.pct);
-    /* a rise of 1 is ignored while discharging, so 18 never shows from 17 */
-    feed(false, 18, T0 + 5);
-    TEST_ASSERT_EQUAL_INT(17, B.pct);
-    /* rise of 4 is accepted: 21 re-arms low */
-    TEST_ASSERT_FALSE(feed(false, 21, T0 + 6) & HY_BATT_EV_LOW);
-    TEST_ASSERT_EQUAL_INT(21, B.pct);
+    TEST_ASSERT_FALSE(feed(false, 15, T0 + 5) & HY_BATT_EV_LOW); /* not re-armed below 18 */
+    /* rise of 3 is accepted and reaches 18: re-armed */
+    TEST_ASSERT_FALSE(feed(false, 18, T0 + 6) & HY_BATT_EV_LOW);
+    TEST_ASSERT_EQUAL_INT(18, B.pct);
     TEST_ASSERT_TRUE(feed(false, 15, T0 + 7) & HY_BATT_EV_LOW);
 }
 
@@ -88,9 +86,12 @@ static void test_crit_once(void)
     TEST_ASSERT_TRUE(f & HY_BATT_EV_CRIT);
     TEST_ASSERT_FALSE(f & HY_BATT_EV_LOW); /* low already fired */
     TEST_ASSERT_EQUAL_UINT32(0, feed(false, 4, T0 + 120) & EVS);
-    feed(false, 8, T0 + 180); /* rise of 4 over 4: accepted, re-arms critical */
+    feed(false, 7, T0 + 180); /* rise of 3 accepted, shown 7: not re-armed */
+    TEST_ASSERT_EQUAL_INT(7, B.pct);
+    TEST_ASSERT_FALSE(feed(false, 5, T0 + 240) & HY_BATT_EV_CRIT);
+    feed(false, 8, T0 + 300); /* rise of 3 accepted, shown 8: re-armed */
     TEST_ASSERT_EQUAL_INT(8, B.pct);
-    f = feed(false, 5, T0 + 240);
+    f = feed(false, 5, T0 + 360);
     TEST_ASSERT_TRUE(f & HY_BATT_EV_CRIT);
     TEST_ASSERT_FALSE(f & HY_BATT_EV_LOW); /* low stays disarmed below 18% */
 }
@@ -161,6 +162,33 @@ static void test_estimate_hidden_then_shown(void)
     TEST_ASSERT_EQUAL_STRING("~24 h", buf);
 }
 
+static void test_estimate_reanchor(void)
+{
+    const int64_t H = 3600;
+    /* accepted rise: the anchor moves to the new reading, no sample in that pass */
+    hy_batt_init(&B, 0);
+    feed(false, 80, T0);
+    feed(false, 70, T0 + 4 * H);
+    TEST_ASSERT_EQUAL_INT32(250, B.rate_cph);
+    feed(false, 75, T0 + 5 * H); /* rise of 5 */
+    TEST_ASSERT_EQUAL_INT(75, B.pct);
+    TEST_ASSERT_EQUAL_INT32(250, B.rate_cph);
+    feed(false, 65, T0 + 7 * H); /* 2 h after the new anchor: no sample (old anchor would give one) */
+    TEST_ASSERT_EQUAL_INT32(250, B.rate_cph);
+    feed(false, 65, T0 + 8 * H); /* 3 h, drop 10 from the new anchor: sample 333 */
+    TEST_ASSERT_EQUAL_INT32(291, B.rate_cph);
+
+    /* clock moved back: re-anchor, no sample */
+    hy_batt_init(&B, 0);
+    feed(false, 80, T0);
+    feed(false, 70, T0 + 4 * H);
+    TEST_ASSERT_EQUAL_INT32(250, B.rate_cph);
+    feed(false, 70, T0 + 3 * H);
+    TEST_ASSERT_EQUAL_INT32(250, B.rate_cph);
+    feed(false, 65, T0 + 6 * H); /* 3 h and 5 points from the new anchor: sample 166 */
+    TEST_ASSERT_EQUAL_INT32(208, B.rate_cph);
+}
+
 static void test_estimate_days_and_under_hour(void)
 {
     char buf[16];
@@ -198,6 +226,7 @@ int main(void)
     RUN_TEST(test_text_red_and_bolt);
     RUN_TEST(test_changed_flag);
     RUN_TEST(test_estimate_hidden_then_shown);
+    RUN_TEST(test_estimate_reanchor);
     RUN_TEST(test_estimate_days_and_under_hour);
     RUN_TEST(test_estimate_hidden_on_usb);
     return UNITY_END();
