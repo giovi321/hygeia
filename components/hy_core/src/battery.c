@@ -11,7 +11,9 @@ void hy_batt_init(hy_batt_t *b, int32_t saved_rate_cph)
     b->rate_cph = saved_rate_cph > 0 ? saved_rate_cph : 0;
 }
 
-static void estimate_step(hy_batt_t *b, int64_t now)
+/* reanchor: a battery swap (accepted rise) or a clock that moved back makes the old anchor
+ * meaningless, so restart it at (now, shown) and take no sample. rate_cph is kept. */
+static void estimate_step(hy_batt_t *b, int64_t now, bool rose)
 {
     if (b->raw.vbus) {
         b->est_t0 = 0;
@@ -19,7 +21,7 @@ static void estimate_step(hy_batt_t *b, int64_t now)
     }
     if (b->pct < 0)
         return;
-    if (b->est_t0 == 0) {
+    if (b->est_t0 == 0 || rose || now < b->est_t0) {
         b->est_t0 = now;
         b->est_p0 = b->pct;
         return;
@@ -36,13 +38,15 @@ uint32_t hy_batt_update(hy_batt_t *b, const hy_batt_raw_t *r, int64_t now)
 {
     int8_t prev = b->pct;
     int8_t shown;
+    bool rose = false;
     if (!r->present || r->pct < 0)
         shown = -1;
     else if (r->vbus || prev < 0)
         shown = r->pct;
-    else if (r->pct >= prev + 3)
+    else if (r->pct >= prev + 3) {
         shown = r->pct; /* battery swapped */
-    else
+        rose = true;
+    } else
         shown = r->pct < prev ? r->pct : prev;
 
     uint32_t flags = 0;
@@ -67,7 +71,7 @@ uint32_t hy_batt_update(hy_batt_t *b, const hy_batt_raw_t *r, int64_t now)
         }
     }
 
-    estimate_step(b, now);
+    estimate_step(b, now, rose);
     return flags;
 }
 
