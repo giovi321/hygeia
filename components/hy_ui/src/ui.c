@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/events.h"
+#include "hy/sched_run.h"
 #include "hy/ui.h"
 #include "ui_internal.h"
 
@@ -18,10 +19,11 @@ static void async_refresh(void *arg)
     (void)arg;
     bool rebuild = s_rebuild_queued;
     s_refresh_queued = s_rebuild_queued = false;
+    hy_sched_run_tick();   /* the event marked the runner dirty: evaluate before redrawing */
     if (rebuild) {
         home_rebuild();
     } else {
-        home_refresh(true);
+        home_refresh_if_changed();
     }
 }
 
@@ -44,7 +46,8 @@ static void event_cb(const hy_event_t *ev, void *ctx)
 static void tick_cb(lv_timer_t *t)
 {
     (void)t;
-    home_minute_tick();
+    hy_sched_run_tick();
+    home_refresh_if_changed();
 }
 
 void ui_log_hwm(const char *what)
@@ -73,6 +76,7 @@ esp_err_t hy_ui_start(void)
     if (!hy_board_lock(2000)) {
         return ESP_ERR_TIMEOUT;
     }
+    hy_sched_run_tick();   /* the first snapshot, so the tiles never start from an empty one */
     s_screen = lv_obj_create(NULL);
     lv_obj_remove_style_all(s_screen);
     lv_obj_set_size(s_screen, HY_SCREEN, HY_SCREEN);

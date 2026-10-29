@@ -24,12 +24,14 @@ typedef struct {
 } hy_saved_tz_t;
 
 /* Takes the TZ lock, saves the current TZ in a fixed buffer (no allocation that could fail), sets
- * TZ to posix_tz (NULL = "UTC0") and calls tzset. Returns false, with TZ unchanged and the lock
+ * TZ to posix_tz (NULL = "UTC0") and calls tzset, both skipped when that TZ is already set (tzset
+ * re-parses the string, about 80 us on the device). Returns false, with TZ unchanged and the lock
  * released, when the previous TZ does not fit the buffer; the caller must then not compute local
  * times. Our own zones are at most HY_TZ_LEN - 1 characters, so this only guards foreign TZs.
  * On success the caller ends with hy_tz_leave. */
 bool hy_tz_enter(hy_saved_tz_t *saved, const char *posix_tz);
-/* Restores the saved TZ, calls tzset, and only then releases the lock. */
+/* Restores the saved TZ and calls tzset (skipped when TZ already equals it), and only then releases
+ * the lock. */
 void hy_tz_leave(const hy_saved_tz_t *saved);
 
 #endif

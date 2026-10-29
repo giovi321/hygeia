@@ -19,6 +19,7 @@ idf_component_register(
         hy_core
         hy_store
         hy_clock
+        hy_sched
         hy_board
         lvgl__lvgl
     PRIV_REQUIRES

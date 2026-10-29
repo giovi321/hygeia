@@ -21,8 +21,10 @@ esp_err_t hy_ui_start(void);
 void hy_ui_debug_tap(const char *code);   /* same handler as tapping the tile of that medicine code */
 void hy_ui_debug_undo(void);              /* same handler as tapping Undo on the visible toast */
 void hy_ui_debug_logs(void);              /* today's and yesterday's log entries */
-void hy_ui_debug_seed4(const char *arg);  /* "": adds the example medicine Z (Zinc); "5": also C; "off": archives both */
+void hy_ui_debug_seed4(const char *arg);  /* "": adds Z (Zinc); "5": also C; "<n>": up to n active (Z1.., Y1..); "off": archives them */
 void hy_ui_debug_shot(void);              /* streams a PNG-convertible snapshot of the active screen */
+void hy_ui_debug_remindtest(const char *arg); /* "<minutes> [count] [miss2]": T (and U) due then; "off": archives both */
+void hy_ui_debug_perf(void);              /* times one forced scheduler evaluation and one home_refresh */
 #endif
 
 #ifdef __cplusplus
