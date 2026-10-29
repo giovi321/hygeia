@@ -8,6 +8,7 @@ idf_component_register(
         "src/power.c"
         "src/types.c"
         "src/tzlock.c"
+        "src/sched.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
