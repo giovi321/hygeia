@@ -13,6 +13,7 @@
 #define T_2026_03_29_0100Z          1774746000LL /* 03:00 CEST, first minute after the gap */
 #define T_2026_07_15_0600Z          1784095200LL /* 08:00 CEST Zurich */
 #define T_2026_07_15_1000Z          1784109600LL /* 06:00 EDT New York, 12:00 CEST Zurich */
+#define DAY 86400LL
 #define MIN 60LL
 #define HOUR 3600LL
 
@@ -257,6 +258,15 @@ static void test_two_due_and_snooze(void)
     TEST_ASSERT_TRUE(out.chime);
     TEST_ASSERT_EQUAL_UINT8(1, s.chime_plays);
     TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+
+    /* The restarted sequence also stops after 5 plays. */
+    for (int m = 17; m <= 23; m += 2) {
+        eval(L(8, m));
+        TEST_ASSERT_TRUE_MESSAGE(out.chime, "restarted sequence repeat");
+    }
+    TEST_ASSERT_EQUAL_UINT8(5, s.chime_plays);
+    eval(L(8, 25));
+    TEST_ASSERT_FALSE(out.chime);
 }
 
 static void test_new_medicine_mid_day(void)
@@ -369,6 +379,131 @@ static void test_not_tracking_outputs_nothing(void)
     TEST_ASSERT_EQUAL_INT64(0, out.next_wake);
 }
 
+/* Waking exactly at base + late and base + missed sees the new state. */
+static void test_wake_at_late_and_missed(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(8, 0));
+    for (int m = 2; m <= 8; m += 2) eval(L(8, m));
+    TEST_ASSERT_EQUAL_INT64(L(8, 30), out.next_wake);
+    eval(out.next_wake);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_LATE, out.open[0].state);
+    TEST_ASSERT_FALSE(out.chime);
+    TEST_ASSERT_EQUAL_INT64(L(10, 0), out.next_wake);
+    eval(out.next_wake);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_TRUE(in_list(out.to_miss, out.n_to_miss, 1, L(8, 0)));
+    TEST_ASSERT_EQUAL_INT64(L(20, 0), out.next_wake);
+}
+
+/* P18: the clock was ahead (14:00), then corrected back to 07:00. */
+static void test_backward_jump_keeps_today(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(14, 0));
+    eval(L(14, 0));
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    TEST_ASSERT_EQUAL_INT64(L(7, 0), hy_sched_tracked_since(&s, 1));
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.next_wake);
+    eval(L(8, 0));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_DUE, out.open[0].state);
+    TEST_ASSERT_TRUE(out.chime);
+    eval(L(10, 0));
+    TEST_ASSERT_TRUE(in_list(out.to_miss, out.n_to_miss, 1, L(8, 0)));
+}
+
+/* P19: a late eval plays one repeat and the next one comes 120 s after it. */
+static void test_late_eval_cadence(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(8, 0));
+    eval(L(8, 5));
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(2, s.chime_plays);
+    TEST_ASSERT_EQUAL_INT64(L(8, 7), s.chime_next);
+    TEST_ASSERT_EQUAL_INT64(L(8, 7), out.next_wake);
+    eval(L(8, 5) + 1);
+    TEST_ASSERT_FALSE(out.chime);
+    eval(L(8, 7));
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(3, s.chime_plays);
+
+    /* Clock invalid with a dose showing, valid again 20 min later: no burst. */
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(8, 0));
+    hy_sched_stop_tracking(&s);
+    eval(L(8, 1));
+    hy_sched_start_tracking(&s, L(8, 20));
+    eval(L(8, 20));
+    int plays = out.chime ? 1 : 0;
+    for (int i = 1; i < 4; i++) {
+        eval(L(8, 20) + i);
+        plays += out.chime ? 1 : 0;
+    }
+    TEST_ASSERT_EQUAL_INT(1, plays);
+}
+
+/* P20: archived for 3 days, unarchived at 12:00: nothing missed for that time. */
+static void test_unarchive_no_missed(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    hy_sched_start_tracking(&s, L(7, 0) - 3 * DAY);
+    eval(L(7, 0) - 3 * DAY);
+    a->archived = true;
+    eval(L(7, 0) - 2 * DAY);
+    a->archived = false;
+    eval(L(12, 0));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+    TEST_ASSERT_EQUAL_INT64(L(12, 0), hy_sched_tracked_since(&s, 1));
+
+    /* Same when it was as-needed in between. */
+    eval(L(13, 0));
+    a->type = HY_SCHED_AS_NEEDED;
+    eval(L(14, 0));
+    a->type = HY_SCHED_FIXED;
+    eval(L(23, 0));
+    TEST_ASSERT_FALSE(in_list(out.to_miss, out.n_to_miss, 1, L(20, 0)));
+}
+
+/* P20: a 09:00 time added at 12:00 does not make today's 09:00 missed. */
+static void test_added_time_no_missed(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    a->times[0] = 20 * 60;
+    a->n_times = 1;
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 30));
+    a->times[0] = 9 * 60;
+    a->times[1] = 20 * 60;
+    a->n_times = 2;
+    eval(L(12, 0));
+    TEST_ASSERT_FALSE(in_list(out.to_miss, out.n_to_miss, 1, L(9, 0)));
+    TEST_ASSERT_EQUAL_INT64(L(12, 0), hy_sched_tracked_since(&s, 1));
+
+    /* An unchanged schedule keeps its since. */
+    eval(L(13, 0));
+    TEST_ASSERT_EQUAL_INT64(L(12, 0), hy_sched_tracked_since(&s, 1));
+    /* Weekdays and active dates count as schedule changes too. */
+    a->weekdays = 0x1F;
+    eval(L(14, 0));
+    TEST_ASSERT_EQUAL_INT64(L(14, 0), hy_sched_tracked_since(&s, 1));
+    a->active_until = 20261231;
+    eval(L(15, 0));
+    TEST_ASSERT_EQUAL_INT64(L(15, 0), hy_sched_tracked_since(&s, 1));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -384,5 +519,10 @@ int main(void)
     RUN_TEST(test_dst_gap_slot);
     RUN_TEST(test_clock_back_no_reannounce);
     RUN_TEST(test_not_tracking_outputs_nothing);
+    RUN_TEST(test_wake_at_late_and_missed);
+    RUN_TEST(test_backward_jump_keeps_today);
+    RUN_TEST(test_late_eval_cadence);
+    RUN_TEST(test_unarchive_no_missed);
+    RUN_TEST(test_added_time_no_missed);
     return UNITY_END();
 }

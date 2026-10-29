@@ -17,7 +17,12 @@
  *
  * Rules:
  * - Only fixed, non-archived medicines. A medicine id not in `seen` is added
- *   with since = now. tracked_since(med) = max(tracking_since, seen.since);
+ *   with since = now. Each eval drops `seen` entries for medicines that are no
+ *   longer eligible (archived, as-needed or absent), so a medicine re-entering
+ *   the eligible set restarts at since = now. since also restarts (= now) when
+ *   the schedule signature (fixed times, weekdays, active dates) changes.
+ *   hy_sched_start_tracking clears `seen`, so after any clock jump every
+ *   medicine restarts at the next eval. tracked_since(med) = max(tracking_since, seen.since);
  *   every state query passes the gap {0, tracked_since(med)}, so a slot whose
  *   window closed before tracking began is UNTRACKED (a HY_MISSED log for the
  *   slot still decides MISSED first).
@@ -33,7 +38,8 @@
  *   from the previous eval. If it contains a pair not in the previous set:
  *   chime, chime_plays = 1, chime_next = now + 120. Else if n_showing > 0,
  *   chime_plays < 5 and now >= chime_next: chime, chime_plays++,
- *   chime_next += 120. If n_showing == 0: chime_plays = 0, chime_next = 0.
+ *   chime_next = now + 120 (paced from the last play, so a late eval plays
+ *   once and does not burst). If n_showing == 0: chime_plays = 0, chime_next = 0.
  * - next_wake: the minimum, over values strictly after now, of: each tracked
  *   medicine's next occurrence base after now; each open entry's
  *   base + late_after_min*60 and base + missed_after_min*60; each snooze
@@ -51,8 +57,8 @@ typedef struct { uint32_t med_id; int64_t slot; int64_t base; hy_occ_state_t sta
 
 typedef struct {
     int64_t tracking_since;                                  /* 0 = not tracking */
-    int64_t last_eval;
-    struct { uint32_t med_id; int64_t since; } seen[HY_MAX_MEDS]; size_t n_seen;
+    int64_t last_eval;                                       /* informational: now of the last tracking eval */
+    struct { uint32_t med_id; int64_t since; uint32_t sig; /* schedule signature */ } seen[HY_MAX_MEDS]; size_t n_seen;
     hy_slot_ref_t announced[32]; size_t announced_next;      /* ring of DUE-announced slots */
     hy_slot_ref_t showing[HY_SCHED_MAX_OPEN]; size_t n_showing_prev;
     int64_t chime_next; uint8_t chime_plays;
