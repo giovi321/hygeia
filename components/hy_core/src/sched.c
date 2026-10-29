@@ -16,27 +16,60 @@ static int seen_index(const hy_sched_t *s, uint32_t med_id)
     return -1;
 }
 
-static bool med_listed(const hy_sched_in_t *in, uint32_t med_id)
+static bool med_listed(const hy_med_t *meds, size_t n_meds, uint32_t med_id)
 {
-    for (size_t i = 0; i < in->n_meds; i++)
-        if (in->meds[i].id == med_id && tracked_med(&in->meds[i])) return true;
+    for (size_t i = 0; i < n_meds; i++)
+        if (meds[i].id == med_id && tracked_med(&meds[i])) return true;
     return false;
 }
 
-/* Adds med_id with since = now. When the table is full, entries for medicines no
- * longer in the input (or no longer tracked) are dropped first. */
-static void seen_add(hy_sched_t *s, const hy_sched_in_t *in, uint32_t med_id)
+/* FNV-1a over what decides when a medicine is due: fixed times, weekdays, active dates. */
+static void sig_mix(uint32_t *h, uint32_t v)
 {
-    if (s->n_seen >= HY_MAX_MEDS) {
-        size_t w = 0;
-        for (size_t r = 0; r < s->n_seen; r++)
-            if (med_listed(in, s->seen[r].med_id)) s->seen[w++] = s->seen[r];
-        s->n_seen = w;
+    for (int i = 0; i < 4; i++) {
+        *h ^= (v >> (8 * i)) & 0xFFu;
+        *h *= 16777619u;
     }
-    if (s->n_seen >= HY_MAX_MEDS) return;
-    s->seen[s->n_seen].med_id = med_id;
-    s->seen[s->n_seen].since = in->now;
-    s->n_seen++;
+}
+
+static uint32_t sched_sig(const hy_med_t *m)
+{
+    uint32_t h = 2166136261u;
+    uint8_t n = m->n_times > HY_MAX_TIMES ? HY_MAX_TIMES : m->n_times;
+    sig_mix(&h, n);
+    for (uint8_t i = 0; i < n; i++) sig_mix(&h, m->times[i]);
+    sig_mix(&h, m->weekdays);
+    sig_mix(&h, (uint32_t)m->active_from);
+    sig_mix(&h, (uint32_t)m->active_until);
+    return h;
+}
+
+/* Drops entries for medicines that are no longer eligible, then adds new ones and
+ * restarts since = now for those whose schedule signature changed. */
+static void seen_update(hy_sched_t *s, const hy_med_t *meds, size_t n_meds, int64_t now)
+{
+    size_t w = 0;
+    for (size_t r = 0; r < s->n_seen; r++)
+        if (med_listed(meds, n_meds, s->seen[r].med_id)) s->seen[w++] = s->seen[r];
+    s->n_seen = w;
+
+    for (size_t i = 0; i < n_meds; i++) {
+        const hy_med_t *m = &meds[i];
+        if (!tracked_med(m)) continue;
+        uint32_t sig = sched_sig(m);
+        int k = seen_index(s, m->id);
+        if (k >= 0) {
+            if (s->seen[k].sig != sig) {
+                s->seen[k].since = now;
+                s->seen[k].sig = sig;
+            }
+        } else if (s->n_seen < HY_MAX_MEDS) {
+            s->seen[s->n_seen].med_id = m->id;
+            s->seen[s->n_seen].since = now;
+            s->seen[s->n_seen].sig = sig;
+            s->n_seen++;
+        }
+    }
 }
 
 static bool any_log_for(const hy_sched_in_t *in, uint32_t med_id, int64_t slot)
@@ -65,7 +98,9 @@ void hy_sched_init(hy_sched_t *s)
 
 void hy_sched_start_tracking(hy_sched_t *s, int64_t now)
 {
-    if (s) s->tracking_since = now;
+    if (!s) return;
+    s->tracking_since = now;
+    s->n_seen = 0; /* a jump in either direction restarts every medicine at the next eval */
 }
 
 void hy_sched_stop_tracking(hy_sched_t *s)
@@ -106,10 +141,11 @@ void hy_sched_eval(hy_sched_t *s, const hy_sched_in_t *in, hy_sched_out_t *out)
     size_t n_cand = 0;
     static int64_t occ[SCHED_OCC_MAX];
 
+    seen_update(s, meds, n_meds, now);
+
     for (size_t i = 0; i < n_meds; i++) {
         const hy_med_t *m = &meds[i];
         if (!tracked_med(m)) continue;
-        if (seen_index(s, m->id) < 0) seen_add(s, in, m->id);
 
         hy_gap_t gap = { 0, hy_sched_tracked_since(s, m->id) };
         size_t n = hy_occurrences(m, now - SCHED_WINDOW_S, now + 1, tz, occ, SCHED_OCC_MAX);
@@ -197,7 +233,7 @@ void hy_sched_eval(hy_sched_t *s, const hy_sched_in_t *in, hy_sched_out_t *out)
     } else if (n_showing > 0 && s->chime_plays < HY_CHIME_MAX_PLAYS && now >= s->chime_next) {
         out->chime = true;
         s->chime_plays++;
-        s->chime_next += HY_CHIME_REPEAT_S;
+        s->chime_next = now + HY_CHIME_REPEAT_S;
     }
     if (n_showing == 0) {
         s->chime_plays = 0;
