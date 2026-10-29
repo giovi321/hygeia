@@ -129,6 +129,7 @@ static void cmd_tap(const char *args)
 
 static void cmd_undo(const char *args) { (void)args; hy_ui_debug_undo(); }
 static void cmd_logs(const char *args) { (void)args; hy_ui_debug_logs(); }
+static void cmd_gaps(const char *args) { (void)args; hy_ui_debug_gaps(); }
 static void cmd_seed4(const char *args) { hy_ui_debug_seed4(args); }
 static void cmd_shot(const char *args) { (void)args; hy_ui_debug_shot(); }
 static void cmd_chime(const char *args) { (void)args; hy_audio_chime(); }
@@ -311,6 +312,8 @@ void app_main(void)
     console_register("alive", hy_power_debug_alive);
     console_register("pkey", hy_power_debug_pkey);
     console_register("fakebatt", hy_power_debug_fakebatt);
+    console_register("poweroff", hy_power_debug_poweroff);
+    console_register("gaps", cmd_gaps);
     console_start();
 #endif
 }

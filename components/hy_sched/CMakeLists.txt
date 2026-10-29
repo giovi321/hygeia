@@ -11,4 +11,6 @@ idf_component_register(
     PRIV_REQUIRES
         esp_timer
         heap
+        freertos
+        hy_power
 )

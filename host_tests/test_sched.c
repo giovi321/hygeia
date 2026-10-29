@@ -504,6 +504,49 @@ static void test_added_time_no_missed(void)
     TEST_ASSERT_EQUAL_INT64(L(15, 0), hy_sched_tracked_since(&s, 1));
 }
 
+/* Review Focus 1: boot after an off period, the 08:00 slot is still inside its window: due (LATE) with the chime. */
+static void test_boot_late_slot_still_due(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(8, 40));
+    eval(L(8, 40));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_UINT32(1, out.open[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.open[0].slot);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_LATE, out.open[0].state);
+    TEST_ASSERT_TRUE(in_list(out.newly_due, out.n_newly_due, 1, L(8, 0)));
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+}
+
+/* Boot after the 08:00 window closed: not open and never missed (the gap is untracked). */
+static void test_boot_after_window_untracked(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(10, 5));
+    eval(L(10, 5));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_FALSE(in_list(out.to_miss, out.n_to_miss, 1, L(8, 0)));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+}
+
+/* Boot inside the window, then the window closes untouched: missed as usual. The runner evaluates at the
+ * tracking start (it is the tick that starts tracking), which also records when A was first seen. */
+static void test_boot_inside_window_then_missed(void)
+{
+    reset();
+    add_a();
+    hy_sched_start_tracking(&s, L(8, 40));
+    eval(L(8, 40));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+    eval(L(10, 0));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_to_miss);
+    TEST_ASSERT_EQUAL_UINT32(1, out.to_miss[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.to_miss[0].slot);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -524,5 +567,8 @@ int main(void)
     RUN_TEST(test_late_eval_cadence);
     RUN_TEST(test_unarchive_no_missed);
     RUN_TEST(test_added_time_no_missed);
+    RUN_TEST(test_boot_late_slot_still_due);
+    RUN_TEST(test_boot_after_window_untracked);
+    RUN_TEST(test_boot_inside_window_then_missed);
     return UNITY_END();
 }

@@ -33,6 +33,7 @@ void hy_power_debug_pmu(const char *args);
 void hy_power_debug_batt(const char *args);
 void hy_power_debug_batlog(const char *args);    /* "" prints both files, "clear" deletes them */
 void hy_power_debug_alive(const char *args);
+void hy_power_debug_poweroff(const char *args);  /* heartbeat clean = true, then the AXP2101 power-off */
 void hy_power_debug_pkey(const char *args);      /* short | long */
 void hy_power_debug_fakebatt(const char *args);  /* <pct> [usb] | off */
 #endif

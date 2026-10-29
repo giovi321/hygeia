@@ -43,6 +43,7 @@ static bool s_fake, s_fake_usb, s_fake_changed, s_force_read;
 static int8_t s_fake_pct;
 
 static int8_t s_clean_cached = -1; /* last "clean" written, -1 unknown */
+static bool s_stopping;             /* a power-off is in progress: no heartbeat (it would clear clean); s_mux */
 
 static int64_t mono_s(void)
 {
@@ -343,7 +344,10 @@ static void power_task(void *arg)
             }
         }
 
-        if (hy_clock_valid() && mono - last_alive >= ALIVE_EVERY_S) {
+        portENTER_CRITICAL(&s_mux);
+        bool stopping = s_stopping;
+        portEXIT_CRITICAL(&s_mux);
+        if (!stopping && hy_clock_valid() && mono - last_alive >= ALIVE_EVERY_S) {
             last_alive = mono;
             hy_power_alive_write((int64_t)time(NULL), false);
         }
@@ -436,6 +440,25 @@ void hy_power_debug_alive(const char *args)
     int64_t now = (int64_t)time(NULL);
     ESP_LOGI(TAG, "alive: %s %" PRId64 " clean %d (now %" PRId64 ", clock %s)", ok ? "record" : "none", a.alive,
              a.clean, now, hy_clock_valid() ? "valid" : "invalid");
+}
+
+void hy_power_debug_poweroff(const char *args)
+{
+    (void)args;
+    portENTER_CRITICAL(&s_mux);
+    s_stopping = true;
+    portEXIT_CRITICAL(&s_mux);
+    if (hy_clock_valid()) {
+        hy_power_alive_write((int64_t)time(NULL), true);
+    } else {
+        ESP_LOGW(TAG, "poweroff: clock invalid, heartbeat not written");
+    }
+    ESP_LOGI(TAG, "power: off (debug)");
+    hy_board_pmu_power_off();
+    ESP_LOGE(TAG, "poweroff: still running");
+    portENTER_CRITICAL(&s_mux);
+    s_stopping = false;
+    portEXIT_CRITICAL(&s_mux);
 }
 
 void hy_power_debug_pkey(const char *args)
