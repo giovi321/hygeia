@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hy/board.h"
+#include "hy/clock.h"
 #include "hy/events.h"
 #include "hy/occ.h"
 #include "hy/sched_run.h"
@@ -43,8 +44,10 @@ static void event_cb(const hy_event_t *ev, void *ctx)
         return;
     }
     history_invalidate();
-    if (ev->type == HY_EV_LOG_EDITED) {
-        detail_invalidate();   /* an edit can change an entry older than the scheduler's window */
+    if (ev->type == HY_EV_LOG_EDITED ||
+        ((ev->type == HY_EV_TAKEN || ev->type == HY_EV_SKIPPED || ev->type == HY_EV_UNDONE) &&
+         ev->ts && ev->ts < hy_clock_port()->now(NULL) - 8 * 86400)) {
+        detail_invalidate();   /* an entry older than the scheduler's 8 day window changed */
     }
     if (ev->type == HY_EV_MEDS_CHANGED) {
         s_rebuild_queued = true;
@@ -129,6 +132,11 @@ size_t ui_log_window(uint32_t med_id, int64_t from, int64_t to, hy_log_t *out, s
     for (;;) {
         size_t n = st->query_log(NULL, from, to, med_id, out, cap);
         if (n < cap || to - from <= 3600) {
+            return n;
+        }
+        /* exactly cap entries: truly full only when something follows the last one (the last itself matches) */
+        hy_log_t probe[2];
+        if (st->query_log(NULL, out[n - 1].ts, to, med_id, probe, 2) < 2) {
             return n;
         }
         ESP_LOGW(TAG, "log window of med %u filled %u entries: keeping the newest half", (unsigned)med_id,
@@ -224,7 +232,7 @@ static void slider_event_cb(lv_event_t *e)
         lv_free(c);
         break;
     case LV_EVENT_PRESSED:
-        ui_input_consume();         /* the slider owns the stroke: no gesture */
+        ui_input_consume_force();   /* the slider owns the stroke, also one that starts in an edge zone */
         c->ok = ui_input_still();   /* false when the stroke only wakes the dimmed screen */
         c->start = lv_slider_get_value(s);
         break;
