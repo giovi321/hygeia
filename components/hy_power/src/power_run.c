@@ -1,5 +1,11 @@
 /* Power task: polls the AXP2101 interrupt flags, keeps the battery model, writes the heartbeat and the
- * battery log, and forwards PWR key, USB and battery changes to the UI (LVGL task, lv_async_call). */
+ * battery log, and forwards PWR key, USB and battery changes to the UI (LVGL task, lv_async_call).
+ *
+ * Sleep mode: when the UI reports the screen OFF, the task pauses LVGL and, without VBUS, configures automatic
+ * light sleep (240 / 40 MHz) with GPIO wakes on touch INT, RTC INT and the user key, and releases its CPU-max
+ * lock. It then runs every 1000 ms (PMU poll, heartbeat, battery reading every 60 s) and ends the sleep mode on
+ * the first wake cause: PWR key, VBUS change, touch, user key, RTC INT low, now >= next_wake, or a low or critical
+ * battery crossing. The UI asks for the sleep mode again after its next tick if the screen stays OFF. */
 #include "hy/power_run.h"
 
 #include <inttypes.h>
@@ -11,6 +17,8 @@
 
 #include "batlog.h"
 #include "esp_log.h"
+#include "esp_lv_adapter.h"
+#include "esp_pm.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -24,7 +32,11 @@
 #define TASK_PRIO       2
 #define TASK_STACK      4096
 #define LOOP_MS         200
+#define SLEEP_LOOP_MS   1000   /* the loop timeout in the sleep mode: PMU poll */
 #define READ_EVERY_S    10
+#define SLEEP_READ_S    60     /* battery reading interval in the sleep mode */
+#define PAUSE_MS        500
+#define CPU_MIN_MHZ     40
 #define ALIVE_EVERY_S   60
 #define BATLOG_EVERY_S  600
 #define ERR_LOG_EVERY_S 60
@@ -50,6 +62,26 @@ static StaticSemaphore_t s_alive_mu_buf;
 static int8_t s_clean_cached = -1; /* last "clean" written, -1 unknown; s_alive_mu */
 static bool s_stopping;             /* a power-off is in progress: no write may clear clean; s_alive_mu */
 static bool s_alive_on;             /* the runner tracks: the power task's periodic heartbeat runs; s_alive_mu */
+
+/* ---- sleep mode state ---- */
+typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_TIMER, W_N } wake_cause_t;
+static const char *const k_cause[W_N] = {"pwr", "usb", "touch", "key", "rtc", "next_wake", "batt", "debug",
+                                         "timer-only"};
+static int64_t (*volatile s_next_wake_fn)(void);
+static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
+static StaticSemaphore_t s_sleep_mu_buf;
+static esp_pm_lock_handle_t s_pm_lock;     /* CPU max, held whenever the sleep mode is not on */
+static bool s_lock_held;                   /* s_sleep_mu */
+static bool s_light;                       /* light sleep enabled in this sleep mode; s_sleep_mu */
+static volatile bool s_asleep;             /* LVGL paused by the sleep mode; written under s_sleep_mu and s_mux */
+static bool s_sleep_req;                   /* the UI asked for the sleep mode; s_mux */
+static bool s_vbus_real;                   /* the last PMU reading saw VBUS (fakebatt does not change it); s_mux */
+static volatile bool s_touch_isr, s_key_isr;
+static int64_t s_sleep_t0_ms;              /* s_sleep_mu */
+/* sleepstat counters; s_mux */
+static uint32_t s_n_entries, s_n_wake[W_N], s_n_chime_batt;
+static int64_t s_ms_asleep, s_longest_awake_off_ms, s_stretch_t0_ms;
+static bool s_stretch_open;                /* awake since a wake that left the screen OFF */
 
 static int64_t mono_s(void)
 {
@@ -261,6 +293,14 @@ static void async_usb(void *p)
     }
 }
 
+static void async_wake(void *p)
+{
+    hy_power_ui_t ui = ui_get();
+    if (ui.wake) {
+        ui.wake((hy_power_wake_t)(uintptr_t)p);
+    }
+}
+
 /* lv_async_call is not thread safe: queue it under the LVGL lock */
 static void post(void (*fn)(void *), void *arg)
 {
@@ -295,6 +335,182 @@ void hy_power_state(hy_power_state_t *out)
     portEXIT_CRITICAL(&s_mux);
 }
 
+/* ---- sleep mode ---- */
+
+static int64_t mono_ms(void)
+{
+    return esp_timer_get_time() / 1000;
+}
+
+void hy_power_set_next_wake_fn(int64_t (*fn)(void))
+{
+    s_next_wake_fn = fn;
+}
+
+static void pm_set(bool light)
+{
+    esp_pm_config_t c = {.max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, .min_freq_mhz = CPU_MIN_MHZ,
+                         .light_sleep_enable = light};
+    esp_err_t err = esp_pm_configure(&c);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "pm configure (light sleep %d): %s", light, esp_err_to_name(err));
+    }
+}
+
+static void lock_hold(bool on)
+{
+    if (!s_pm_lock || s_lock_held == on) {
+        return;
+    }
+    if (on) {
+        esp_pm_lock_acquire(s_pm_lock);
+    } else {
+        esp_pm_lock_release(s_pm_lock);
+    }
+    s_lock_held = on;
+}
+
+static bool sleep_requested(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    bool r = s_sleep_req;
+    portEXIT_CRITICAL(&s_mux);
+    return r;
+}
+
+/* Power task. The UI asked for the sleep mode: pause LVGL; without VBUS, light sleep with the GPIO wakes. */
+static void enter_sleep(void)
+{
+    xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
+    if (s_asleep || !sleep_requested()) {
+        xSemaphoreGive(s_sleep_mu);
+        return;
+    }
+    esp_err_t err = esp_lv_adapter_pause(PAUSE_MS);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "lvgl pause: %s, retry on the next pass", esp_err_to_name(err));
+        xSemaphoreGive(s_sleep_mu);
+        return;
+    }
+    if (!sleep_requested()) {
+        esp_lv_adapter_resume();   /* the screen left OFF while LVGL was pausing */
+        xSemaphoreGive(s_sleep_mu);
+        return;
+    }
+    int64_t now = mono_ms();
+    portENTER_CRITICAL(&s_mux);
+    bool vbus = s_vbus_real;
+    s_asleep = true;
+    s_n_entries++;
+    if (s_stretch_open && now - s_stretch_t0_ms > s_longest_awake_off_ms) {
+        s_longest_awake_off_ms = now - s_stretch_t0_ms;
+    }
+    s_stretch_open = false;
+    portEXIT_CRITICAL(&s_mux);
+    s_sleep_t0_ms = now;
+    ESP_LOGI(TAG, "power: lvgl paused");
+    if (vbus) {
+        s_light = false;
+        ESP_LOGI(TAG, "light sleep: not enabled (vbus)");
+    } else {
+        s_light = true;
+        ESP_LOGI(TAG, "light sleep: on");
+        hy_board_sleep_wake_arm(true);
+        pm_set(true);
+        lock_hold(false);
+    }
+    xSemaphoreGive(s_sleep_mu);
+}
+
+/* Any task but the LVGL task (which cannot run while asleep). Ends the sleep mode: CPU max, no light sleep, LVGL
+ * running. The request is cleared: the UI asks again if the screen stays OFF. */
+static void exit_sleep(wake_cause_t cause)
+{
+    xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
+    if (!s_asleep) {
+        xSemaphoreGive(s_sleep_mu);
+        return;
+    }
+    lock_hold(true);
+    if (s_light) {
+        pm_set(false);
+        hy_board_sleep_wake_arm(false);
+        s_light = false;
+    }
+    esp_lv_adapter_resume();
+    int64_t now = mono_ms();
+    portENTER_CRITICAL(&s_mux);
+    s_asleep = false;
+    s_sleep_req = false;
+    s_n_wake[cause]++;
+    s_ms_asleep += now - s_sleep_t0_ms;
+    s_stretch_open = true;
+    s_stretch_t0_ms = now;
+    portEXIT_CRITICAL(&s_mux);
+    ESP_LOGI(TAG, "power: wake (%s) at %lld ms, asleep %lld ms", k_cause[cause], (long long)now,
+             (long long)(now - s_sleep_t0_ms));
+    xSemaphoreGive(s_sleep_mu);
+}
+
+void hy_power_screen_off(bool off)
+{
+    portENTER_CRITICAL(&s_mux);
+    bool was = s_sleep_req;
+    s_sleep_req = off;
+    if (!off) {
+        s_stretch_open = false;   /* the screen came back: not an awake stretch while OFF */
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (off) {
+        if (!was && s_task) {
+            xTaskNotifyGive(s_task);
+        }
+        return;
+    }
+    if (s_asleep) {
+        exit_sleep(W_DEBUG);   /* only from a task other than LVGL's: the LVGL task does not run while asleep */
+    }
+}
+
+void hy_power_screen_state(uint8_t scr)
+{
+    s_scr = scr;
+}
+
+void hy_power_chime_on_battery(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    s_n_chime_batt++;
+    portEXIT_CRITICAL(&s_mux);
+}
+
+void hy_power_resume(void)
+{
+    if (s_asleep) {
+        exit_sleep(W_DEBUG);
+    }
+}
+
+static void IRAM_ATTR touch_hook(void)
+{
+    s_touch_isr = true;
+    if (s_asleep && s_task) {
+        BaseType_t hp = pdFALSE;
+        vTaskNotifyGiveFromISR(s_task, &hp);
+        portYIELD_FROM_ISR(hp);
+    }
+}
+
+static void IRAM_ATTR key_hook(void)
+{
+    s_key_isr = true;
+    if (s_task) {
+        BaseType_t hp = pdFALSE;
+        vTaskNotifyGiveFromISR(s_task, &hp);
+        portYIELD_FROM_ISR(hp);
+    }
+}
+
 /* ---- task ---- */
 
 static void log_irq(uint32_t f)
@@ -322,6 +538,9 @@ static uint32_t read_battery(int64_t mono, bool *refake)
     esp_err_t err = hy_board_pmu_read(&raw);
 
     portENTER_CRITICAL(&s_mux);
+    if (err == ESP_OK) {
+        s_vbus_real = raw.vbus;
+    }
     bool fake = s_fake, fake_usb = s_fake_usb;
     int8_t fake_pct = s_fake_pct;
     *refake = s_fake_changed;
@@ -377,7 +596,7 @@ static void power_task(void *arg)
     hy_power_state(&st);
     int32_t saved_rate = st.batt.rate_cph;
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(LOOP_MS));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(s_asleep ? SLEEP_LOOP_MS : LOOP_MS));
         int64_t mono = mono_s();
 
         uint32_t irq = hy_board_pmu_irq();
@@ -391,6 +610,42 @@ static void power_task(void *arg)
 
         if (irq) {
             log_irq(irq);
+        }
+        bool touch = s_touch_isr, key = s_key_isr;
+        s_touch_isr = s_key_isr = false;
+        wake_cause_t cause = W_N;
+        if (s_asleep) {
+            int64_t (*nw)(void) = s_next_wake_fn;
+            int64_t next = nw ? nw() : 0;
+            if (irq & (HY_PMU_PKEY_SHORT | HY_PMU_PKEY_LONG)) {
+                cause = W_PWR;
+            } else if (irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) {
+                cause = W_USB;
+            } else if (touch) {
+                cause = W_TOUCH;
+            } else if (key) {
+                cause = W_KEY;
+            } else if (hy_board_rtc_int_low()) {
+                cause = W_RTC;
+            } else if (next && hy_clock_valid() && (int64_t)time(NULL) >= next) {
+                cause = W_NEXT;
+            }
+            if (cause != W_N) {
+                exit_sleep(cause);
+            } else {
+                portENTER_CRITICAL(&s_mux);
+                s_n_wake[W_TIMER]++;
+                portEXIT_CRITICAL(&s_mux);
+            }
+        }
+        if (cause == W_TOUCH) {
+            post(async_wake, (void *)(uintptr_t)HY_PWAKE_TOUCH);
+        }
+        if (key) {
+            post(async_wake, (void *)(uintptr_t)HY_PWAKE_KEY);
+        }
+        if (cause == W_RTC || cause == W_NEXT) {
+            post(async_wake, (void *)(uintptr_t)HY_PWAKE_TICK);
         }
         if (irq & HY_PMU_PKEY_SHORT) {
             post(async_pwr_short, NULL);
@@ -407,7 +662,7 @@ static void power_task(void *arg)
 
         const uint32_t reread = HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT | HY_PMU_BAT_IN | HY_PMU_BAT_OUT |
                                 HY_PMU_CHG_START | HY_PMU_CHG_DONE;
-        if ((irq & reread) || force || mono - last_read >= READ_EVERY_S) {
+        if ((irq & reread) || force || mono - last_read >= (s_asleep ? SLEEP_READ_S : READ_EVERY_S)) {
             last_read = mono;
             bool refake = false;
             uint32_t flags = read_battery(mono, &refake);
@@ -426,6 +681,9 @@ static void power_task(void *arg)
                          st.batt.raw.pct, (unsigned)st.batt.raw.mv, st.batt.raw.vbus, (int)st.batt.raw.chg,
                          st.pmu_ok ? "ok" : "error");
             }
+            if ((flags & (HY_BATT_EV_LOW | HY_BATT_EV_CRIT)) && s_asleep) {
+                exit_sleep(W_BATT);   /* the UI publishes the event; critical opens the countdown */
+            }
             if (flags) {
                 post(async_battery, (void *)(uintptr_t)flags);
             }
@@ -443,6 +701,10 @@ static void power_task(void *arg)
             last_alive = mono;
             alive_tick();
         }
+
+        if (!s_asleep && sleep_requested()) {
+            enter_sleep();
+        }
     }
 }
 
@@ -453,6 +715,15 @@ esp_err_t hy_power_init(void)
     }
     if (!s_alive_mu) {
         s_alive_mu = xSemaphoreCreateMutexStatic(&s_alive_mu_buf);
+    }
+    s_sleep_mu = xSemaphoreCreateMutexStatic(&s_sleep_mu_buf);
+    esp_err_t perr = esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "hy_awake", &s_pm_lock);
+    if (perr == ESP_OK) {
+        lock_hold(true);
+        pm_set(false);   /* min 40 MHz: reached only while the sleep mode releases the lock */
+    } else {
+        s_pm_lock = NULL;
+        ESP_LOGE(TAG, "pm lock: %s, no light sleep", esp_err_to_name(perr));
     }
     batlog_init();
     esp_err_t err = hy_board_pmu_init();
@@ -478,7 +749,10 @@ void hy_power_start(void)
     if (xTaskCreate(power_task, "power", TASK_STACK, NULL, TASK_PRIO, &s_task) != pdPASS) {
         ESP_LOGE(TAG, "task create failed");
         s_task = NULL;
+        return;
     }
+    hy_board_set_touch_isr_hook(touch_hook);
+    hy_board_set_user_key_isr_hook(key_hook);
 }
 
 /* ---- debug ---- */
@@ -562,6 +836,28 @@ void hy_power_debug_pkey(const char *args)
     s_inject |= f;
     portEXIT_CRITICAL(&s_mux);
     wake_task();
+}
+
+void hy_power_sleep_stats(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    uint32_t entries = s_n_entries, chimes = s_n_chime_batt, w[W_N];
+    memcpy(w, s_n_wake, sizeof w);
+    int64_t ms = s_ms_asleep, longest = s_longest_awake_off_ms;
+    bool req = s_sleep_req, vbus = s_vbus_real;
+    portEXIT_CRITICAL(&s_mux);
+    bool asleep = s_asleep;
+    if (asleep) {
+        ms += mono_ms() - s_sleep_t0_ms;
+    }
+    ESP_LOGI(TAG, "sleepstat: %s%s, entries %" PRIu32 ", asleep %lld ms total, chimes on battery %" PRIu32
+             ", longest awake stretch while off %lld ms, requested %d, vbus %d",
+             asleep ? "asleep" : "awake", asleep ? (s_light ? " (light sleep)" : " (no light sleep)") : "", entries,
+             (long long)ms, chimes, (long long)longest, req, vbus);
+    ESP_LOGI(TAG, "sleepstat wakes: pwr %" PRIu32 ", usb %" PRIu32 ", touch %" PRIu32 ", key %" PRIu32 ", rtc %" PRIu32
+             ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", timer-only %" PRIu32,
+             w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_TIMER]);
+    esp_pm_dump_locks(stdout);   /* any lock other than hy_awake held while asleep keeps the chip out of light sleep */
 }
 
 void hy_power_debug_fakebatt(const char *args)

@@ -7,6 +7,8 @@
 #include "sdkconfig.h"
 #include "hy/actions.h"
 #include "hy/nav.h"
+#include "hy/power_run.h"
+#include "hy/screen.h"
 #include "esp_err.h"
 #include "strings.h"
 
@@ -101,7 +103,7 @@ hy_view_t ui_current_view(void);                  /* the view shown now */
 bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
 void      ui_nav_set_idle(bool idle);            /* the raw nav flag; idle.c owns it (the debug note wake test sets it alone) */
 void      ui_nav_set_poweroff(bool on);          /* the power-off overlay or the countdown is up: nav rule 0 */
-void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2, and the idle timer is held */
+void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2 (it holds the screen on USB only, R1) */
 void      ui_nav_push(hy_view_t v);
 #if CONFIG_HY_DEBUG_CONSOLE
 void      ui_nav_reset(void);                    /* debug: back to the root whatever overlay is showing */
@@ -226,16 +228,29 @@ bool home_med_id_by_code(const char *code, uint32_t *id);
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */
 
-/* idle.c: the idle clock overlay on lv_layer_top; the nav idle flag is set and cleared with it */
-void idle_create(void);                          /* after topbar_create */
-void idle_enter(void);
-void idle_wake(void);                            /* a touch (fx WAKE): overlay off, brightness back in 200 ms */
-void idle_wake_due(void);                        /* a due entry shows: the same, logged as "wake (due)" */
-bool idle_active(void);
+/* idle.c: the screen state machine (ON, DIM, OFF) and its views: DIM is the idle clock overlay on lv_layer_top, OFF
+ * blanks the panel and asks the power task for the sleep mode. The nav idle flag follows "state is not ON". */
+void idle_create(void);                          /* after topbar_create, before poweroff_create */
+void screen_init(void);                          /* after poweroff_create: ON, USB from the PMU state */
+void screen_event(hy_scr_ev_t ev);
+hy_scr_t screen_state(void);
+void screen_wake(const char *why);               /* an overlay that wakes the screen on USB and on battery */
+void screen_tick(void);                          /* ui.c, every second: USB sync, TICK, the sleep request while OFF */
+void screen_sched_evaluated(void);               /* after each scheduler evaluation: CHIME on a chime moment */
+void screen_usb(bool in);                        /* hy_power_ui_t.usb: USB_IN / USB_OUT */
+void screen_touch_wake(void);                    /* a touch woke the CPU from the sleep mode */
+bool screen_wake_guard_take(void);               /* input.c at a press: a stroke right after screen_touch_wake only wakes */
+void screen_activity(void);                      /* input.c: a stroke on an awake screen restarts the timers */
+void screen_pwr_short(void);                     /* PWR short with no confirmation: toggles ON <-> OFF */
+void idle_enter(void);                           /* debug `idle`: DIM now (as if dim_s passed) */
+void idle_wake(void);                            /* a waking stroke (fx WAKE): TOUCH, logged "wake (touch)" */
+void idle_wake_due(void);                        /* a due entry shows: DUE, logged "wake (due)" */
+bool idle_active(void);                          /* the state is DIM or OFF */
 bool idle_next_text(char *out, size_t len);      /* "Next: A at 14:00"; false when nothing is scheduled or the clock is invalid */
-void idle_set_hold(bool hold);                   /* true: the timer does not enter the idle clock (overlays, until the screen state machine owns it) */
-void screen_pwr_short(void);                     /* PWR short with no overlay: toggles the screen (stub until Task 10) */
 void idle_brightness_stop(void);                 /* whoever sets the brightness itself stops a running idle fade first */
+#if CONFIG_HY_DEBUG_CONSOLE
+void screen_debug(const char *arg);              /* `scr [off|nousb|usb]` */
+#endif
 
 /* splash.c */
 int  splash_remaining_ms(void);                  /* ms until the splash has run 1000 ms, 0 when over or not running */
@@ -246,7 +261,7 @@ void splash_finish(lv_obj_t *next);              /* LVGL lock held: loads next w
 /* due.c: the due card, an overlay inside ui_content() above every view */
 void due_create(void);
 void due_refresh(void);                  /* from the snapshot, when its generation changed; flash request too */
-bool due_visible(void);                  /* the idle timer is held while true */
+bool due_visible(void);                  /* on USB the screen is held on while true (R1) */
 void due_next(void);                     /* swipe up: next showing entry, wrapping */
 void due_snooze(void);                   /* swipe left: snooze the shown entry by settings snooze_min */
 void due_slide_complete(void);           /* the knob reached 90%: log taken */

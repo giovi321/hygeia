@@ -148,6 +148,8 @@ static void cmd_poweroff(const char *args)
     }
 }
 static void cmd_idle(const char *args) { hy_ui_debug_idle(args); }
+static void cmd_scr(const char *args) { hy_ui_debug_scr(args); }
+static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
 static void cmd_history(const char *args) { hy_ui_debug_history(args); }
@@ -273,6 +275,7 @@ void app_main(void)
         esp_err_t perr = hy_power_init();
         ESP_LOGI(TAG, "hy_power_init: %s", esp_err_to_name(perr));
     }
+    hy_power_set_next_wake_fn(hy_sched_run_next_wake);   /* the power task wakes for it while asleep (R11) */
     esp_err_t rerr = hy_sched_run_init();
     if (rerr == ESP_OK) {
         ESP_LOGI(TAG, "hy_sched_run_init: %s", esp_err_to_name(rerr));
@@ -323,6 +326,8 @@ void app_main(void)
     console_register("fakebatt", hy_power_debug_fakebatt);
     console_register("poweroff", cmd_poweroff);
     console_register("gaps", cmd_gaps);
+    console_register("scr", cmd_scr);
+    console_register("sleepstat", cmd_sleepstat);
     console_start();
 #endif
 }
