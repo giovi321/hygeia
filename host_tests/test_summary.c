@@ -89,13 +89,18 @@ static hy_sched_in_t input(int64_t now)
 
 /* Tracking from 2026-10-25 00:00 local: start, then one eval at that instant so every
  * medicine's since = tracking start. Queries may then use any now. */
-static void track(void)
+static void track_at(int64_t start)
 {
-    hy_sched_start_tracking(&s, TRACK_START);
-    hy_sched_in_t in = input(TRACK_START);
+    hy_sched_start_tracking(&s, start);
+    hy_sched_in_t in = input(start);
     in.logs = NULL; in.n_logs = 0;
     hy_sched_out_t o;
     hy_sched_eval(&s, &in, &o);
+}
+
+static void track(void)
+{
+    track_at(TRACK_START);
 }
 
 static hy_tile_view_t tile(const hy_med_t *m, int64_t now)
@@ -291,6 +296,101 @@ static void test_adherence_excludes_untracked_and_open(void)
     TEST_ASSERT_EQUAL_UINT16(0, a.resolved);
 }
 
+static void test_tile_no_dose_ring_from_skipped_slot(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    track();
+    add_log(1, L(6, 1), HY_SKIPPED, L(6, 0));
+    hy_tile_view_t t = tile(a, L(10, 0));
+    TEST_ASSERT_EQUAL_INT(HY_TILE_NO_DOSE, t.kind);
+    TEST_ASSERT_EQUAL_INT32(500, t.ring); /* (10:00 - 06:00) / (14:00 - 06:00) */
+    TEST_ASSERT_EQUAL_INT64(0, t.last_taken);
+}
+
+static void test_tile_snoozed_on_older_open_slot(void)
+{
+    reset();
+    hy_med_t *v = add_v();
+    v->times[0] = 8 * 60; v->times[1] = 9 * 60; v->n_times = 2; /* closer than missed_after_min */
+    track();
+    snoozes[n_snoozes].med_id = 2; snoozes[n_snoozes].slot = L(8, 0); snoozes[n_snoozes].until = L(9, 30);
+    n_snoozes++;
+    hy_tile_view_t t = tile(v, L(9, 10)); /* 08:00 LATE (open, snoozed), 09:00 DUE */
+    TEST_ASSERT_EQUAL_INT(HY_TILE_SNOOZED, t.kind);
+    TEST_ASSERT_EQUAL_INT64(L(9, 30), t.snoozed_until);
+}
+
+static void test_today_rows_tie_break_by_order(void)
+{
+    reset();
+    hy_med_t *v = add_v();   /* id 2, 08:30 */
+    v->order = 5;
+    hy_med_t *a = add_a();   /* id 1 */
+    a->times[0] = 8 * 60 + 30; a->n_times = 1;
+    a->order = 0;
+    track();
+    hy_sched_in_t in = input(L(7, 0));
+    hy_today_row_t rows[4];
+    TEST_ASSERT_EQUAL_UINT(2, hy_today_rows(&in, &s, rows, 4, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, rows[0].med_id); /* order 0 first although listed second */
+    TEST_ASSERT_EQUAL_UINT32(2, rows[1].med_id);
+}
+
+/* 2026-03-29, Zurich: 23 h day, 02:30 does not exist and moves to 03:00 CEST */
+static void test_rows_and_mark_on_23h_day(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    a->times[0] = 2 * 60 + 30; a->times[1] = 8 * 60; a->n_times = 2;
+    const int64_t mid = 1774738800LL; /* 2026-03-28T23:00Z = 03-29 00:00 CET */
+    const int64_t s1 = mid + 2 * HOUR, s2 = mid + 7 * HOUR; /* 03:00 CEST, 08:00 CEST */
+    track_at(mid - 9 * DAY);
+    hy_sched_in_t in = input(mid + 11 * HOUR); /* 12:00 CEST */
+    bool prog = true;
+    TEST_ASSERT_EQUAL_INT(HY_MARK_MISSED, hy_day_mark(a, 20260329, &in, &s, &prog));
+    add_log(1, s1 + 60, HY_TAKEN, s1);
+    add_log(1, s2 + 60, HY_TAKEN, s2);
+    in = input(mid + 11 * HOUR);
+    TEST_ASSERT_EQUAL_INT(HY_MARK_ON_TIME, hy_day_mark(a, 20260329, &in, &s, &prog));
+    TEST_ASSERT_FALSE(prog);
+    hy_today_row_t rows[4];
+    uint16_t taken = 0, total = 0;
+    TEST_ASSERT_EQUAL_UINT(2, hy_today_rows(&in, &s, rows, 4, &taken, &total));
+    TEST_ASSERT_EQUAL_INT64(s1, rows[0].slot);
+    TEST_ASSERT_EQUAL_INT64(s2, rows[1].slot);
+    TEST_ASSERT_EQUAL_UINT16(2, taken);
+    TEST_ASSERT_EQUAL_UINT16(2, total);
+}
+
+/* 2026-10-25, Zurich: 25 h day, 02:30 occurs twice and is scheduled once, at the first occurrence */
+static void test_rows_and_mark_on_25h_day(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    a->times[0] = 2 * 60 + 30; a->times[1] = 6 * 60; a->times[2] = 22 * 60; a->n_times = 3;
+    const int64_t mid = 1792879200LL; /* 2026-10-24T22:00Z = 10-25 00:00 CEST */
+    const int64_t s1 = mid + 2 * HOUR + 30 * MIN; /* 02:30 CEST */
+    const int64_t s2 = mid + 7 * HOUR;            /* 06:00 CET */
+    const int64_t s3 = mid + 23 * HOUR;           /* 22:00 CET */
+    track_at(mid - 7 * DAY);
+    add_log(1, s1 + 60, HY_TAKEN, s1);
+    add_log(1, s2 + 60, HY_TAKEN, s2);
+    add_log(1, s3 + 60, HY_TAKEN, s3);
+    hy_sched_in_t in = input(mid + 24 * HOUR + 30 * MIN); /* 23:30 CET */
+    bool prog = true;
+    TEST_ASSERT_EQUAL_INT(HY_MARK_ON_TIME, hy_day_mark(a, 20261025, &in, &s, &prog));
+    TEST_ASSERT_FALSE(prog);
+    hy_today_row_t rows[6];
+    uint16_t taken = 0, total = 0;
+    TEST_ASSERT_EQUAL_UINT(3, hy_today_rows(&in, &s, rows, 6, &taken, &total));
+    TEST_ASSERT_EQUAL_INT64(s1, rows[0].slot);
+    TEST_ASSERT_EQUAL_INT64(s2, rows[1].slot);
+    TEST_ASSERT_EQUAL_INT64(s3, rows[2].slot);
+    TEST_ASSERT_EQUAL_UINT16(3, taken);
+    TEST_ASSERT_EQUAL_UINT16(3, total);
+}
+
 static void test_delta_text(void)
 {
     char b[24];
@@ -329,6 +429,11 @@ int main(void)
     RUN_TEST(test_day_mark_priority);
     RUN_TEST(test_day_mark_in_progress);
     RUN_TEST(test_adherence_excludes_untracked_and_open);
+    RUN_TEST(test_tile_no_dose_ring_from_skipped_slot);
+    RUN_TEST(test_tile_snoozed_on_older_open_slot);
+    RUN_TEST(test_today_rows_tie_break_by_order);
+    RUN_TEST(test_rows_and_mark_on_23h_day);
+    RUN_TEST(test_rows_and_mark_on_25h_day);
     RUN_TEST(test_delta_text);
     RUN_TEST(test_local_date_across_dst);
     return UNITY_END();

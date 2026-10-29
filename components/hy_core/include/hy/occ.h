@@ -56,7 +56,7 @@ int64_t hy_occ_base(const hy_med_t *m, int64_t slot, const char *posix_tz, const
  * 1. TAKEN if a taken log for the slot exists, or (west rule) a taken log whose
  *    slot, rendered in the log's own tz, has the same local date and HH:MM as
  *    this slot rendered in posix_tz; else SKIPPED if a skipped log for the slot
- *    exists; else MISSED if a HY_MISSED log for the slot exists. A logged
+ *    exists, or (west rule, same match) a skipped log; else MISSED if a HY_MISSED log for the slot exists. A logged
  *    miss wins over the gap and time rules below.
  * 2. UNTRACKED if the slot lies inside a gap [start, end) and its window closed
  *    (base + missed_after_min) at or before the gap end. `now` is not
