@@ -155,6 +155,13 @@ bool ui_input_waking(void)
 
 /* A stroke that starts in an edge zone (the screen-edge gestures) is never a widget's: EDGE_RIGHT, EDGE_DOWN and
  * EDGE_UP navigate from any screen, also over scrolling content, the keyboard and sliders. */
+/* A widget that drags horizontally (a slider) owns its stroke even from an edge zone: a drag that starts at
+ * x < 40 must not pop the view mid-drag. */
+void ui_input_consume_force(void)
+{
+    s_consumed = true;
+}
+
 void ui_input_consume(void)
 {
     if (s_st.x0 < HY_EDGE_PX || s_st.y0 < HY_EDGE_PX || s_st.y0 >= HY_SCREEN_PX - HY_EDGE_PX) {

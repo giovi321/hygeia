@@ -145,6 +145,7 @@ void note_show(uint32_t med_id)
     const hy_med_t *m = ui_find_med(med_id);
     lv_label_set_text(s_name, m ? m->name : "");
     lv_textarea_set_text(s_ta, "");
+    s_prev[0] = 0;
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -230,9 +231,8 @@ void note_create(void)
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_FILL), LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_FILL), LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(HY_C_TEXT), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_add_event_cb(s_kb, kb_press_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(s_kb, kb_press_cb, LV_EVENT_PRESSED | LV_EVENT_PREPROCESS, NULL);   /* before the key's own handler */
     lv_obj_add_event_cb(s_kb, consume_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(s_kb, kb_value_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(s_kb, ready_cb, LV_EVENT_READY, NULL);
-    lv_obj_add_event_cb(s_kb, cancel_cb, LV_EVENT_CANCEL, NULL);
+    /* READY and CANCEL go to the keyboard and then to its textarea: handle them on the textarea only */
 }
