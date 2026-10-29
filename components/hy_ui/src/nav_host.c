@@ -134,6 +134,9 @@ void ui_show_view(hy_view_t v)
         pager_show((int)(v - HY_V_HOME), s_started && is_pager(s_shown) && s_shown != v);
     }
     topbar_set_grab(v == HY_V_HOME && !s_nav.due);
+    if (s_shown == HY_V_HISTORY && v != HY_V_HISTORY) {
+        history_hide();
+    }
     s_shown = v;   /* before the refresh: the page refreshes only while it is the shown view */
     refresh_view(v);
 }

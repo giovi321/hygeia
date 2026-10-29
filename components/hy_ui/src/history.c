@@ -49,45 +49,16 @@ static lv_timer_t *s_tap_timer;
 static uint32_t s_tap_med;
 static bool s_pressed;
 
-/* Past days only change when a log, a medicine or the zone changes, and hy_day_mark costs about 4 ms a call
- * (measured), so a plain generation change (the minute tick) recomputes today's column only. Everything is
- * recomputed on show, on a range toggle and after any hy event (history_invalidate). */
+/* Past days only change when a log, a medicine, the zone or the tracking start changes, and hy_day_mark costs
+ * about 4 ms a call (measured), so everything is recomputed only when the recompute key changes (today, zone,
+ * last zone change, tracked-since per medicine, medicine schedules, log count and newest log, range), on a
+ * range toggle and after any hy event (history_invalidate). A show or a minute tick recomputes today's column. */
 static bool s_full = true;
-static int32_t s_marks_today;
-static int s_marks_days;
-static size_t s_marks_n;
-static uint32_t s_marks_ids[HY_MAX_MEDS];
+static uint32_t s_key;      /* recompute key of the last full run */
 static hy_adherence_t s_ad;
 static hy_mark_t s_marks[HY_MAX_MEDS][MAX_DAYS];
 static bool s_prog[HY_MAX_MEDS];
 static const hy_med_t *s_meds[HY_MAX_MEDS];
-
-static lv_obj_t *plain(lv_obj_t *parent)
-{
-    lv_obj_t *o = lv_obj_create(parent);
-    lv_obj_remove_style_all(o);
-    lv_obj_set_scrollable(o, false);
-    lv_obj_set_clickable(o, false);
-    return o;
-}
-
-static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *text)
-{
-    lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, f, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
-    lv_label_set_text(l, text);
-    return l;
-}
-
-static uint32_t fnv(uint32_t h, const void *p, size_t n)
-{
-    const uint8_t *b = p;
-    for (size_t i = 0; i < n; i++) {
-        h = (h ^ b[i]) * 16777619u;
-    }
-    return h;
-}
 
 /* Monday = 0 ... Sunday = 6 of a YYYYMMDD date */
 static int weekday_of(int32_t date)
@@ -115,7 +86,10 @@ static void tap_cancel(void)
 static void tap_fire(lv_timer_t *t)
 {
     if (s_pressed) {
-        lv_timer_reset(t);   /* a finger is down (a possible second tap or a hold): wait */
+        /* A finger is down (a possible second tap or a hold): wait. LVGL has already counted this run
+         * against repeat_count and deletes the timer at 0, so give the run back or s_tap_timer dangles. */
+        lv_timer_set_repeat_count(t, 1);
+        lv_timer_reset(t);
         return;
     }
     s_tap_timer = NULL;      /* the timer deletes itself after this run (repeat count 1) */
@@ -138,9 +112,21 @@ void history_invalidate(void)
 
 void history_show(void)
 {
-    s_full = true;
     history_refresh_if_changed();
 }
+
+void history_hide(void)
+{
+    tap_cancel();
+    s_pressed = false;
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+void history_debug_press(bool down)
+{
+    s_pressed = down;
+}
+#endif
 
 void history_toggle_range(void)
 {
@@ -201,7 +187,7 @@ static void rows_scroll_cb(lv_event_t *e)
 
 static void add_cell(lv_obj_t *row, const geom_t *g, int i, hy_mark_t mk, lv_color_t col, bool dim)
 {
-    lv_obj_t *c = plain(row);
+    lv_obj_t *c = ui_plain(row);
     lv_obj_set_size(c, g->cell, g->cell);
     lv_obj_set_pos(c, g->x0 + i * g->pitch_x, (g->row_h - g->cell) / 2);
     lv_obj_set_style_radius(c, g->radius, 0);
@@ -228,7 +214,7 @@ static void add_cell(lv_obj_t *row, const geom_t *g, int i, hy_mark_t mk, lv_col
         break;
     }
     if (mk == HY_MARK_LATE) {
-        lv_obj_t *d = plain(c);
+        lv_obj_t *d = ui_plain(c);
         lv_obj_set_size(d, g->dot, g->dot);
         lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(d, lv_color_hex(HY_C_AMBER), 0);
@@ -256,7 +242,7 @@ static void add_row(const geom_t *g, int idx, size_t m_idx)
     lv_obj_add_event_cb(row, press_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(row, press_cb, LV_EVENT_PRESS_LOST, NULL);
 
-    lv_obj_t *code = label(row, hy_type.body_bold, 0, m->code);
+    lv_obj_t *code = ui_label(row, hy_type.body_bold, 0, m->code);
     lv_obj_set_style_text_color(code, col, 0);
     lv_obj_set_pos(code, CODE_X, (g->row_h - lv_font_get_line_height(hy_type.body_bold)) / 2);
 
@@ -316,10 +302,35 @@ void history_refresh(void)
                 s_meds[n++] = &sn->in.meds[i];
             }
         }
-        bool full = s_full || s_marks_today != today || s_marks_days != s_days || s_marks_n != n;
-        for (size_t i = 0; i < n && !full; i++) {
-            full = s_marks_ids[i] != s_meds[i]->id;
+        uint32_t key = ui_fnv(2166136261u, &today, sizeof today);
+        key = ui_fnv(key, &s_days, sizeof s_days);
+        key = ui_fnv(key, sn->in.tz, strnlen(sn->in.tz, HY_TZ_LEN));
+        if (sn->in.last_change) {
+            key = ui_fnv(key, &sn->in.last_change->at, sizeof sn->in.last_change->at);
+            key = ui_fnv(key, sn->in.last_change->new_tz, strnlen(sn->in.last_change->new_tz, HY_TZ_LEN));
         }
+        for (size_t i = 0; i < n; i++) {
+            const hy_med_t *m = s_meds[i];
+            int64_t since = hy_sched_tracked_since(sn->sched, m->id);
+            key = ui_fnv(key, &m->id, sizeof m->id);
+            key = ui_fnv(key, &m->type, sizeof m->type);
+            key = ui_fnv(key, m->times, sizeof m->times);
+            key = ui_fnv(key, &m->n_times, sizeof m->n_times);
+            key = ui_fnv(key, &m->weekdays, sizeof m->weekdays);
+            key = ui_fnv(key, &m->late_after_min, sizeof m->late_after_min);
+            key = ui_fnv(key, &m->missed_after_min, sizeof m->missed_after_min);
+            key = ui_fnv(key, &m->early_window_min, sizeof m->early_window_min);
+            key = ui_fnv(key, &m->active_from, sizeof m->active_from);
+            key = ui_fnv(key, &m->active_until, sizeof m->active_until);
+            key = ui_fnv(key, &since, sizeof since);
+        }
+        key = ui_fnv(key, &sn->in.n_logs, sizeof sn->in.n_logs);
+        if (sn->in.n_logs && sn->in.logs) {
+            const hy_log_t *last = &sn->in.logs[sn->in.n_logs - 1];
+            key = ui_fnv(key, &last->id, sizeof last->id);
+            key = ui_fnv(key, &last->ts, sizeof last->ts);
+        }
+        bool full = s_full || key != s_key;
         for (size_t i = 0; i < n; i++) {
             for (int d = full ? 0 : s_days - 1; d < s_days; d++) {
                 bool prog = false;
@@ -329,27 +340,22 @@ void history_refresh(void)
                     s_prog[i] = prog;
                 }
             }
-            sig = fnv(sig, s_marks[i], sizeof s_marks[i][0] * (size_t)s_days);
-            sig = fnv(sig, &s_prog[i], sizeof s_prog[i]);
-            sig = fnv(sig, &s_meds[i]->id, sizeof s_meds[i]->id);
-            sig = fnv(sig, s_meds[i]->code, sizeof s_meds[i]->code);
-            sig = fnv(sig, &s_meds[i]->color, sizeof s_meds[i]->color);
+            sig = ui_fnv(sig, s_marks[i], sizeof s_marks[i][0] * (size_t)s_days);
+            sig = ui_fnv(sig, &s_prog[i], sizeof s_prog[i]);
+            sig = ui_fnv(sig, &s_meds[i]->id, sizeof s_meds[i]->id);
+            sig = ui_fnv(sig, s_meds[i]->code, sizeof s_meds[i]->code);
+            sig = ui_fnv(sig, &s_meds[i]->color, sizeof s_meds[i]->color);
         }
         if (full) {
             hy_adherence(0, first, s_days, &sn->in, sn->sched, &s_ad);
-            s_marks_today = today;
-            s_marks_days = s_days;
-            s_marks_n = n;
-            for (size_t i = 0; i < n; i++) {
-                s_marks_ids[i] = s_meds[i]->id;
-            }
+            s_key = key;
             s_full = false;
         }
         ad = s_ad;
     }
-    sig = fnv(sig, &today, sizeof today);
-    sig = fnv(sig, &s_days, sizeof s_days);
-    sig = fnv(sig, &ad, sizeof ad);
+    sig = ui_fnv(sig, &today, sizeof today);
+    sig = ui_fnv(sig, &s_days, sizeof s_days);
+    sig = ui_fnv(sig, &ad, sizeof ad);
     int64_t t1 = esp_timer_get_time();
     s_view_us = (uint32_t)(t1 - t0);
     if (s_drawn && !s_force && sig == s_sig) {
@@ -398,11 +404,11 @@ void history_timing(uint32_t *view_us, uint32_t *lvgl_us)
 /* A legend item: a SQ px square (kind 0 on time, 1 late, 2 missed) and its text, centred on cx */
 static void legend_item(lv_obj_t *page, int cx, int kind, uint32_t color, const char *text)
 {
-    lv_obj_t *item = plain(page);
+    lv_obj_t *item = ui_plain(page);
     lv_obj_set_size(item, LV_SIZE_CONTENT, 22);
     lv_obj_set_flex_flow(item, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(item, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *sq = plain(item);
+    lv_obj_t *sq = ui_plain(item);
     lv_obj_set_size(sq, SQ, SQ);
     lv_obj_set_style_radius(sq, 2, 0);
     lv_obj_set_style_margin_right(sq, 7, 0);
@@ -415,14 +421,14 @@ static void legend_item(lv_obj_t *page, int cx, int kind, uint32_t color, const 
         lv_obj_set_style_bg_opa(sq, LV_OPA_COVER, 0);
     }
     if (kind == 1) {
-        lv_obj_t *d = plain(sq);
+        lv_obj_t *d = ui_plain(sq);
         lv_obj_set_size(d, 4, 4);
         lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(d, lv_color_hex(HY_C_AMBER), 0);
         lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
         lv_obj_center(d);
     }
-    label(item, hy_type.status, color, text);
+    ui_label(item, hy_type.status, color, text);
     lv_obj_update_layout(item);
     lv_obj_set_pos(item, cx - lv_obj_get_width(item) / 2, LEGEND_Y - 11);
 }
@@ -441,16 +447,16 @@ void history_create(lv_obj_t *page)
     lv_obj_add_event_cb(s_bg, press_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(s_bg, press_cb, LV_EVENT_PRESS_LOST, NULL);
 
-    s_title = label(page, hy_type.title, HY_C_TEXT, HY_S_HI_TITLE_7);
+    s_title = ui_label(page, hy_type.title, HY_C_TEXT, HY_S_HI_TITLE_7);
     lv_obj_set_pos(s_title, 24, 2);
 
     for (int i = 0; i < 7; i++) {
-        s_wd[i] = label(page, hy_type.status, HY_C_TEXT2, "");
+        s_wd[i] = ui_label(page, hy_type.status, HY_C_TEXT2, "");
         lv_obj_set_width(s_wd[i], G7.cell);
         lv_obj_set_style_text_align(s_wd[i], LV_TEXT_ALIGN_CENTER, 0);
     }
     for (int k = 0; k < 5; k++) {
-        s_tick[k] = label(page, hy_type.small, HY_C_TEXT2, "");
+        s_tick[k] = ui_label(page, hy_type.small, HY_C_TEXT2, "");
         lv_obj_set_hidden(s_tick[k], true);
     }
 
@@ -469,7 +475,7 @@ void history_create(lv_obj_t *page)
     legend_item(page, 245, 1, HY_C_TEXT2, HY_S_HI_LATE);
     legend_item(page, 382, 2, HY_C_MISS, HY_S_HI_MISSED);
 
-    s_adh = label(page, hy_type.title, HY_C_TEXT, HY_S_ADHERENCE_NONE);
+    s_adh = ui_label(page, hy_type.title, HY_C_TEXT, HY_S_ADHERENCE_NONE);
     lv_obj_set_width(s_adh, HY_SCREEN);
     lv_obj_set_style_text_align(s_adh, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(s_adh, 0, ADH_Y - lv_font_get_line_height(hy_type.title) / 2);

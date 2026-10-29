@@ -457,8 +457,15 @@ static void job_due(const char *arg)
     }
 }
 
-/* "history toggle|tap <code>|dbl <code>|perf": the range toggle and the row taps through the input layer.
+/* "history toggle|tap <code>|dbl <code>|hold <code>|perf": the range toggle and the row taps through the input layer.
  * dbl sends two strokes 0 ms apart so the second one is a double tap by hy_gesture_double. */
+static void hold_release(lv_timer_t *t)
+{
+    (void)t;
+    history_debug_press(false);
+    ESP_LOGI(TAG, "history hold: released");
+}
+
 static void job_history(const char *arg)
 {
     char cmd[8] = "", code[4] = "";
@@ -477,6 +484,17 @@ static void job_history(const char *arg)
             input_debug_stroke(240, 240, 242, 241, i ? 0 : 80);
             history_tap(id);
         }
+    } else if (strcmp(cmd, "hold") == 0) {
+        /* a row tap, then a finger held on the page for 500 ms: the 300 ms timer waits and fires after the release */
+        if (!row) {
+            ESP_LOGW(TAG, "history hold: needs a medicine code");
+            return;
+        }
+        input_debug_stroke(240, 240, 242, 241, 80);
+        history_tap(id);
+        history_debug_press(true);
+        lv_timer_t *t = lv_timer_create(hold_release, 500, NULL);
+        lv_timer_set_repeat_count(t, 1);
     } else if (strcmp(cmd, "perf") == 0) {
         uint32_t v, l, o;
         history_refresh();
@@ -486,7 +504,7 @@ static void job_history(const char *arg)
         ESP_LOGI(TAG, "history perf: marks %u us, lvgl %u us (no-op when unchanged); overview %u us", (unsigned)v,
                  (unsigned)l, (unsigned)o);
     } else {
-        ESP_LOGE(TAG, "usage: history <toggle|tap [code]|dbl [code]|perf>");
+        ESP_LOGE(TAG, "usage: history <toggle|tap [code]|dbl [code]|hold <code>|perf>");
     }
 }
 
