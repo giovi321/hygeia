@@ -19,7 +19,7 @@ static const char *TAG = "ui_qs";
 
 enum { T_WIFI, T_AP, T_SOUND, T_DND, T_N };
 
-static lv_obj_t *s_root, *s_tile[T_N], *s_sub[T_N], *s_slider;
+static lv_obj_t *s_root, *s_tile[T_N], *s_sub[T_N], *s_slider, *s_batt;
 
 static void save(const hy_settings_t *s)
 {
@@ -38,6 +38,24 @@ static void refresh(void)
     lv_obj_set_style_bg_color(s_tile[T_SOUND], lv_color_hex(st->sound ? HY_C_ON : HY_C_SURFACE2), 0);
     lv_obj_set_style_bg_color(s_tile[T_DND], lv_color_hex(st->dnd ? HY_C_ON : HY_C_SURFACE2), 0);
     lv_slider_set_value(s_slider, st->brightness, LV_ANIM_OFF);
+}
+
+void qs_battery_refresh(void)
+{
+    if (!s_batt) {
+        return;
+    }
+    char pct[16], est[16], b[48];
+    bool red, bolt, has_est, known;
+    ui_battery_text(pct, sizeof pct, &red, &bolt, est, sizeof est, &has_est, &known);
+    if (!known) {
+        snprintf(b, sizeof b, "%s", HY_S_QS_BATTERY);
+    } else if (has_est) {
+        snprintf(b, sizeof b, HY_S_QS_BATTERY_EST, pct, est);
+    } else {
+        snprintf(b, sizeof b, HY_S_QS_BATTERY_PCT, pct);
+    }
+    lv_label_set_text(s_batt, b);   /* the label is right-aligned: its position is kept by the top-right anchor */
 }
 
 static void toggle_sound(void)
@@ -131,8 +149,9 @@ void qs_create(void)
     y += 30 + 16;
     lv_obj_t *l = ui_label(s_root, hy_type.status, HY_C_TEXT2, HY_S_QS_BRIGHTNESS);
     lv_obj_set_pos(l, 24, y);
-    lv_obj_t *r = ui_label(s_root, hy_type.status, HY_C_TEXT2, HY_S_QS_BATTERY);
-    lv_obj_align(r, LV_ALIGN_TOP_RIGHT, -24, y);
+    s_batt = ui_label(s_root, hy_type.status, HY_C_TEXT2, HY_S_QS_BATTERY);
+    lv_obj_align(s_batt, LV_ALIGN_TOP_RIGHT, -24, y);
+    qs_battery_refresh();
 
     y += 21 + 13;
     int bw = (HY_SCREEN - 2 * MARGIN - GAP) / 2;

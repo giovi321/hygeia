@@ -6,8 +6,10 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/clock.h"
+#include "hy/battery.h"
 #include "hy/events.h"
 #include "hy/occ.h"
+#include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
 #include "hy/ui.h"
@@ -58,12 +60,41 @@ static void event_cb(const hy_event_t *ev, void *ctx)
     }
 }
 
+/* Power task callback (LVGL task, via lv_async_call): refresh the battery widgets; a low or critical crossing
+ * publishes its event. Low also shows the info toast, on a dark screen too (it does not wake it and is gone
+ * after its 5 s). Critical shows no toast: the countdown overlay replaces it. */
+static void battery_cb(uint32_t flags)
+{
+    topbar_battery_refresh();
+    if (!(flags & (HY_BATT_EV_LOW | HY_BATT_EV_CRIT))) {
+        return;
+    }
+    hy_power_state_t st;
+    hy_power_state(&st);
+    const hy_clock_port_t *ck = hy_clock_port();
+    hy_event_t ev = {.ts = ck->valid(NULL) ? ck->now(NULL) : 0, .value = st.batt.pct};
+    if (flags & HY_BATT_EV_LOW) {
+        ev.type = HY_EV_BATTERY_LOW;
+        ESP_LOGI(TAG, "HY_EV_BATTERY_LOW value=%d", (int)ev.value);
+        hy_ev_publish(&ev);
+        char b[48];
+        snprintf(b, sizeof b, HY_S_BATT_LOW, (int)ev.value);
+        toast_show_info(b);
+    }
+    if (flags & HY_BATT_EV_CRIT) {
+        ev.type = HY_EV_BATTERY_CRITICAL;
+        ESP_LOGI(TAG, "HY_EV_BATTERY_CRITICAL value=%d", (int)ev.value);
+        hy_ev_publish(&ev);
+    }
+}
+
 /* Everything that follows the clock: the scheduler, the root flags, the top bar and every shown page */
 void ui_refresh_all(void)
 {
     hy_sched_run_tick();
     nav_host_tick();
     topbar_refresh();
+    topbar_battery_refresh();
     home_refresh_if_changed();
     overview_refresh_if_changed();
     history_refresh_if_changed();
@@ -429,6 +460,8 @@ esp_err_t hy_ui_start(void)
     lv_timer_create(tick_cb, 1000, NULL);
     lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */
     int sub = hy_ev_subscribe(event_cb, NULL);
+    static const hy_power_ui_t power_ui = {.battery = battery_cb};
+    hy_power_set_ui(&power_ui);
     hy_board_unlock();
 
     if (sub < 0) {
