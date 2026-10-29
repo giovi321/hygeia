@@ -18,6 +18,9 @@ static bool s_active;      /* between PRESSED and RELEASED */
 static bool s_consumed;    /* a widget owns the current stroke */
 static bool s_last_tap;    /* the last finished stroke classified as TAP */
 static bool s_phys_down;   /* the last sample was pressed */
+static bool s_last_double; /* the last finished stroke was the second tap of a double tap */
+static hy_stroke_t s_prev_tap;
+static bool s_have_prev;   /* s_prev_tap is a tap that may start a double tap */
 static bool s_waking;      /* the stroke started on the dimmed screen: it only wakes */
 
 static uint16_t dev_of(int32_t x, int32_t y)
@@ -67,6 +70,7 @@ static void indev_cb(lv_event_t *e)
         /* while the logged toast and its scrim are up a swipe does not navigate */
         s_consumed = toast_logged_visible();
         s_last_tap = false;
+        s_last_double = false;
         s_st.x0 = s_st.x1 = (int16_t)p.x;
         s_st.y0 = s_st.y1 = (int16_t)p.y;
         s_st.t0_ms = s_st.t1_ms = lv_tick_get();
@@ -102,6 +106,18 @@ static void finish(int32_t x, int32_t y, uint32_t t)
             s_last_tap = false;
         }
     }
+    s_last_double = false;
+    if (s_last_tap && !s_consumed) {
+        if (s_have_prev && hy_gesture_double(&s_prev_tap, &s_st)) {
+            s_last_double = true;
+            s_have_prev = false;
+        } else {
+            s_prev_tap = s_st;
+            s_have_prev = true;
+        }
+    } else {
+        s_have_prev = false;
+    }
 }
 
 void input_init(lv_indev_t *indev)
@@ -120,6 +136,11 @@ void input_init(lv_indev_t *indev)
 bool ui_input_last_was_tap(void)
 {
     return !s_active && s_last_tap;
+}
+
+bool ui_input_last_was_double(void)
+{
+    return !s_active && s_last_double;
 }
 
 bool ui_input_still(void)

@@ -39,6 +39,7 @@ void hy_ui_debug_nav(void);               /* logs the navigation stack, e.g. "na
 void hy_ui_debug_storefail(const char *arg); /* "": storage-down root; "off": storage ok again */
 void hy_ui_debug_idle(const char *arg);   /* "": sets the nav idle flag (stub until the idle module); "off": clears it */
 void hy_ui_debug_tapstroke(const char *code); /* a still stroke through the input layer, then that tile's click handler */
+void hy_ui_debug_history(const char *arg); /* "toggle": 7/30 days; "tap|dbl [code]": a row tap or double tap through the input layer; "perf": timings */
 void hy_ui_debug_due(const char *arg);    /* "slide|skip|snooze|next": the due card's actions, as the gestures call them; "flash": the speaker-failure flash */
 #endif
 

@@ -26,16 +26,6 @@ static lv_obj_t *box(lv_obj_t *parent)
     return o;
 }
 
-/* Overview and History are filled by their own modules; until then a page shows its header. */
-static void header(lv_obj_t *page, const char *text)
-{
-    lv_obj_t *l = lv_label_create(page);
-    lv_obj_set_style_text_font(l, hy_type.title, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(HY_C_TEXT), 0);
-    lv_label_set_text(l, text);
-    lv_obj_set_pos(l, 24, 2);
-}
-
 static void set_dots(void)
 {
     for (int i = 0; i < PAGES; i++) {
@@ -59,8 +49,6 @@ lv_obj_t *pager_create(lv_obj_t *parent)
         lv_obj_set_size(s_pages[i], HY_SCREEN, HY_CONTENT_H);
         lv_obj_set_pos(s_pages[i], i * HY_SCREEN, 0);
     }
-    header(s_pages[1], HY_S_OV_TITLE);
-    header(s_pages[2], HY_S_HI_TITLE_7);
 
     lv_obj_t *dots = box(s_root);
     lv_obj_set_size(dots, LV_SIZE_CONTENT, DOT);

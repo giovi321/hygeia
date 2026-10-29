@@ -139,6 +139,7 @@ static void cmd_storefail(const char *args) { hy_ui_debug_storefail(args); }
 static void cmd_idle(const char *args) { hy_ui_debug_idle(args); }
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
+static void cmd_history(const char *args) { hy_ui_debug_history(args); }
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -273,6 +274,7 @@ void app_main(void)
     console_register("idle", cmd_idle);
     console_register("tapstroke", cmd_tapstroke);
     console_register("due", cmd_due);
+    console_register("history", cmd_history);
     console_start();
 #endif
 }

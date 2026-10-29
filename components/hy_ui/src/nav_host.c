@@ -103,6 +103,12 @@ static void refresh_view(hy_view_t v)
     case HY_V_HOME:
         home_refresh_if_changed();
         break;
+    case HY_V_OVERVIEW:
+        overview_refresh_if_changed();
+        break;
+    case HY_V_HISTORY:
+        history_show();
+        break;
     case HY_V_DETAIL:
         lv_label_set_text(s_detail_name, med_name(s_nav.med_id));
         break;
@@ -128,8 +134,8 @@ void ui_show_view(hy_view_t v)
         pager_show((int)(v - HY_V_HOME), s_started && is_pager(s_shown) && s_shown != v);
     }
     topbar_set_grab(v == HY_V_HOME && !s_nav.due);
+    s_shown = v;   /* before the refresh: the page refreshes only while it is the shown view */
     refresh_view(v);
-    s_shown = v;
 }
 
 void ui_nav_log(void)
@@ -171,6 +177,11 @@ hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
     }
     ui_nav_log();
     return fx;
+}
+
+hy_view_t ui_current_view(void)
+{
+    return s_shown;
 }
 
 bool ui_nav_idle(void)
@@ -236,6 +247,8 @@ void nav_host_init(void)
     hy_nav_init(&s_nav);
     s_pager = pager_create(ui_content());
     home_create(pager_page(0));
+    overview_create(pager_page(1));
+    history_create(pager_page(2));
 
     s_views[HY_V_STORAGE_DOWN] = storage_down_create(ui_content());
     lv_obj_set_hidden(s_views[HY_V_STORAGE_DOWN], true);

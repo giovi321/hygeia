@@ -10,6 +10,8 @@ idf_component_register(
         "src/home.c"
         "src/toast.c"
         "src/due.c"
+        "src/overview.c"
+        "src/history.c"
         "src/debug.c"
         "fonts/hy_inter_14.c"
         "fonts/hy_inter_17.c"
