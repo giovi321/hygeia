@@ -90,6 +90,55 @@ Verified on the board from the serial log, 2026-10-28.
 - RTC kept time over 74 s with USB unplugged and the battery connected, device off (`osc_stopped=0` afterwards)
 - Not tested: time kept with no battery and no USB. Whether the board has a backup supply for the PCF85063 is unknown; the firmware's "Set the time" flow covers the case where it does not
 
+## RTC alarm
+
+Verified on the board, 2026-10-28 (serial) and 2026-10-29 (owner, build 7f8df51).
+
+- The PCF85063 interrupt is on GPIO 13 (input, pull-up, falling edge); the ISR only sets a flag, `hy_clock_alarm_take` reads it
+- `alarm 20`: fired 19.5 s after the command, at exactly set time + 20 s, through the hardware interrupt
+- A target at or before now + 2 s is not armed: the chip is disarmed and a software due-now flag is raised, so the next take returns true (`alarm 1` fired 0.12 s later)
+- One-shot contract: `hy_clock_alarm_take` disarms the chip (AIE and AF cleared) and resets the programmed value; the scheduler calls `hy_clock_alarm_set` after every evaluation to re-arm. Owner check: alarm set at 19232 ms, the scheduler re-armed ("rtc alarm set") at 38302 ms, 19.1 s later
+- The chip matches second, minute, hour and day of month only, with no month field: a target more than about one month ahead fires early
+- `hy_clock_alarm_take` logs `rtc alarm fired at <utc>` and names the source, hardware interrupt or software due-now flag (added after the 2026-10-29 owner check, which could only infer the fire from the re-arm; not yet run on the board)
+
+## Audio
+
+- Codec path ES8311 verified: `hy_audio_init` returns ESP_OK, the chime renders to 16319 samples at 22050 Hz, played in about 850 ms including 100 ms of trailing silence (748 ms before the silence was added)
+- Volume 60 judged "fine" by the owner on 2026-10-29
+- Not yet checked: the "Play chime" button in Sound settings, and the repeat chimes every 2 min up to 5 times (device muted in an office)
+
+## Gestures
+
+Thresholds that worked on the panel (owner session 2026-10-29, build 7f8df51):
+
+- Edge zone: 40 px (top edge down, bottom edge up from y 440, left edge right)
+- Swipe: dominant axis at least 60 px and at least 1.5 times the other axis
+- Tap: at most 16 px of movement and under 500 ms; a long press is at most 16 px and 500 ms or more
+- Double tap: 300 ms between release and the next press, 40 px between the two points
+- A stroke that leaves and returns to the start is not a tap: `max_dev` (maximum deviation from the start) must also be 16 px or less, not only the end-point distance
+- A stroke that starts in an edge zone is never consumed by a widget, except sliders, which take it with a forced consume
+
+## Splash
+
+- Splash done in 1008 ms on both boots; maximum frame gap 74 ms inside the 900 ms animation (target about 50), measured on build 7f8df51 before the hidden views moved out of the splash
+
+## Performance
+
+Scheduler evaluation and Home refresh on the board (newlib, CLIB malloc):
+
+- 3 active medicines: evaluation 34.3 to 35.6 ms (target 60 ms), `home_refresh` 8.8 to 9.2 ms (target 20 ms)
+- 50 active medicines: evaluation about 141 ms (target 300 ms), `home_refresh` 91 to 94 ms (target 60 ms, missed). `hy_tile_view` costs about 1.8 ms per fixed medicine, 88 to 90 ms for 50 tiles; LVGL updates are 3 to 4 ms
+- Picolibc was slower (3 medicines: evaluation 60 to 64 ms, `home_refresh` 33 ms; 50 medicines: 306 ms and 315 ms) because it re-parses the TZ string on every `localtime_r` and `mktime`; the project builds with newlib
+- Internal heap free with 50 tiles: 44 to 49 KB (minimum 35 KB); with 3 medicines 97 to 151 KB
+
+## Owed hardware checks
+
+- Item 8: repeat chimes (every 2 min, up to 5 plays) with sound on
+- Item 29: Play chime in Sound settings
+- Item 18: Detail scroll with more history rows than fit on screen (the owner saw no scroll with the current content)
+- Serial check A: waking stroke while a due card appears (`idle on`, `gesture hold`, `remindtest 0`, `gesture release left`: no snooze, nav stays `[due]`)
+- Serial check B: idle Next after an early dose (take V early, `idle on`, the idle screen must not name the satisfied slot)
+
 ## Home grid
 
 - Owner-verified on firmware a319c4e: tile tap, Undo by finger, scroll with 5 medicines, and the panel's look against the mockup
