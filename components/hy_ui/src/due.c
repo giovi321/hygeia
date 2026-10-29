@@ -42,6 +42,11 @@ static const char *TAG = "ui_due";
 #define FADE_MS       150
 #define BACK_MS       150
 #define FLASH_STEP_MS 200
+#define PD_MAX        6            /* entry dots at the left edge; the last one stands for "this and more" */
+#define PD            8
+#define PD_ACTIVE_H   22
+#define PD_GAP        8
+#define PD_X          12
 #define FLASH_PHASES  6            /* three 200 ms flashes, each followed by 200 ms back */
 
 typedef struct {
@@ -58,6 +63,7 @@ static char s_tz[HY_TZ_LEN];
 static uint32_t s_gen_seen;
 static bool s_visible;
 
+static lv_obj_t *s_dots_box, *s_dots[PD_MAX];
 static lv_obj_t *s_card, *s_ring, *s_code, *s_name, *s_due, *s_track, *s_knob, *s_check, *s_slide_lbl,
     *s_snooze_lbl, *s_skip_lbl, *s_skip_hit;
 
@@ -170,6 +176,30 @@ static void flash_start(void)
 
 /* ---- drawing ---- */
 
+/* One dot per showing entry, at most PD_MAX. With more entries the last dot is smaller and covers the rest.
+ * The current entry's dot is taller and in the medicine colour. Hidden when one entry shows. */
+static void dots_render(lv_color_t col)
+{
+    size_t shown = s_n > PD_MAX ? PD_MAX : s_n;
+    if (s_n < 2) {
+        lv_obj_set_hidden(s_dots_box, true);
+        return;
+    }
+    lv_obj_set_hidden(s_dots_box, false);
+    size_t active = s_idx < PD_MAX ? s_idx : PD_MAX - 1;
+    for (size_t i = 0; i < PD_MAX; i++) {
+        if (i >= shown) {
+            lv_obj_set_hidden(s_dots[i], true);
+            continue;
+        }
+        bool on = i == active;
+        bool more = s_n > PD_MAX && i == PD_MAX - 1;
+        lv_obj_set_hidden(s_dots[i], false);
+        lv_obj_set_size(s_dots[i], PD, on ? PD_ACTIVE_H : more ? PD - 3 : PD);
+        lv_obj_set_style_bg_color(s_dots[i], on ? col : lv_color_hex(HY_C_DOT), 0);
+    }
+}
+
 static void render(void)
 {
     entry_t *e = cur();
@@ -181,6 +211,7 @@ static void render(void)
     lv_obj_set_style_text_color(s_code, col, 0);
     lv_obj_set_style_bg_color(s_knob, col, 0);
     set_text(s_code, e->code);
+    dots_render(col);
 
     char buf[96];
     if (e->dose[0]) {
@@ -595,6 +626,19 @@ void due_create(void)
     lv_obj_set_style_bg_opa(s_card, LV_OPA_COVER, 0);
     lv_obj_set_clickable(s_card, true);   /* swallows every touch so nothing underneath logs a dose */
     lv_obj_set_hidden(s_card, true);
+
+    s_dots_box = plain(s_card, PD, LV_SIZE_CONTENT, PD_X, 0);
+    lv_obj_set_height(s_dots_box, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_dots_box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_dots_box, PD_GAP, 0);
+    lv_obj_align(s_dots_box, LV_ALIGN_LEFT_MID, PD_X, 0);
+    lv_obj_set_hidden(s_dots_box, true);
+    for (size_t i = 0; i < PD_MAX; i++) {
+        s_dots[i] = plain(s_dots_box, PD, PD, 0, 0);
+        lv_obj_set_style_radius(s_dots[i], PD / 2, 0);
+        lv_obj_set_style_bg_opa(s_dots[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(s_dots[i], lv_color_hex(HY_C_DOT), 0);
+    }
 
     const int32_t ring_x = (HY_SCREEN - RING_D) / 2;
     lv_obj_t *disc = plain(s_card, DISC_D, DISC_D, ring_x + RING_W, RING_Y + RING_W);
