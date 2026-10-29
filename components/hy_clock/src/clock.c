@@ -58,6 +58,7 @@ static SemaphoreHandle_t s_alarm_mutex;
 #define ALARM_UNKNOWN INT64_MIN /* chip alarm state not known: the next set always writes */
 static int64_t s_alarm_utc = ALARM_UNKNOWN;
 static volatile bool s_alarm_flag;
+static bool s_alarm_soft;   /* the flag was raised by hy_clock_alarm_set (target already due), not by the interrupt; under the mutex */
 
 static StaticSemaphore_t s_tz_mutex_buf;
 static SemaphoreHandle_t s_tz_mutex;
@@ -410,6 +411,7 @@ esp_err_t hy_clock_alarm_set(int64_t utc)
     esp_err_t err = ESP_OK;
     if (want != s_alarm_utc) {
         s_alarm_flag = false; /* a stale pending interrupt must not disarm the new alarm */
+        s_alarm_soft = false;
         err = pcf85063_alarm_set(want ? raw : NULL);
         if (err == ESP_OK) {
             s_alarm_utc = want;
@@ -421,6 +423,7 @@ esp_err_t hy_clock_alarm_set(int64_t utc)
     if (err == ESP_OK) {
         if (due) {
             s_alarm_flag = true;
+            s_alarm_soft = true;
         }
         ESP_LOGI(TAG, "rtc alarm %s", due ? "due now" : (want ? "set" : "disabled"));
     }
@@ -435,6 +438,9 @@ bool hy_clock_alarm_take(void)
     }
     xSemaphoreTake(s_alarm_mutex, portMAX_DELAY);
     s_alarm_flag = false;
+    bool soft = s_alarm_soft;
+    int64_t programmed = s_alarm_utc;
+    s_alarm_soft = false;
     /* One shot: clears AIE and AF so the day-of-month match does not repeat */
     esp_err_t err = pcf85063_alarm_set(NULL);
     if (err == ESP_OK) {
@@ -444,6 +450,12 @@ bool hy_clock_alarm_take(void)
         ESP_LOGE(TAG, "RTC alarm clear: %s", esp_err_to_name(err));
     }
     xSemaphoreGive(s_alarm_mutex);
+    if (soft) {
+        ESP_LOGI(TAG, "rtc alarm fired at %lld (software due-now flag)", (long long)time(NULL));
+    } else {
+        ESP_LOGI(TAG, "rtc alarm fired at %lld (hardware interrupt, programmed %lld)", (long long)time(NULL),
+                 (long long)programmed);
+    }
     return true;
 }
 
