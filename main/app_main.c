@@ -239,7 +239,11 @@ void app_main(void)
 
     init_storage();
     esp_err_t rerr = hy_sched_run_init();
-    ESP_LOGI(TAG, "hy_sched_run_init: %s", esp_err_to_name(rerr));
+    if (rerr == ESP_OK) {
+        ESP_LOGI(TAG, "hy_sched_run_init: %s", esp_err_to_name(rerr));
+    } else {
+        ESP_LOGE(TAG, "hy_sched_run_init: %s: reminders are OFF", esp_err_to_name(rerr));
+    }
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
         ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));

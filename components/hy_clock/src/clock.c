@@ -339,12 +339,10 @@ esp_err_t hy_clock_set(int64_t utc, const char *posix_tz, const char *source)
     }
     int64_t jump = utc - (int64_t)time(NULL);
     set_system_time(utc);
-    /* The zone is in force even if persisting it fails. A differing POSIX string records a
-     * change and clears the IANA name; an unchanged one keeps the name. */
-    hy_tzchange_t ch;
-    char zone[HY_ZONE_LEN];
-    bool changed = zone_switch(tzcopy, NULL, utc, &ch, zone, sizeof zone);
-    esp_err_t nvs_err = save_zone(tzcopy, zone, changed ? &ch : NULL);
+    /* Publish the sync right after the time step, before the slow zone work and NVS write: a reader that
+     * sees the new time without the new sequence would evaluate it with the pre-jump tracking state.
+     * settimeofday itself takes libc locks, so it cannot run inside the spinlock; the runner's
+     * monotonic cross-check covers the few microseconds in between. */
     portENTER_CRITICAL(&s_lock);
     s_valid = true;
     strlcpy(s_src, source ? source : "", sizeof s_src);
@@ -352,6 +350,12 @@ esp_err_t hy_clock_set(int64_t utc, const char *posix_tz, const char *source)
     s_sync_jump = jump;
     s_sync_seq++;
     portEXIT_CRITICAL(&s_lock);
+    /* The zone is in force even if persisting it fails. A differing POSIX string records a
+     * change and clears the IANA name; an unchanged one keeps the name. */
+    hy_tzchange_t ch;
+    char zone[HY_ZONE_LEN];
+    bool changed = zone_switch(tzcopy, NULL, utc, &ch, zone, sizeof zone);
+    esp_err_t nvs_err = save_zone(tzcopy, zone, changed ? &ch : NULL);
     ESP_LOGI(TAG, "clock set via %s: utc %lld, jump %lld s, tz %s%s", source ? source : "",
              (long long)utc, (long long)jump, tzcopy, changed ? ", zone change recorded" : "");
     if (nvs_err != ESP_OK) {
