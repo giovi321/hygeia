@@ -102,6 +102,32 @@ hy_err_t hy_act_skip(uint32_t med_id, hy_source_t src, uint32_t *out_log_id);
  */
 hy_err_t hy_act_undo(uint32_t log_id);
 
+typedef struct { uint32_t med_id; int64_t slot; int64_t until; } hy_snooze_t;
+
+/*
+ * Writes an automatic missed entry: ts = now, tz, slot, delta_min = (now - slot) / 60,
+ * status HY_MISSED, source HY_SRC_AUTO. HY_E_CLOCK, HY_E_NOT_FOUND (unknown, archived,
+ * as-needed), HY_E_INVALID when slot is not an occurrence of the medicine. If any log
+ * for (med, slot) exists (including a MISSED one): HY_OK, *out_log_id = 0, nothing
+ * written, no event. Otherwise publishes HY_EV_MISSED with slot and drops a snooze for
+ * that slot. Not undoable. HY_E_FULL when the look-back query is truncated.
+ */
+hy_err_t hy_act_mark_missed(uint32_t med_id, int64_t slot, uint32_t *out_log_id);
+
+/*
+ * Snoozes the open occurrence: slot = hy_match_slot at now; it must satisfy
+ * base <= now < base + missed_after (base from hy_occ_base with the clock port's
+ * last_change), else HY_E_INVALID. minutes 1..120 else HY_E_INVALID.
+ * until = min(now + minutes*60, base + missed_after_min*60). Replaces an existing
+ * snooze for the medicine. Publishes HY_EV_SNOOZED (ts now, slot). HY_E_CLOCK,
+ * HY_E_NOT_FOUND as for log_taken (and for as-needed medicines, as for mark_missed).
+ */
+hy_err_t hy_act_snooze(uint32_t med_id, uint16_t minutes, hy_source_t src, int64_t *out_until);
+
+/* Snoozes whose until is after now, at most HY_MAX_MEDS. Pointer valid until the next
+ * action or call. A taken or skipped entry for a snoozed slot drops that snooze. */
+size_t hy_snoozes(const hy_snooze_t **out);
+
 /* Sets edited = true, update_log, publishes HY_EV_LOG_EDITED. No clock needed. */
 hy_err_t hy_act_log_edit(const hy_log_t *e);
 /* delete_log, then publishes HY_EV_LOG_EDITED (there is no delete event). No clock needed. */

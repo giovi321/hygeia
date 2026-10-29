@@ -45,6 +45,11 @@ typedef struct { int64_t at; char old_tz[HY_TZ_LEN]; char new_tz[HY_TZ_LEN]; } h
 int64_t hy_match_slot(const hy_med_t *m, int64_t ts, const char *posix_tz,
                       const hy_log_t *logs, size_t n_logs);
 
+/* The instant an occurrence's state clock counts from (east rule), as hy_occ_state
+ * uses it: the slot, or last_change->at when the slot lies in the skipped wall-clock
+ * interval of a forward zone change. last_change may be NULL. */
+int64_t hy_occ_base(const hy_med_t *m, int64_t slot, const char *posix_tz, const hy_tzchange_t *last_change);
+
 /*
  * State of one occurrence at time now, evaluated in this order:
  * 1. TAKEN if a taken log for the slot exists, or (west rule) a taken log whose

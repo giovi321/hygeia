@@ -346,6 +346,21 @@ static void test_east_jump_due_on_arrival(void)
                           hy_occ_state(&m, s, s + DAY, ch.at, TZ_ZURICH, NULL, 0, NULL, 0, NULL));
 }
 
+/* hy_occ_base is the instant hy_occ_state counts from (R6 setup). */
+static void test_occ_base_matches_state(void)
+{
+    hy_med_t m;
+    make_med(&m, 8 * 60, 0xFFFF);
+    hy_tzchange_t ch;
+    memset(&ch, 0, sizeof ch);
+    ch.at = T_2026_07_15_1000Z;
+    strcpy(ch.old_tz, TZ_NY);
+    strcpy(ch.new_tz, TZ_ZURICH);
+    int64_t s = T_2026_07_15_0600Z;
+    TEST_ASSERT_EQUAL_INT64(ch.at, hy_occ_base(&m, s, TZ_ZURICH, &ch));
+    TEST_ASSERT_EQUAL_INT64(s, hy_occ_base(&m, s, TZ_ZURICH, NULL));
+}
+
 /* 2026-11-02: taken 08:05 Zurich for the 08:00 slot, then change to New York;
  * the New York 08:00 slot of the same calendar day is already taken. */
 static void test_west_no_repeat(void)
@@ -523,6 +538,7 @@ int main(void)
     RUN_TEST(test_skipped_state);
     RUN_TEST(test_untracked_gap);
     RUN_TEST(test_east_jump_due_on_arrival);
+    RUN_TEST(test_occ_base_matches_state);
     RUN_TEST(test_west_no_repeat);
     RUN_TEST(test_west_rule_other_day);
     RUN_TEST(test_min_interval);
