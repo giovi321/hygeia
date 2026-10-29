@@ -7,6 +7,7 @@
 #include "sdkconfig.h"
 #include "hy/actions.h"
 #include "hy/nav.h"
+#include "esp_err.h"
 #include "strings.h"
 
 /* colours (global constraints) */
@@ -73,6 +74,19 @@ lv_obj_t *ui_plain(lv_obj_t *parent);            /* unstyled, non-scrolling, non
 lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *text);
 uint32_t  ui_fnv(uint32_t h, const void *p, size_t n); /* FNV-1a step over n bytes, seed 2166136261u */
 const hy_med_t *ui_find_med(uint32_t id);        /* the live medicine list entry, NULL when unknown */
+void      ui_refresh_all(void);                  /* scheduler tick, root flags, top bar and the shown pages */
+void      ui_time_changed(void);                 /* after a time or zone set (no hy event): also the day-based caches */
+
+/* widgets shared by quick settings, settings and the set-the-time screen */
+typedef void (*ui_action_cb)(void *ud);
+void      ui_on_tap(lv_obj_t *o, ui_action_cb cb, void *ud);   /* runs cb on a still, awake tap only */
+lv_obj_t *ui_button(lv_obj_t *parent, int32_t w, int32_t h, const lv_font_t *f, const char *text, ui_action_cb cb, void *ud);
+lv_obj_t *ui_view_title(lv_obj_t *view, const char *text);     /* 26 bold header at (24, 2) */
+/* A 30 px slider. live runs on every change, commit on release; a stroke that only woke the screen changes nothing.
+ * It consumes its strokes (no gesture). */
+lv_obj_t *ui_slider(lv_obj_t *parent, int32_t w, int32_t min, int32_t max, void (*live)(int32_t), void (*commit)(int32_t));
+lv_obj_t *ui_roller(lv_obj_t *parent, const char *opts, lv_roller_mode_t mode, int32_t w, const lv_font_t *sel_font,
+                    lv_event_cb_t changed);
 
 /* nav_host.c */
 void      nav_host_init(void);                   /* creates the views in ui_content(), shows the root */
@@ -92,7 +106,8 @@ lv_obj_t *ui_view_box(void);                     /* a hidden 480 x 424 view cont
 void      ui_register_view(hy_view_t v, lv_obj_t *obj); /* the view nav_host shows for v */
 void      ui_open_detail(uint32_t med_id);
 void      ui_set_storage_down(bool down);        /* LVGL task: storage state for the root */
-void      ui_nav_log(void);                      /* "nav: HOME > QS" */
+void      ui_qs_slide_done(void);                /* qs.c: the slide ended, nav_host hides the view under it */
+void      ui_nav_log(void);                   /* "nav: HOME > QS" */
 const char *ui_gesture_name(hy_gesture_t g);
 
 /* input.c
@@ -160,6 +175,22 @@ void earlier_submit(void);                       /* the Log at button: log taken
 #if CONFIG_HY_DEBUG_CONSOLE
 void note_debug_text(const char *text);          /* sets the note field as typing would */
 void earlier_debug_set(int hour, int minute);    /* sets the rollers as turning them would */
+#endif
+
+/* qs.c, settings.c, timeset.c: quick settings, Settings and its sub-views, the set-the-time screen */
+void qs_create(void);
+void qs_show(void);                              /* the view became the top: values and the 200 ms slide */
+void settings_create(void);                      /* Settings, Time zone, Sound, Display and About views */
+void settings_show(hy_view_t v);                 /* one of those views became the top: refresh its values */
+esp_err_t settings_set_zone(const char *iana);   /* the zone picker's Set; the debug settz calls it too */
+void settings_brightness_live(int32_t pct);      /* live brightness, no save */
+void settings_brightness_commit(int32_t pct);    /* saves the brightness setting */
+void timeset_create(lv_obj_t *parent, bool invalid_mode);
+void timeset_show(bool invalid_mode);            /* rollers to the current time (the build time while the clock is invalid) */
+#if CONFIG_HY_DEBUG_CONSOLE
+void qs_debug(const char *arg);                  /* "sound|dnd|bright <n>": the tile taps and the slider release */
+void timeset_debug_set(int year, int month, int day, int hour, int minute); /* the Date and time rollers, then Set */
+void settings_debug_log(void);                   /* logs the settings the RAM copy holds */
 #endif
 
 /* storage_down.c */

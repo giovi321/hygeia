@@ -1,6 +1,5 @@
 /* Navigation host: owns the hy_nav_t, keeps one view per hy_view_t inside ui_content() and shows the top of
- * the stack. Views that later tasks provide (quick settings, settings, set the time, idle)
- * are stubs here. */
+ * the stack. The idle view (Task 17) is not here yet. */
 
 #include <stdio.h>
 #include <string.h>
@@ -38,7 +37,7 @@ const char *ui_gesture_name(hy_gesture_t g)
     return (unsigned)g < sizeof n / sizeof n[0] ? n[g] : "?";
 }
 
-/* ---- stub views until their tasks land ---- */
+/* ---- view containers ---- */
 
 lv_obj_t *ui_view_box(void)
 {
@@ -59,20 +58,6 @@ void ui_register_view(hy_view_t v, lv_obj_t *obj)
     if ((unsigned)v < N_VIEWS) {
         s_views[v] = obj;
     }
-}
-
-static lv_obj_t *stub_titled(const char *title, const char *body)
-{
-    lv_obj_t *v = ui_view_box();
-    lv_obj_t *t = ui_label(v, hy_type.title, HY_C_TEXT, title);
-    lv_obj_set_pos(t, 24, 2);
-    if (body) {
-        lv_obj_t *b = ui_label(v, hy_type.status, HY_C_TEXT2, body);
-        lv_obj_set_width(b, HY_SCREEN - 48);
-        lv_label_set_long_mode(b, LV_LABEL_LONG_MODE_WRAP);
-        lv_obj_set_pos(b, 24, 48);
-    }
-    return v;
 }
 
 /* fx handlers: the idle module (Task 17) replaces the wake stub */
@@ -108,9 +93,39 @@ static void refresh_view(hy_view_t v)
     case HY_V_EARLIER:
         earlier_show(s_nav.med_id);
         break;
+    case HY_V_QS:
+        qs_show();
+        break;
+    case HY_V_SETTINGS:
+    case HY_V_SET_ZONE:
+    case HY_V_SET_SOUND:
+    case HY_V_SET_DISPLAY:
+    case HY_V_ABOUT:
+        settings_show(v);
+        break;
+    case HY_V_SET_TIME:
+        timeset_show(false);
+        break;
+    case HY_V_CLOCK_INVALID:
+        timeset_show(true);
+        break;
     default:
         break;
     }
+}
+
+/* The view under quick settings stays visible while the 200 ms slide runs, then the slide hides it */
+void ui_qs_slide_done(void)
+{
+    if (s_shown != HY_V_QS) {
+        return;
+    }
+    for (int i = 0; i < N_VIEWS; i++) {
+        if (s_views[i] && s_views[i] != s_views[HY_V_QS]) {
+            lv_obj_set_hidden(s_views[i], true);
+        }
+    }
+    lv_obj_set_hidden(s_pager, true);
 }
 
 void ui_show_view(hy_view_t v)
@@ -119,12 +134,14 @@ void ui_show_view(hy_view_t v)
         return;
     }
     bool pager = is_pager(v);
+    bool under = v == HY_V_QS && s_started && s_shown != HY_V_QS;   /* keep the previous view for the slide */
     for (int i = 0; i < N_VIEWS; i++) {
         if (s_views[i]) {
-            lv_obj_set_hidden(s_views[i], s_views[i] != s_views[v]);
+            bool prev = under && !is_pager(s_shown) && s_views[i] == s_views[s_shown];
+            lv_obj_set_hidden(s_views[i], s_views[i] != s_views[v] && !prev);
         }
     }
-    lv_obj_set_hidden(s_pager, !pager);
+    lv_obj_set_hidden(s_pager, !pager && !(under && is_pager(s_shown)));
     if (pager) {
         /* animate only a page change within the pager */
         pager_show((int)(v - HY_V_HOME), s_started && is_pager(s_shown) && s_shown != v);
@@ -274,17 +291,15 @@ void nav_host_init(void)
 
     s_views[HY_V_STORAGE_DOWN] = storage_down_create(ui_content());
     lv_obj_set_hidden(s_views[HY_V_STORAGE_DOWN], true);
-    s_views[HY_V_CLOCK_INVALID] = stub_titled(HY_S_TIME_TITLE, HY_S_TIME_BODY);
-    s_views[HY_V_QS] = stub_titled(HY_S_QS_TITLE, NULL);
     detail_create();
     note_create();
     earlier_create();
-    lv_obj_t *other = ui_view_box();   /* settings and its sub-views: empty until their tasks */
-    for (int v = HY_V_NOTE; v < N_VIEWS; v++) {
-        if (!s_views[v] && !is_pager((hy_view_t)v)) {
-            s_views[v] = other;
-        }
-    }
+    qs_create();
+    settings_create();
+    s_views[HY_V_SET_TIME] = ui_view_box();
+    timeset_create(s_views[HY_V_SET_TIME], false);
+    s_views[HY_V_CLOCK_INVALID] = ui_view_box();
+    timeset_create(s_views[HY_V_CLOCK_INVALID], true);
 
     due_create();   /* last: above every view, below the toast */
 

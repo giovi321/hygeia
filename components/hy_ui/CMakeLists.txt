@@ -15,6 +15,9 @@ idf_component_register(
         "src/detail.c"
         "src/note.c"
         "src/earlier.c"
+        "src/qs.c"
+        "src/settings.c"
+        "src/timeset.c"
         "src/debug.c"
         "fonts/hy_inter_14.c"
         "fonts/hy_inter_17.c"
@@ -38,7 +41,9 @@ idf_component_register(
         hy_board
         lvgl__lvgl
     PRIV_REQUIRES
+        esp_app_format
         esp_rom
         esp_timer
         freertos
+        joltwallet__littlefs
 )

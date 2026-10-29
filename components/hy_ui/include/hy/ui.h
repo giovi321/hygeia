@@ -44,6 +44,9 @@ void hy_ui_debug_detail(const char *arg); /* "<code>": opens that medicine's det
 void hy_ui_debug_note(const char *arg);   /* "<code> [text]": the note view; with a text, logs a taken dose now with it */
 void hy_ui_debug_earlier(const char *arg); /* "<code> [hh:mm]": the log-earlier view; with a time, logs a taken dose then */
 void hy_ui_debug_due(const char *arg);    /* "slide|skip|snooze|next": the due card's actions, as the gestures call them; "flash": the speaker-failure flash */
+void hy_ui_debug_qs(const char *arg);     /* "sound|dnd|bright <n>": tile taps and slider release; "view <name>": pushes qs, settings, zone, time, sound, display, about or invalid; "" opens Quick settings */
+void hy_ui_debug_settz(const char *iana); /* the zone picker's Set with that IANA name */
+void hy_ui_debug_settings(void);          /* logs the settings in the RAM copy (what NVS holds after a reboot) */
 #endif
 
 #ifdef __cplusplus

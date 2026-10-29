@@ -23,7 +23,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS };
 typedef struct {
     int kind;
     char arg[96];
@@ -577,6 +577,34 @@ static void job_earlier(const char *arg)
     }
 }
 
+static void job_qs(const char *arg)
+{
+    static const struct { const char *name; hy_view_t v; } views[] = {
+        {"qs", HY_V_QS}, {"settings", HY_V_SETTINGS}, {"zone", HY_V_SET_ZONE}, {"time", HY_V_SET_TIME},
+        {"sound", HY_V_SET_SOUND}, {"display", HY_V_SET_DISPLAY}, {"about", HY_V_ABOUT},
+        {"invalid", HY_V_CLOCK_INVALID},   /* the root's layout; the root itself follows the clock */
+    };
+    if (strncmp(arg, "view ", 5) == 0) {
+        for (size_t i = 0; i < sizeof views / sizeof views[0]; i++) {
+            if (strcmp(arg + 5, views[i].name) == 0) {
+                ui_nav_push(views[i].v);
+                return;
+            }
+        }
+        ESP_LOGE(TAG, "qs view: unknown view \"%s\"", arg + 5);
+    } else if (arg[0]) {
+        qs_debug(arg);
+    } else {
+        ui_nav_push(HY_V_QS);
+    }
+}
+
+static void job_settz(const char *iana)
+{
+    esp_err_t err = settings_set_zone(iana);
+    ESP_LOGI(TAG, "settz %s: %s", iana, esp_err_to_name(err));
+}
+
 static void run_job(void *arg)
 {
     job_t *j = arg;
@@ -646,6 +674,15 @@ static void run_job(void *arg)
     case J_EARLIER:
         job_earlier(j->arg);
         break;
+    case J_QS:
+        job_qs(j->arg);
+        break;
+    case J_SETTZ:
+        job_settz(j->arg);
+        break;
+    case J_SETTINGS:
+        settings_debug_log();
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -691,5 +728,8 @@ void hy_ui_debug_history(const char *arg) { post(J_HISTORY, arg); }
 void hy_ui_debug_detail(const char *arg) { post(J_DETAIL, arg); }
 void hy_ui_debug_note(const char *arg) { post(J_NOTE, arg); }
 void hy_ui_debug_earlier(const char *arg) { post(J_EARLIER, arg); }
+void hy_ui_debug_qs(const char *arg) { post(J_QS, arg); }
+void hy_ui_debug_settz(const char *iana) { post(J_SETTZ, iana); }
+void hy_ui_debug_settings(void) { post(J_SETTINGS, NULL); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

@@ -505,6 +505,11 @@ uint32_t hy_clock_sync_seq(int64_t *jump_s)
     return seq;
 }
 
+int64_t hy_clock_build_epoch(void)
+{
+    return HY_BUILD_EPOCH;
+}
+
 void hy_clock_last_sync(char *src, size_t src_len, int64_t *at)
 {
     portENTER_CRITICAL(&s_lock);

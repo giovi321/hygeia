@@ -52,9 +52,9 @@ static void event_cb(const hy_event_t *ev, void *ctx)
     }
 }
 
-static void tick_cb(lv_timer_t *t)
+/* Everything that follows the clock: the scheduler, the root flags, the top bar and every shown page */
+void ui_refresh_all(void)
 {
-    (void)t;
     hy_sched_run_tick();
     nav_host_tick();
     topbar_refresh();
@@ -63,6 +63,20 @@ static void tick_cb(lv_timer_t *t)
     history_refresh_if_changed();
     detail_refresh_if_changed();
     due_refresh();
+}
+
+/* A time or zone set publishes no hy event: recompute the views that depend on the day and the zone */
+void ui_time_changed(void)
+{
+    history_invalidate();
+    detail_invalidate();
+    ui_refresh_all();
+}
+
+static void tick_cb(lv_timer_t *t)
+{
+    (void)t;
+    ui_refresh_all();
 }
 
 /* The first snapshot, as soon as the LVGL task runs; the tiles stay blank until then */
@@ -113,6 +127,173 @@ const hy_med_t *ui_find_med(uint32_t id)
         }
     }
     return NULL;
+}
+
+/* ---- widget helpers shared by quick settings, settings and the set-the-time screen ---- */
+
+typedef struct {
+    ui_action_cb cb;
+    void *ud;
+} tap_ctx_t;
+
+static void tap_event_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    tap_ctx_t *c = lv_event_get_user_data(e);
+    if (code == LV_EVENT_DELETE) {
+        lv_free(c);
+        return;
+    }
+    if (!ui_input_last_was_tap()) {
+        return;   /* a waking stroke or a swipe that ended here */
+    }
+    c->cb(c->ud);
+}
+
+void ui_on_tap(lv_obj_t *o, ui_action_cb cb, void *ud)
+{
+    tap_ctx_t *c = lv_malloc(sizeof *c);
+    if (!c) {
+        return;
+    }
+    c->cb = cb;
+    c->ud = ud;
+    lv_obj_set_clickable(o, true);
+    lv_obj_add_event_cb(o, tap_event_cb, LV_EVENT_SHORT_CLICKED, c);
+    lv_obj_add_event_cb(o, tap_event_cb, LV_EVENT_DELETE, c);
+}
+
+lv_obj_t *ui_button(lv_obj_t *parent, int32_t w, int32_t h, const lv_font_t *f, const char *text, ui_action_cb cb,
+                    void *ud)
+{
+    lv_obj_t *b = lv_obj_create(parent);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_style_radius(b, 22, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(HY_C_SURFACE2), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(HY_C_GRAB), LV_STATE_PRESSED);
+    lv_obj_set_scrollable(b, false);
+    lv_obj_set_scroll_chain(b, true);
+    ui_on_tap(b, cb, ud);
+    lv_obj_center(ui_label(b, f, HY_C_TEXT, text));
+    return b;
+}
+
+lv_obj_t *ui_view_title(lv_obj_t *view, const char *text)
+{
+    lv_obj_t *t = ui_label(view, hy_type.title, HY_C_TEXT, text);
+    lv_obj_set_pos(t, 24, 2);
+    return t;
+}
+
+typedef struct {
+    void (*live)(int32_t);
+    void (*commit)(int32_t);
+    int32_t start;
+    bool ok;      /* the stroke began on an awake screen */
+} slider_ctx_t;
+
+static void slider_event_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    slider_ctx_t *c = lv_event_get_user_data(e);
+    lv_obj_t *s = lv_event_get_target_obj(e);
+    switch (code) {
+    case LV_EVENT_DELETE:
+        lv_free(c);
+        break;
+    case LV_EVENT_PRESSED:
+        ui_input_consume();         /* the slider owns the stroke: no gesture */
+        c->ok = ui_input_still();   /* false when the stroke only wakes the dimmed screen */
+        c->start = lv_slider_get_value(s);
+        break;
+    case LV_EVENT_PRESSING:
+        ui_input_consume();
+        break;
+    case LV_EVENT_VALUE_CHANGED:
+        if (c->ok) {
+            c->live(lv_slider_get_value(s));
+        } else {
+            lv_slider_set_value(s, c->start, LV_ANIM_OFF);
+        }
+        break;
+    case LV_EVENT_RELEASED:
+        if (c->ok) {
+            c->commit(lv_slider_get_value(s));
+        } else {
+            lv_slider_set_value(s, c->start, LV_ANIM_OFF);
+        }
+        c->ok = false;
+        break;
+    default:
+        break;
+    }
+}
+
+lv_obj_t *ui_slider(lv_obj_t *parent, int32_t w, int32_t min, int32_t max, void (*live)(int32_t),
+                    void (*commit)(int32_t))
+{
+    lv_obj_t *s = lv_slider_create(parent);
+    slider_ctx_t *c = lv_malloc(sizeof *c);
+    if (!c) {
+        return s;
+    }
+    c->live = live;
+    c->commit = commit;
+    c->ok = false;
+    c->start = min;
+    lv_slider_set_range(s, min, max);
+    lv_obj_set_size(s, w, 30);
+    lv_obj_set_style_radius(s, 15, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s, lv_color_hex(HY_C_SURFACE2), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(s, 15, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s, lv_color_hex(HY_C_FILL), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s, 0, LV_PART_KNOB);
+    lv_obj_set_style_border_width(s, 0, LV_PART_KNOB);
+    lv_obj_set_style_shadow_width(s, 0, LV_PART_KNOB);
+    lv_obj_set_style_outline_width(s, 0, 0);
+    lv_obj_set_ext_click_area(s, 12);
+    lv_obj_add_event_cb(s, slider_event_cb, LV_EVENT_ALL, c);
+    return s;
+}
+
+static void roller_consume_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_input_consume();   /* turning a roller is the roller's stroke */
+}
+
+lv_obj_t *ui_roller(lv_obj_t *parent, const char *opts, lv_roller_mode_t mode, int32_t w, const lv_font_t *sel_font,
+                    lv_event_cb_t changed)
+{
+    lv_obj_t *r = lv_roller_create(parent);
+    lv_roller_set_options(r, opts, mode);
+    lv_roller_set_visible_row_count(r, 5);
+    lv_obj_set_width(r, w);
+    lv_obj_set_style_text_font(r, hy_type.body, 0);
+    lv_obj_set_style_text_color(r, lv_color_hex(HY_C_TEXT2), 0);
+    lv_obj_set_style_text_align(r, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_line_space(r, 12, 0);
+    lv_obj_set_style_bg_color(r, lv_color_hex(HY_C_SURFACE), 0);
+    lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(r, 22, 0);
+    lv_obj_set_style_border_width(r, 0, 0);
+    lv_obj_set_style_outline_width(r, 0, 0);
+    lv_obj_set_style_text_font(r, sel_font, LV_PART_SELECTED);
+    lv_obj_set_style_text_color(r, lv_color_hex(HY_C_TEXT), LV_PART_SELECTED);
+    lv_obj_set_style_bg_color(r, lv_color_hex(HY_C_SURFACE2), LV_PART_SELECTED);
+    lv_obj_set_style_bg_opa(r, LV_OPA_COVER, LV_PART_SELECTED);
+    lv_obj_add_event_cb(r, roller_consume_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(r, roller_consume_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(r, roller_consume_cb, LV_EVENT_SCROLL_BEGIN, NULL);
+    if (changed) {
+        lv_obj_add_event_cb(r, changed, LV_EVENT_VALUE_CHANGED, NULL);
+    }
+    return r;
 }
 
 lv_obj_t *ui_content(void)

@@ -153,6 +153,8 @@
 #define HY_S_TIME_TITLE    "Set the time"
 #define HY_S_TIME_BODY     "Reminders are paused and logging is off until the time is set."
 #define HY_S_TIME_BAD_DATE "That date does not exist"
+#define HY_S_TIME_TOO_EARLY "Date is before this firmware was built"
+#define HY_S_TIME_ZONE_LINE "Time zone %s"          /* IANA name or POSIX string */
 
 /* ---- idle clock ---- */
 #define HY_S_IDLE_NEXT     "Next: %s at %s"         /* code, HH:MM */
