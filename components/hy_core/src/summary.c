@@ -381,3 +381,16 @@ void hy_delta_text(int32_t delta_min, char *buf, size_t len)
     if (a < 120) snprintf(buf, len, "%s%d min", sign, (int)a);
     else snprintf(buf, len, "%s%d h %02d min", sign, (int)(a / 60), (int)(a % 60));
 }
+
+bool hy_due_within(const hy_med_t *meds, size_t n, const char *posix_tz, int64_t now, int64_t horizon_s)
+{
+    if (!meds || horizon_s <= 0) return false;
+    for (size_t i = 0; i < n; i++) {
+        const hy_med_t *m = &meds[i];
+        if (!fixed_active(m)) continue;
+        int64_t slot;
+        /* hy_occurrences covers [from, to): (now, now + horizon_s] is [now + 1, now + horizon_s + 1) */
+        if (hy_occurrences(m, now + 1, now + horizon_s + 1, posix_tz, &slot, 1) > 0) return true;
+    }
+    return false;
+}
