@@ -1,5 +1,5 @@
 /* Navigation host: owns the hy_nav_t, keeps one view per hy_view_t inside ui_content() and shows the top of
- * the stack. Views that later tasks provide (detail, quick settings, settings, set the time, idle)
+ * the stack. Views that later tasks provide (quick settings, settings, set the time, idle)
  * are stubs here. */
 
 #include <stdio.h>
@@ -17,7 +17,6 @@ static const char *TAG = "ui_nav";
 static hy_nav_t s_nav;
 static lv_obj_t *s_pager;
 static lv_obj_t *s_views[N_VIEWS];   /* NULL for the pager pages, which share s_pager */
-static lv_obj_t *s_detail_name;
 static hy_view_t s_shown;
 static bool s_started;
 static volatile bool s_storage_down;
@@ -41,7 +40,7 @@ const char *ui_gesture_name(hy_gesture_t g)
 
 /* ---- stub views until their tasks land ---- */
 
-static lv_obj_t *view_box(void)
+lv_obj_t *ui_view_box(void)
 {
     lv_obj_t *v = lv_obj_create(ui_content());
     lv_obj_remove_style_all(v);
@@ -55,22 +54,20 @@ static lv_obj_t *view_box(void)
     return v;
 }
 
-static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *text)
+void ui_register_view(hy_view_t v, lv_obj_t *obj)
 {
-    lv_obj_t *l = lv_label_create(parent);
-    lv_obj_set_style_text_font(l, f, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
-    lv_label_set_text(l, text);
-    return l;
+    if ((unsigned)v < N_VIEWS) {
+        s_views[v] = obj;
+    }
 }
 
 static lv_obj_t *stub_titled(const char *title, const char *body)
 {
-    lv_obj_t *v = view_box();
-    lv_obj_t *t = label(v, hy_type.title, HY_C_TEXT, title);
+    lv_obj_t *v = ui_view_box();
+    lv_obj_t *t = ui_label(v, hy_type.title, HY_C_TEXT, title);
     lv_obj_set_pos(t, 24, 2);
     if (body) {
-        lv_obj_t *b = label(v, hy_type.status, HY_C_TEXT2, body);
+        lv_obj_t *b = ui_label(v, hy_type.status, HY_C_TEXT2, body);
         lv_obj_set_width(b, HY_SCREEN - 48);
         lv_label_set_long_mode(b, LV_LABEL_LONG_MODE_WRAP);
         lv_obj_set_pos(b, 24, 48);
@@ -85,16 +82,9 @@ static void fx_due_next(void) { due_next(); }
 
 /* ---- showing ---- */
 
-static const char *med_name(uint32_t id)
+static bool in_detail_group(hy_view_t v)
 {
-    const hy_med_t *ms;
-    size_t n = hy_meds(&ms);
-    for (size_t i = 0; i < n; i++) {
-        if (ms[i].id == id) {
-            return ms[i].name;
-        }
-    }
-    return "";
+    return v == HY_V_DETAIL || v == HY_V_NOTE || v == HY_V_EARLIER;
 }
 
 static void refresh_view(hy_view_t v)
@@ -110,7 +100,13 @@ static void refresh_view(hy_view_t v)
         history_show();
         break;
     case HY_V_DETAIL:
-        lv_label_set_text(s_detail_name, med_name(s_nav.med_id));
+        detail_show(s_nav.med_id);
+        break;
+    case HY_V_NOTE:
+        note_show(s_nav.med_id);
+        break;
+    case HY_V_EARLIER:
+        earlier_show(s_nav.med_id);
         break;
     default:
         break;
@@ -136,6 +132,9 @@ void ui_show_view(hy_view_t v)
     topbar_set_grab(v == HY_V_HOME && !s_nav.due);
     if (s_shown == HY_V_HISTORY && v != HY_V_HISTORY) {
         history_hide();
+    }
+    if (in_detail_group(s_shown) && !in_detail_group(v)) {
+        detail_hide();
     }
     s_shown = v;   /* before the refresh: the page refreshes only while it is the shown view */
     refresh_view(v);
@@ -211,6 +210,26 @@ void ui_nav_push(hy_view_t v)
     ui_nav_log();
 }
 
+void ui_nav_pop(void)
+{
+    if (s_nav.depth > 1) {
+        s_nav.depth--;
+    }
+    show_top();
+    ui_nav_log();
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+void ui_nav_reset(void)
+{
+    s_nav.depth = 1;
+    if (s_nav.stack[0] == HY_V_OVERVIEW || s_nav.stack[0] == HY_V_HISTORY) {
+        s_nav.stack[0] = HY_V_HOME;
+    }
+    show_top();
+}
+#endif
+
 void ui_open_detail(uint32_t med_id)
 {
     hy_nav_open_detail(&s_nav, med_id);
@@ -257,10 +276,10 @@ void nav_host_init(void)
     lv_obj_set_hidden(s_views[HY_V_STORAGE_DOWN], true);
     s_views[HY_V_CLOCK_INVALID] = stub_titled(HY_S_TIME_TITLE, HY_S_TIME_BODY);
     s_views[HY_V_QS] = stub_titled(HY_S_QS_TITLE, NULL);
-    s_views[HY_V_DETAIL] = view_box();
-    s_detail_name = label(s_views[HY_V_DETAIL], hy_type.title, HY_C_TEXT, "");
-    lv_obj_align(s_detail_name, LV_ALIGN_TOP_MID, 0, 2);
-    lv_obj_t *other = view_box();   /* note, earlier, settings and its sub-views: empty until their tasks */
+    detail_create();
+    note_create();
+    earlier_create();
+    lv_obj_t *other = ui_view_box();   /* settings and its sub-views: empty until their tasks */
     for (int v = HY_V_NOTE; v < N_VIEWS; v++) {
         if (!s_views[v] && !is_pager((hy_view_t)v)) {
             s_views[v] = other;

@@ -48,7 +48,7 @@ static bool s_pending;
 
 /* Duration as "2 h 14 m"; strings.h joins each number and unit with a no-break space so a wrapped toast never
  * separates "4" from "h". Under a minute gives "<1 m". */
-static void fmt_dur(int64_t min, char *buf, size_t len)
+void ui_fmt_dur(int64_t min, char *buf, size_t len)
 {
     if (min < 1) {
         snprintf(buf, len, HY_S_DUR_LT1M);
@@ -141,7 +141,7 @@ static void view_of(const hy_med_t *m, const hy_snapshot_t *sn, view_t *v)
             snprintf(v->text, sizeof v->text, HY_S_TILE_JUST_NOW);
         } else {
             char d[24];
-            fmt_dur(min, d, sizeof d);
+            ui_fmt_dur(min, d, sizeof d);
             snprintf(v->text, sizeof v->text, HY_S_TILE_AGO, d);
         }
         break;
@@ -479,6 +479,31 @@ const char *ui_err_text(hy_err_t err)
     }
 }
 
+/* R29: a repeated as-needed dose inside its minimum interval shows the too-soon toast and waits for a second
+ * request for the same medicine within the undo window. true = warned, the caller must not log now. */
+bool home_too_soon_hold(const hy_med_t *m, bool valid, int64_t now)
+{
+    bool second = s_pending && s_pending_id == m->id && lv_tick_elaps(s_pending_tick) <= HY_TOO_SOON_WINDOW_MS;
+    if (valid && m->type == HY_SCHED_AS_NEEDED && !second) {
+        size_t n = load_logs(m, as_needed_from(m, now), now);
+        int32_t since = -1;
+        if (hy_min_interval_check(m, now, s_logs, n, &since) == HY_W_TOO_SOON) {
+            char a[24], b[24], msg[96];
+            ui_fmt_dur(since, a, sizeof a);
+            ui_fmt_dur(m->min_interval_min, b, sizeof b);
+            snprintf(msg, sizeof msg, HY_S_TOO_SOON, a, b);
+            s_pending = true;
+            s_pending_id = m->id;
+            s_pending_tick = lv_tick_get();
+            ESP_LOGI(TAG, "too soon: %s", msg);
+            toast_show_info(msg);
+            return true;
+        }
+    }
+    s_pending = false;
+    return false;
+}
+
 void home_tap_med(uint32_t med_id)
 {
     if (toast_logged_visible()) {
@@ -496,25 +521,9 @@ void home_tap_med(uint32_t med_id)
     int64_t now = valid ? ck->now(NULL) : 0;
     char tz[HY_TZ_LEN];
     hy_clock_tz_copy(tz, sizeof tz); /* the port pointer may be replaced by a zone change */
-    bool second = s_pending && s_pending_id == med_id && lv_tick_elaps(s_pending_tick) <= HY_TOO_SOON_WINDOW_MS;
-
-    if (valid && m->type == HY_SCHED_AS_NEEDED && !second) {
-        size_t n = load_logs(m, as_needed_from(m, now), now);
-        int32_t since = -1;
-        if (hy_min_interval_check(m, now, s_logs, n, &since) == HY_W_TOO_SOON) {
-            char a[24], b[24], msg[96];
-            fmt_dur(since, a, sizeof a);
-            fmt_dur(m->min_interval_min, b, sizeof b);
-            snprintf(msg, sizeof msg, HY_S_TOO_SOON, a, b);
-            s_pending = true;
-            s_pending_id = med_id;
-            s_pending_tick = lv_tick_get();
-            ESP_LOGI(TAG, "too soon: %s", msg);
-            toast_show_info(msg);
-            return;
-        }
+    if (home_too_soon_hold(m, valid, now)) {
+        return;
     }
-    s_pending = false;
 
     char code[3];
     snprintf(code, sizeof code, "%s", m->code);   /* m is invalid after an action */
