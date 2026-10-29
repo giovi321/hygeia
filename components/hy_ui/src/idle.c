@@ -170,6 +170,7 @@ static void wake(const char *why)
     lv_display_trigger_activity(NULL);
     bri_to(s_bri, hy_settings()->brightness);
     ESP_LOGI(TAG, "idle: wake%s", why);
+    ui_battery_toast_flush();
 }
 
 void idle_wake(void)

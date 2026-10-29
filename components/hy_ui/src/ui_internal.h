@@ -256,6 +256,10 @@ void due_drag_debug(bool drop);          /* debug: simulated knob grab (false) a
 void toast_create(lv_obj_t *parent);
 void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id);
 void toast_show_skipped(const char *code, const char *hhmm, uint32_t log_id); /* "V skipped 08:31", Undo, same rules */
+/* Low-battery toast: held in one pending slot (a newer percent replaces it) while the Undo toast is open or the
+ * screen is not fully on, shown when the Undo toast ends or on the next wake. The flush is the wake hook. */
+void ui_battery_toast(int pct);
+void ui_battery_toast_flush(void);
 void toast_show_info(const char *text);  /* warning style, no Undo */
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */

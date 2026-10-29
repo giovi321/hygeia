@@ -27,7 +27,7 @@ static char s_batt_txt[16], s_est_txt[16];
 static bool s_batt_red, s_batt_bolt, s_batt_est, s_batt_known, s_batt_shown;
 
 static const lv_point_precise_t slash_pts[] = {{3, 1}, {27, 23}};
-static const lv_point_precise_t bolt_pts[] = {{8, 0}, {1, 10}, {9, 16}};
+static const lv_point_precise_t bolt_pts[] = {{7, 1}, {2, 9}, {8, 15}};
 
 static lv_obj_t *plain(lv_obj_t *parent)
 {
@@ -116,6 +116,9 @@ void ui_battery_text(char *pct, size_t pct_len, bool *red, bool *bolt, char *est
     if (!st.pmu_ok) {
         st.batt.pct = -1;
         st.batt.raw.chg = HY_CHG_NONE;
+    }
+    if (st.batt.pct < 0) {
+        st.batt.raw.chg = HY_CHG_NONE;   /* no battery: no bolt */
     }
     hy_batt_text(&st.batt, pct, pct_len, HY_S_BATTERY_NONE, red, bolt);
     *has_est = hy_batt_estimate(&st.batt, est, est_len);
