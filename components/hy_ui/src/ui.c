@@ -29,6 +29,7 @@ static void async_refresh(void *arg)
     }
     overview_refresh_if_changed();
     history_refresh_if_changed();
+    detail_refresh_if_changed();
     due_refresh();
     topbar_refresh();   /* a zone change moves the clock */
 }
@@ -41,6 +42,7 @@ static void event_cb(const hy_event_t *ev, void *ctx)
         return;
     }
     history_invalidate();
+    detail_invalidate();
     if (ev->type == HY_EV_MEDS_CHANGED) {
         s_rebuild_queued = true;
     }
@@ -59,6 +61,7 @@ static void tick_cb(lv_timer_t *t)
     home_refresh_if_changed();
     overview_refresh_if_changed();
     history_refresh_if_changed();
+    detail_refresh_if_changed();
     due_refresh();
 }
 
@@ -98,6 +101,18 @@ uint32_t ui_fnv(uint32_t h, const void *p, size_t n)
         h = (h ^ b[i]) * 16777619u;
     }
     return h;
+}
+
+const hy_med_t *ui_find_med(uint32_t id)
+{
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    for (size_t i = 0; i < n; i++) {
+        if (ms[i].id == id) {
+            return &ms[i];
+        }
+    }
+    return NULL;
 }
 
 lv_obj_t *ui_content(void)

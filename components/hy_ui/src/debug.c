@@ -23,10 +23,10 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER };
 typedef struct {
     int kind;
-    char arg[24];
+    char arg[96];
 } job_t;
 
 /* ---- jobs (run in the LVGL task) ---- */
@@ -71,9 +71,9 @@ static void job_logs(void)
         if (buf[i].slot) {
             hy_format_local(buf[i].slot, buf[i].tz, s, sizeof s);
         }
-        ESP_LOGI(TAG, "log id=%u med=%s status=%s source=%s local=%s slot=%s delta=%d",
+        ESP_LOGI(TAG, "log id=%u med=%s status=%s source=%s local=%s slot=%s delta=%d note=\"%s\"",
                  (unsigned)buf[i].id, code, st[buf[i].status % 3], src[buf[i].source % 4], t, s,
-                 (int)buf[i].delta_min);
+                 (int)buf[i].delta_min, buf[i].note);
     }
     heap_caps_free(buf);
 }
@@ -508,6 +508,75 @@ static void job_history(const char *arg)
     }
 }
 
+/* "detail <code>", "note <code> [text]", "earlier <code> [hh:mm]": the views a long press and their buttons open.
+ * The nav stack goes back to the root first so repeated commands do not pile up. With a text or a time the
+ * Log button's function runs too; without, the view stays open for a shot. */
+static bool open_detail_of(const char *code)
+{
+    uint32_t id;
+    if (!home_med_id_by_code(code, &id)) {
+        ESP_LOGW(TAG, "no active medicine with code \"%s\"", code);
+        return false;
+    }
+    ui_nav_reset();
+    ui_open_detail(id);
+    return true;
+}
+
+static void job_detail(const char *arg)
+{
+    char code[4] = "", opt[8] = "";
+    sscanf(arg, "%3s %7s", code, opt);
+    if (!code[0]) {
+        ESP_LOGE(TAG, "usage: detail <code> [scroll]");
+        return;
+    }
+    if (open_detail_of(code) && strcmp(opt, "scroll") == 0) {
+        detail_debug_scroll();
+    }
+}
+
+static void job_note(const char *arg)
+{
+    char code[4] = "";
+    sscanf(arg, "%3s", code);
+    if (!code[0]) {
+        ESP_LOGE(TAG, "usage: note <code> [text]");
+        return;
+    }
+    const char *text = strchr(arg, ' ');
+    while (text && *text == ' ') {
+        text++;
+    }
+    if (!open_detail_of(code)) {
+        return;
+    }
+    ui_nav_push(HY_V_NOTE);
+    if (text && *text) {
+        note_debug_text(text);
+        note_submit();
+    }
+}
+
+static void job_earlier(const char *arg)
+{
+    char code[4] = "";
+    int h = -1, m = -1;
+    int n = sscanf(arg, "%3s %d:%d", code, &h, &m);
+    if (n < 1 || (n > 1 && n < 3)) {
+        ESP_LOGE(TAG, "usage: earlier <code> [hh:mm]");
+        return;
+    }
+    if (!open_detail_of(code)) {
+        return;
+    }
+    ui_nav_push(HY_V_EARLIER);
+    if (n == 3) {
+        earlier_debug_set(h, m);
+        earlier_submit();
+    }
+}
+
 static void run_job(void *arg)
 {
     job_t *j = arg;
@@ -568,6 +637,15 @@ static void run_job(void *arg)
     case J_HISTORY:
         job_history(j->arg);
         break;
+    case J_DETAIL:
+        job_detail(j->arg);
+        break;
+    case J_NOTE:
+        job_note(j->arg);
+        break;
+    case J_EARLIER:
+        job_earlier(j->arg);
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -610,5 +688,8 @@ void hy_ui_debug_idle(const char *arg) { post(J_IDLE, arg); }
 void hy_ui_debug_tapstroke(const char *code) { post(J_TAPSTROKE, code); }
 void hy_ui_debug_due(const char *arg) { post(J_DUE, arg); }
 void hy_ui_debug_history(const char *arg) { post(J_HISTORY, arg); }
+void hy_ui_debug_detail(const char *arg) { post(J_DETAIL, arg); }
+void hy_ui_debug_note(const char *arg) { post(J_NOTE, arg); }
+void hy_ui_debug_earlier(const char *arg) { post(J_EARLIER, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

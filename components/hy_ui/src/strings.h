@@ -108,7 +108,9 @@
 #define HY_S_DET_NOTE      "Log with note"
 #define HY_S_DET_EARLIER   "Log earlier" HY_S_ELL
 #define HY_S_DET_30_DAYS   "Last 30 days"
+#define HY_S_DET_SEP       ", "                     /* between schedule times */
 #define HY_S_NOTE_LOG      "Log"
+#define HY_S_NOTE_HINT     "Note (optional)"
 #define HY_S_TODAY_AT      "Today %s"               /* HH:MM */
 #define HY_S_YESTERDAY_AT  "Yesterday %s"           /* HH:MM */
 #define HY_S_LOG_AT        "Log at %s"              /* HH:MM */

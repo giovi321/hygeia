@@ -72,6 +72,7 @@ void      ui_fmt_hhmm(int64_t ts, const char *tz, char *out, size_t len); /* "HH
 lv_obj_t *ui_plain(lv_obj_t *parent);            /* unstyled, non-scrolling, non-clickable box */
 lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *text);
 uint32_t  ui_fnv(uint32_t h, const void *p, size_t n); /* FNV-1a step over n bytes, seed 2166136261u */
+const hy_med_t *ui_find_med(uint32_t id);        /* the live medicine list entry, NULL when unknown */
 
 /* nav_host.c */
 void      nav_host_init(void);                   /* creates the views in ui_content(), shows the root */
@@ -83,6 +84,12 @@ bool      ui_nav_idle(void);                     /* the dimmed screen: the next 
 void      ui_nav_set_idle(bool idle);            /* stub until the idle module (Task 17) */
 void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2, and the idle timer is held */
 void      ui_nav_push(hy_view_t v);
+#if CONFIG_HY_DEBUG_CONSOLE
+void      ui_nav_reset(void);                    /* debug: back to the root whatever overlay is showing */
+#endif
+void      ui_nav_pop(void);                      /* one level up, whatever overlay is showing */
+lv_obj_t *ui_view_box(void);                     /* a hidden 480 x 424 view container in ui_content() */
+void      ui_register_view(hy_view_t v, lv_obj_t *obj); /* the view nav_host shows for v */
 void      ui_open_detail(uint32_t med_id);
 void      ui_set_storage_down(bool down);        /* LVGL task: storage state for the root */
 void      ui_nav_log(void);                      /* "nav: HOME > QS" */
@@ -133,10 +140,34 @@ void history_debug_press(bool down);    /* debug: a finger held on / released fr
 #endif
 void history_timing(uint32_t *view_us, uint32_t *lvgl_us);
 
+/* detail.c, note.c, earlier.c: the medicine detail and the two views above it. *_show runs from nav_host each time
+ * the view becomes the top of the stack, with the medicine of the nav stack. */
+#define HY_NOTE_MAX 63                           /* bytes of a log note, without the NUL */
+void detail_create(void);
+void detail_show(uint32_t med_id);
+void detail_hide(void);                          /* left for a view outside detail, note and earlier */
+void detail_invalidate(void);                    /* a log, medicine or zone changed: recompute on the next refresh */
+void detail_refresh_if_changed(void);            /* generation changed and the detail is shown */
+#if CONFIG_HY_DEBUG_CONSOLE
+void detail_debug_scroll(void);                  /* scrolls the detail to its end */
+#endif
+void note_create(void);
+void note_show(uint32_t med_id);
+void note_submit(void);                          /* the Log button: log taken now with the note, back to detail */
+void earlier_create(void);
+void earlier_show(uint32_t med_id);
+void earlier_submit(void);                       /* the Log at button: log taken at the chosen time, back to detail */
+#if CONFIG_HY_DEBUG_CONSOLE
+void note_debug_text(const char *text);          /* sets the note field as typing would */
+void earlier_debug_set(int hour, int minute);    /* sets the rollers as turning them would */
+#endif
+
 /* storage_down.c */
 lv_obj_t *storage_down_create(lv_obj_t *parent);
 
 /* home.c */
+void ui_fmt_dur(int64_t min, char *buf, size_t len); /* "2 h 14 m" with no-break spaces, "<1 m" under a minute */
+bool home_too_soon_hold(const hy_med_t *m, bool valid, int64_t now); /* R29: true = warned, do not log now */
 const char *ui_err_text(hy_err_t err);   /* plan-1 error toast text for a failed action */
 void home_create(lv_obj_t *page);
 void home_rebuild(void);                 /* meds changed */
