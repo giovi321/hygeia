@@ -20,4 +20,8 @@ esp_err_t pcf85063_read(pcf85063_time_t *out);
 /* Writes registers 0x04..0x0A with the OS flag clear; starts the oscillator and forces 24 h mode */
 esp_err_t pcf85063_write(int64_t epoch);
 
+/* Programs alarm registers 0x0B..0x0F from raw (see hy_rtc_alarm_encode), clears AF, sets AIE.
+ * raw NULL disables the alarm: all AEN bits set, AIE and AF cleared. */
+esp_err_t pcf85063_alarm_set(const uint8_t raw[5]);
+
 #endif

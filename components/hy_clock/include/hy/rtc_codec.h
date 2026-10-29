@@ -16,4 +16,8 @@ bool hy_rtc_decode(const uint8_t raw[7], int64_t *epoch);
 /* Encode an epoch in 2000-01-01..2099-12-31 into raw[7] (weekday 0 = Sunday, OS flag clear). False if out of range. */
 bool hy_rtc_encode(int64_t epoch, uint8_t raw[7]);
 
+/* Alarm registers 0x0B..0x0F for epoch (2000..2099): second, minute, hour, day in BCD with bit 7
+ * (AEN, active low) clear = enabled, weekday 0x80 = disabled. False if out of range. */
+bool hy_rtc_alarm_encode(int64_t epoch, uint8_t raw[5]);
+
 #endif

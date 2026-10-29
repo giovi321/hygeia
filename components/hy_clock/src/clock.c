@@ -5,7 +5,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "hy/rtc_codec.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "hy/tzlock.h"
@@ -23,6 +26,7 @@
 #define NVS_KEY_CHG_OLD "chg_old"
 #define NVS_KEY_CHG_NEW "chg_new"
 #define SRC_LEN 16
+#define RTC_INT_GPIO 13
 
 static const char *TAG = "clock";
 
@@ -47,6 +51,12 @@ static uint32_t s_sync_seq;
 static int64_t s_sync_jump;
 static bool s_have_chg;
 static hy_tzchange_t s_chg;
+
+/* Alarm: s_alarm_utc is the programmed value (0 = none), guarded by s_alarm_mutex; the ISR only sets s_alarm_flag */
+static StaticSemaphore_t s_alarm_mutex_buf;
+static SemaphoreHandle_t s_alarm_mutex;
+static int64_t s_alarm_utc;
+static volatile bool s_alarm_flag;
 
 static StaticSemaphore_t s_tz_mutex_buf;
 static SemaphoreHandle_t s_tz_mutex;
@@ -217,8 +227,38 @@ static void set_system_time(int64_t utc)
     settimeofday(&tv, NULL);
 }
 
+static void IRAM_ATTR rtc_int_isr(void *arg)
+{
+    (void)arg;
+    s_alarm_flag = true;
+}
+
+/* INT is open-drain active low: input, pull-up, falling edge */
+static esp_err_t alarm_gpio_init(void)
+{
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << RTC_INT_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
+    };
+    esp_err_t err = gpio_config(&cfg);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = gpio_install_isr_service(0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) { /* already installed elsewhere */
+        return err;
+    }
+    return gpio_isr_handler_add(RTC_INT_GPIO, rtc_int_isr, NULL);
+}
+
 esp_err_t hy_clock_init(i2c_master_bus_handle_t bus)
 {
+    if (!s_alarm_mutex) {
+        s_alarm_mutex = xSemaphoreCreateMutexStatic(&s_alarm_mutex_buf);
+    }
     if (!s_tz_mutex) {
         s_tz_mutex = xSemaphoreCreateRecursiveMutexStatic(&s_tz_mutex_buf);
         hy_tz_set_lock(tz_mutex_take, tz_mutex_give, s_tz_mutex);
@@ -236,6 +276,10 @@ esp_err_t hy_clock_init(i2c_master_bus_handle_t bus)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RTC read: %s", esp_err_to_name(err));
         return err;
+    }
+    esp_err_t gerr = alarm_gpio_init();
+    if (gerr != ESP_OK) {
+        ESP_LOGE(TAG, "RTC INT gpio %d: %s", RTC_INT_GPIO, esp_err_to_name(gerr));
     }
     bool ok = t.decoded && hy_clock_is_plausible(t.epoch, t.osc_stopped, HY_BUILD_EPOCH);
     if (ok) {
@@ -327,6 +371,48 @@ esp_err_t hy_clock_set_zone(const char *iana, const char *posix_tz)
         ESP_LOGE(TAG, "zone in force but not persisted, NVS: %s", esp_err_to_name(nvs_err));
     }
     return nvs_err;
+}
+
+esp_err_t hy_clock_alarm_set(int64_t utc)
+{
+    uint8_t raw[5];
+    if (utc != 0 && !hy_rtc_alarm_encode(utc, raw)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_alarm_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_alarm_mutex, portMAX_DELAY);
+    esp_err_t err = ESP_OK;
+    if (utc != s_alarm_utc) {
+        err = pcf85063_alarm_set(utc ? raw : NULL);
+        if (err == ESP_OK) {
+            s_alarm_utc = utc;
+            ESP_LOGI(TAG, "rtc alarm %s", utc ? "set" : "disabled");
+        } else {
+            ESP_LOGE(TAG, "RTC alarm write: %s", esp_err_to_name(err));
+        }
+    }
+    xSemaphoreGive(s_alarm_mutex);
+    return err;
+}
+
+bool hy_clock_alarm_take(void)
+{
+    if (!s_alarm_flag || !s_alarm_mutex) {
+        return false;
+    }
+    s_alarm_flag = false;
+    xSemaphoreTake(s_alarm_mutex, portMAX_DELAY);
+    /* One shot: clears AIE and AF so the day-of-month match does not repeat */
+    esp_err_t err = pcf85063_alarm_set(NULL);
+    if (err == ESP_OK) {
+        s_alarm_utc = 0;
+    } else {
+        ESP_LOGE(TAG, "RTC alarm clear: %s", esp_err_to_name(err));
+    }
+    xSemaphoreGive(s_alarm_mutex);
+    return true;
 }
 
 const char *hy_clock_tz(void)

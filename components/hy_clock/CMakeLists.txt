@@ -9,6 +9,7 @@ idf_component_register(
     REQUIRES
         hy_core
         esp_driver_i2c
+        esp_driver_gpio
     PRIV_REQUIRES
         nvs_flash
 )
