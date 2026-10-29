@@ -27,12 +27,17 @@ typedef struct {
     uint8_t color;
     lv_obj_t *tile, *arc, *code_lbl, *status;
     int32_t ring;
+    /* what the status line and outline show now, so a refresh touches only tiles that changed */
+    bool drawn, due;
+    int style;
+    char text[32];
 } tile_t;
 
 static tile_t s_tiles[HY_MAX_MEDS];
 static size_t s_ntiles;
 static lv_obj_t *s_grid;
 static uint32_t s_gen_seen;
+static uint32_t s_view_us, s_lvgl_us;   /* last home_refresh: tile view computation, LVGL updates */
 static hy_log_t *s_logs;   /* LOG_MAX entries, PSRAM: the as-needed too-soon check only */
 
 static uint32_t s_pending_id;
@@ -345,12 +350,32 @@ static const hy_med_t *snap_med(const hy_snapshot_t *sn, uint32_t id)
     return find_med(id);
 }
 
+/* Applies v to the tile, touching LVGL only for what changed since the last refresh */
+static void apply_view(tile_t *t, const view_t *v, bool animate)
+{
+    set_ring(t, v->ring, animate);   /* no-op for an unchanged ring */
+    if (!t->drawn || t->style != v->style || strcmp(t->text, v->text) != 0) {
+        set_status(t, v->text, v->style);
+        t->style = v->style;
+        snprintf(t->text, sizeof t->text, "%s", v->text);
+    }
+    if (!t->drawn || t->due != v->due) {
+        lv_obj_set_style_border_opa(t->tile, v->due ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        t->due = v->due;
+    }
+    t->drawn = true;
+}
+
 void home_refresh(bool animate)
 {
+    if (hy_sched_generation() == 0) {
+        return;   /* no evaluation yet: the tiles stay blank until the first snapshot */
+    }
     int64_t t0 = esp_timer_get_time();
     const hy_snapshot_t *sn = hy_sched_snapshot();
     s_gen_seen = hy_sched_generation();
     bool valid = sn->tracking;
+    int64_t view_us = 0;
 
     for (size_t i = 0; i < s_ntiles; i++) {
         tile_t *t = &s_tiles[i];
@@ -358,23 +383,30 @@ void home_refresh(bool animate)
         if (!m) {
             continue;
         }
-        if (!valid) {
-            set_ring(t, 0, animate);
-            set_status(t, HY_S_TILE_CLOCK_UNSET, 0);
-            lv_obj_set_style_border_opa(t->tile, LV_OPA_TRANSP, 0);
-            continue;
-        }
         view_t v;
-        view_of(m, sn, &v);
-        set_ring(t, v.ring, animate);
-        set_status(t, v.text, v.style);
-        lv_obj_set_style_border_opa(t->tile, v.due ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        if (!valid) {
+            memset(&v, 0, sizeof v);
+            snprintf(v.text, sizeof v.text, "%s", HY_S_TILE_CLOCK_UNSET);
+        } else {
+            int64_t tv0 = esp_timer_get_time();
+            view_of(m, sn, &v);
+            view_us += esp_timer_get_time() - tv0;
+        }
+        apply_view(t, &v, animate);
     }
     int64_t us = esp_timer_get_time() - t0;
+    s_view_us = (uint32_t)view_us;
+    s_lvgl_us = (uint32_t)(us - view_us);
     static bool first = true;
     ESP_LOG_LEVEL(first ? ESP_LOG_INFO : ESP_LOG_DEBUG, TAG, "home_refresh: %u tiles in %u ms",
                   (unsigned)s_ntiles, (unsigned)((us + 500) / 1000));
     first = false;
+}
+
+void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us)
+{
+    *view_us = s_view_us;
+    *lvgl_us = s_lvgl_us;
 }
 
 void home_refresh_if_changed(void)

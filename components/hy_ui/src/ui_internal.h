@@ -101,10 +101,11 @@ lv_obj_t *storage_down_create(lv_obj_t *parent);
 /* home.c */
 void home_create(lv_obj_t *page);
 void home_rebuild(void);                 /* meds changed */
-void home_refresh(bool animate);         /* redraw every tile from the scheduler snapshot */
+void home_refresh(bool animate);         /* tiles from the scheduler snapshot; LVGL only for changed ones */
 void home_tap_med(uint32_t med_id);      /* the tile tap handler */
 bool home_med_id_by_code(const char *code, uint32_t *id);
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
+void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */
 
 /* toast.c */
 void toast_create(lv_obj_t *parent);

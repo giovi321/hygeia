@@ -315,6 +315,11 @@ static void job_perf(void)
              (unsigned)active_count(), (unsigned)hy_sched_snapshot()->in.n_logs,
              (unsigned)((t1 - t0) / 1000), (unsigned)((t1 - t0) % 1000), (unsigned)(q_us / 1000),
              (unsigned)(q_us % 1000), (unsigned)((t2 - t1) / 1000), (unsigned)((t2 - t1) % 1000));
+    uint32_t view_us, lvgl_us;
+    home_refresh_timing(&view_us, &lvgl_us);
+    ESP_LOGI(TAG, "perf: home_refresh split: tile views %u.%03u ms, LVGL updates %u.%03u ms",
+             (unsigned)(view_us / 1000), (unsigned)(view_us % 1000), (unsigned)(lvgl_us / 1000),
+             (unsigned)(lvgl_us % 1000));
     ESP_LOGI(TAG, "perf: heap internal free %u (min %u), PSRAM free %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
