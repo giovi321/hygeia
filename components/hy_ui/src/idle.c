@@ -116,6 +116,24 @@ static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
     return best;
 }
 
+/* code of the first open, not snoozed dose (the order the due card lists them); "" when its medicine is unknown */
+static const char *open_code(const hy_snapshot_t *sn)
+{
+    for (size_t i = 0; i < sn->out.n_open; i++) {
+        const hy_open_t *op = &sn->out.open[i];
+        if (op->snoozed_until != 0) {
+            continue;
+        }
+        for (size_t k = 0; k < sn->in.n_meds; k++) {
+            if (sn->in.meds[k].id == op->med_id) {
+                return sn->in.meds[k].code;
+            }
+        }
+        return "";
+    }
+    return "";
+}
+
 /* "Next: A at 14:00" for the power-off confirmation; false when the clock is invalid or nothing is scheduled */
 bool idle_next_text(char *out, size_t len)
 {
@@ -166,6 +184,11 @@ static void render(void)
     int64_t nx = valid && sn->tracking && hy_sched_generation() ? next_slot(sn, &code) : 0;
     if (!valid) {
         snprintf(b, sizeof b, "%s", HY_S_IDLE_SET_TIME);
+    } else if (sn->tracking && sn->out.n_showing == 1) {
+        /* a dose is open (on battery its card does not hold the screen): name it, not a future slot */
+        snprintf(b, sizeof b, HY_S_IDLE_DUE_ONE, open_code(sn));
+    } else if (sn->tracking && sn->out.n_showing > 1) {
+        snprintf(b, sizeof b, HY_S_IDLE_DUE_MORE, open_code(sn), (unsigned)(sn->out.n_showing - 1));
     } else if (nx) {
         ui_fmt_hhmm(nx, tz, hhmm, sizeof hhmm);
         snprintf(b, sizeof b, HY_S_IDLE_NEXT, code, hhmm);

@@ -18,7 +18,8 @@ typedef struct { uint16_t dim_s; uint16_t off_bat_s; uint32_t off_usb_s; } hy_sc
 typedef struct { hy_scr_t state; uint32_t activity_ms; bool usb; bool hold; } hy_screen_t;
 
 void     hy_screen_init(hy_screen_t *s, bool usb, uint32_t now_ms);           /* ON */
-/* hold: due card or power-off confirmation showing (no dim, no off) */
+/* hold: the power-off confirmation or the critical countdown shows, or a due card shows on USB (no dim, no off;
+ * set by the UI, R1) */
 void     hy_screen_set_hold(hy_screen_t *s, bool hold, uint32_t now_ms);
 hy_scr_t hy_screen_event(hy_screen_t *s, hy_scr_ev_t ev, uint32_t now_ms, const hy_scr_cfg_t *cfg);
 bool     hy_screen_may_sleep(const hy_screen_t *s);                            /* OFF and !usb */

@@ -38,7 +38,6 @@ void      hy_power_set_next_wake_fn(int64_t (*fn)(void));
 void      hy_power_screen_off(bool off);
 void      hy_power_screen_state(uint8_t scr);    /* batlog scr column: 0 on, 1 dim, 2 off */
 void      hy_power_chime_on_battery(void);       /* sleepstat: a chime moment while on battery */
-void      hy_power_resume(void);                 /* any task: leaves the sleep mode so queued LVGL work runs */
 /* Heartbeat: NVS namespace "power", key "alive" (i64), key "clean" (u8). */
 bool      hy_power_alive_load(hy_alive_t *out);
 /* Serialised across tasks; while a power-off is in progress a write with clean = false is skipped. */
@@ -63,7 +62,8 @@ void hy_power_debug_batlog(const char *args);    /* "" prints both files, "clear
 void hy_power_debug_alive(const char *args);
 void hy_power_debug_poweroff(const char *args);  /* heartbeat clean = true, then the AXP2101 power-off */
 void hy_power_debug_pkey(const char *args);      /* short | long */
-void hy_power_debug_fakebatt(const char *args);  /* <pct> [usb] | off */
+void hy_power_debug_fakebatt(const char *args);  /* <pct> [mv] [usb] | off; mv default 3300 + 9 * pct */
+void hy_power_resume(void);                      /* any task: leaves the sleep mode so queued LVGL work runs */
 void hy_power_sleep_stats(void);                 /* sleepstat: entries, time asleep, wakes by cause, PM locks */
 #endif
 

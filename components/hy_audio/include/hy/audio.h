@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-/* bsp_audio_init(NULL), speaker codec, renders the chime into PSRAM, starts the audio task.
+/* Builds the ES8311 speaker device on a TX-only I2S channel, renders the chime into PSRAM, starts the audio task.
  * Nothing else depends on it: when it fails the device keeps working without sound. */
 esp_err_t hy_audio_init(void);
 /* true from boot until hy_audio_init has returned (either result): a chime requested now cannot be played yet,

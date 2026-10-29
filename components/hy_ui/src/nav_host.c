@@ -188,14 +188,6 @@ static void show_top(void)
 
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
 {
-    if (s_nav.poweroff && s_nav.idle) {
-        /* an overlay up on a DIM or OFF screen (the countdown after PWR short): the stroke only wakes, as rule 1
-         * does for every other view (rule 0 would swallow it and leave the screen dark) */
-        s_nav.idle = false;
-        fx_wake();
-        ui_nav_log();
-        return HY_FX_WAKE;
-    }
     hy_nav_fx_t fx = hy_nav_gesture(&s_nav, g);
     switch (fx) {
     case HY_FX_WAKE:

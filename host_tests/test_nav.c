@@ -332,17 +332,17 @@ static void test_double_tap_exact_and_wrap(void)
 
 static void test_poweroff_rule(void)
 {
-    for (int mode = 0; mode < 3; mode++) {          /* plain, due, idle */
+    for (int mode = 0; mode < 2; mode++) {          /* plain, due (idle is rule 0a: test_off_counts_as_idle) */
         for (int g = HY_G_NONE; g <= HY_G_EDGE_RIGHT; g++) {
             hy_nav_t n; hy_nav_init(&n);
             hy_nav_push(&n, HY_V_SETTINGS);
-            n.poweroff = true; n.due = (mode == 1); n.idle = (mode == 2);
+            n.poweroff = true; n.due = (mode == 1);
             TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, (hy_gesture_t)g));
             TEST_ASSERT_EQUAL(2, n.depth);
             TEST_ASSERT_EQUAL(HY_V_HOME, n.stack[0]);
             TEST_ASSERT_EQUAL(HY_V_SETTINGS, hy_nav_view(&n));
             TEST_ASSERT_EQUAL(mode == 1, n.due);
-            TEST_ASSERT_EQUAL(mode == 2, n.idle);
+            TEST_ASSERT_FALSE(n.idle);
             TEST_ASSERT_TRUE(n.poweroff);
         }
     }
@@ -359,6 +359,15 @@ static void test_off_counts_as_idle(void)
         TEST_ASSERT_EQUAL(HY_FX_WAKE, hy_nav_gesture(&n, gs[i]));
         TEST_ASSERT_FALSE(n.idle);
         TEST_ASSERT_TRUE(n.due);
+    }
+    /* an overlay up on a DIM or OFF screen: the stroke only wakes */
+    for (int i = 0; i < 2; i++) {
+        hy_nav_t n; hy_nav_init(&n);
+        n.idle = true; n.poweroff = true;
+        TEST_ASSERT_EQUAL(HY_FX_WAKE, hy_nav_gesture(&n, gs[i]));
+        TEST_ASSERT_FALSE(n.idle);
+        TEST_ASSERT_TRUE(n.poweroff);
+        TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, gs[i]));   /* awake: rule 0 swallows it */
     }
 }
 
