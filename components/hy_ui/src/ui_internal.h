@@ -73,6 +73,7 @@ void      ui_fmt_hhmm(int64_t ts, const char *tz, char *out, size_t len); /* "HH
 lv_obj_t *ui_plain(lv_obj_t *parent);            /* unstyled, non-scrolling, non-clickable box */
 lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *text);
 uint32_t  ui_fnv(uint32_t h, const void *p, size_t n); /* FNV-1a step over n bytes, seed 2166136261u */
+size_t    ui_log_window(uint32_t med_id, int64_t from, int64_t to, hy_log_t *out, size_t cap); /* newest cap entries of [from, to), ascending */
 const hy_med_t *ui_find_med(uint32_t id);        /* the live medicine list entry, NULL when unknown */
 void      ui_refresh_all(void);                  /* scheduler tick, root flags, top bar and the shown pages */
 void      ui_time_changed(void);                 /* after a time or zone set (no hy event): also the day-based caches */
@@ -120,9 +121,11 @@ void      input_init(lv_indev_t *indev);
 bool      ui_input_last_was_tap(void);           /* the stroke that produced the current click classified as TAP */
 bool      ui_input_last_was_double(void);        /* ... and it was the second tap of a double tap (300 ms, 40 px) */
 bool      ui_input_still(void);                  /* the current or last stroke never left the tap slop */
+bool      ui_input_waking(void);                 /* the current or last stroke started on the dimmed screen: it only wakes */
 void      ui_input_consume(void);                /* the current stroke belongs to a widget: no gesture */
 #if CONFIG_HY_DEBUG_CONSOLE
 void      input_debug_stroke(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms); /* press + release */
+void      input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms, bool consume);
 #endif
 
 /* topbar.c */
@@ -173,6 +176,7 @@ void earlier_create(void);
 void earlier_show(uint32_t med_id);
 void earlier_submit(void);                       /* the Log at button: log taken at the chosen time, back to detail */
 #if CONFIG_HY_DEBUG_CONSOLE
+void note_debug_ok(void);                        /* the keyboard's OK key */
 void note_debug_text(const char *text);          /* sets the note field as typing would */
 void earlier_debug_set(int hour, int minute);    /* sets the rollers as turning them would */
 #endif

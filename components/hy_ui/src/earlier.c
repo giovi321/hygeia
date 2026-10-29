@@ -18,6 +18,7 @@ static const char *TAG = "ui_earlier";
 
 static lv_obj_t *s_root, *s_name, *s_line, *s_hour, *s_min, *s_btn_lbl;
 static uint32_t s_med_id;
+static char s_line_txt[40];
 
 /* The instant of hour:minute today, or yesterday when that is after now, in the clock zone */
 static bool resolve(int hour, int minute, int64_t *ts, bool *yesterday)
@@ -55,9 +56,21 @@ static void update(void)
     bool y = false;
     resolve(sel_hour(), sel_minute(), &ts, &y);
     snprintf(t, sizeof t, y ? HY_S_YESTERDAY_AT : HY_S_TODAY_AT, hhmm);
-    lv_label_set_text(s_line, t);
+    if (strcmp(t, s_line_txt) != 0) {   /* the minute timer calls this too: touch LVGL only on a change */
+        snprintf(s_line_txt, sizeof s_line_txt, "%s", t);
+        lv_label_set_text(s_line, t);
+    }
     snprintf(t, sizeof t, HY_S_LOG_AT, hhmm);
     lv_label_set_text(s_btn_lbl, t);
+}
+
+/* "Today" turns into "Yesterday" while the view stays open */
+static void tick_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (ui_current_view() == HY_V_EARLIER) {
+        update();
+    }
 }
 
 static void roller_changed_cb(lv_event_t *e)
@@ -98,6 +111,12 @@ void earlier_submit(void)
         toast_show_info(ui_err_text(HY_E_CLOCK));
         return;
     }
+    if (ts > hy_clock_port()->now(NULL)) {
+        /* a time inside the skipped hour of a spring-forward change resolves past now: never log the future */
+        ESP_LOGW(TAG, "%02d:%02d resolves after now", sel_hour(), sel_minute());
+        toast_show_info(HY_S_EARLIER_BAD);
+        return;
+    }
     char code[3];
     snprintf(code, sizeof code, "%s", m->code);   /* m is invalid after an action */
     char tz[HY_TZ_LEN];
@@ -110,9 +129,14 @@ void earlier_submit(void)
         toast_show_info(ui_err_text(err));
         return;
     }
-    char hhmm[8];
+    char hhmm[8], when[24];
     ui_fmt_hhmm(ts, tz, hhmm, sizeof hhmm);
-    toast_show_logged(code, hhmm, id);
+    if (y) {
+        snprintf(when, sizeof when, HY_S_YESTERDAY_LC, hhmm);
+    } else {
+        snprintf(when, sizeof when, "%s", hhmm);
+    }
+    toast_show_logged(code, when, id);
     ui_log_hwm("log earlier");
     ui_nav_pop();
 }
@@ -198,8 +222,10 @@ void earlier_create(void)
     s_hour = make_roller(hours, 108);
     s_min = make_roller(mins, 252);
     lv_obj_update_layout(s_hour);
-    lv_obj_t *colon = ui_label(s_root, hy_type.time, HY_C_TEXT, ":");
+    lv_obj_t *colon = ui_label(s_root, hy_type.time, HY_C_TEXT, HY_S_COLON);
     lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 92 + lv_obj_get_height(s_hour) / 2 - lv_font_get_line_height(hy_type.time) / 2);
+
+    lv_timer_create(tick_cb, 5000, NULL);
 
     lv_obj_t *btn = lv_obj_create(s_root);
     lv_obj_remove_style_all(btn);
