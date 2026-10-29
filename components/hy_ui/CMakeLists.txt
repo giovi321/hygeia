@@ -47,5 +47,6 @@ idf_component_register(
         esp_rom
         esp_timer
         freertos
+        hy_power
         joltwallet__littlefs
 )

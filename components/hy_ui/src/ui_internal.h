@@ -136,7 +136,13 @@ void      input_debug_release(int16_t x1, int16_t y1); /* release a held stroke 
 
 /* topbar.c */
 void      topbar_create(void);                   /* on lv_layer_top, below every overlay */
-void      topbar_refresh(void);                  /* time, Wi-Fi off icon, battery placeholder */
+void      topbar_refresh(void);                  /* time and the Wi-Fi off icon */
+void      topbar_battery_refresh(void);          /* percent, red, bolt; also the idle line and quick settings; no LVGL work when unchanged */
+/* Battery text for every place that shows it. *known false: pct holds the placeholder. est empty when hidden. */
+void      ui_battery_text(char *pct, size_t pct_len, bool *red, bool *bolt, char *est, size_t est_len, bool *has_est,
+                          bool *known);
+void      idle_status_refresh(void);             /* idle.c: battery percent in the status line */
+void      qs_battery_refresh(void);              /* qs.c: battery line */
 void      topbar_set_visible(bool on);
 void      topbar_set_grab(bool on);              /* pull-down handle, Home only */
 

@@ -98,6 +98,18 @@ static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
     return best;
 }
 
+void idle_status_refresh(void)
+{
+    if (!s_status) {
+        return;
+    }
+    char pct[16], est[16], b[48];
+    bool red, bolt, has_est, known;
+    ui_battery_text(pct, sizeof pct, &red, &bolt, est, sizeof est, &has_est, &known);
+    snprintf(b, sizeof b, HY_S_IDLE_STATUS, pct);
+    lv_label_set_text(s_status, b);
+}
+
 static void render(void)
 {
     const hy_clock_port_t *ck = hy_clock_port();
@@ -207,7 +219,8 @@ void idle_create(void)
     lv_obj_align(s_clock, LV_ALIGN_CENTER, 0, -33);
     s_next = ui_label(s_grp, hy_type.body, HY_C_TEXT2, "");
     lv_obj_align(s_next, LV_ALIGN_CENTER, 0, 65);
-    s_status = ui_label(s_grp, hy_type.status, HY_C_TEXT2, HY_S_IDLE_STATUS);
+    s_status = ui_label(s_grp, hy_type.status, HY_C_TEXT2, "");
+    idle_status_refresh();
     lv_obj_align(s_status, LV_ALIGN_CENTER, 0, 110);
     lv_timer_create(tick_cb, 500, NULL);
 }
