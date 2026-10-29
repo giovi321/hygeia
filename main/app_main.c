@@ -143,6 +143,17 @@ static void cmd_history(const char *args) { hy_ui_debug_history(args); }
 static void cmd_detail(const char *args) { hy_ui_debug_detail(args); }
 static void cmd_note(const char *args) { hy_ui_debug_note(args); }
 static void cmd_earlier(const char *args) { hy_ui_debug_earlier(args); }
+static void cmd_qs(const char *args) { hy_ui_debug_qs(args); }
+static void cmd_settz(const char *args)
+{
+    char iana[64];
+    if (sscanf(args, "%63s", iana) != 1) {
+        ESP_LOGE(TAG, "usage: settz <iana>");
+        return;
+    }
+    hy_ui_debug_settz(iana);
+}
+static void cmd_settings(const char *args) { (void)args; hy_ui_debug_settings(); }
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -281,6 +292,9 @@ void app_main(void)
     console_register("detail", cmd_detail);
     console_register("note", cmd_note);
     console_register("earlier", cmd_earlier);
+    console_register("qs", cmd_qs);
+    console_register("settz", cmd_settz);
+    console_register("settings", cmd_settings);
     console_start();
 #endif
 }

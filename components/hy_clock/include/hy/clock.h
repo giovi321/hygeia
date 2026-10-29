@@ -65,6 +65,9 @@ uint32_t  hy_clock_sync_seq(int64_t *jump_s);
 /* Copy out the last successful sync: source name (empty if none yet) and the UTC time set */
 void hy_clock_last_sync(char *src, size_t src_len, int64_t *at);
 
+/* UTC seconds of the CMake configure that built this firmware: the earliest time hy_clock_set accepts */
+int64_t hy_clock_build_epoch(void);
+
 /* Log a fresh RTC read (raw registers, decoded UTC), system time (UTC and local), TZ, zone name,
  * validity, last sync, sync sequence and the last tz change */
 void hy_clock_report(void);
