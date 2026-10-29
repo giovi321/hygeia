@@ -17,7 +17,33 @@ LV_FONT_DECLARE(lv_font_montserrat_14);
 static lv_obj_t *s_root, *s_name, *s_ta, *s_kb;
 static uint32_t s_med_id;
 static char s_prev[HY_NOTE_MAX * 4 + 1];
-static lv_font_t s_kb_font;   /* Inter 22 with Montserrat as the fallback for the keyboard's symbol keys */
+/* Simplified keyboard: 9 keys per row so every key is about 47 px wide on the 480 px panel (the stock map has 10 to
+ * 12 per row at about 35 px). Letters in three rows, no shift or cursor keys, and a bottom row with the mode key,
+ * space, backspace and OK. The mode texts are the ones the stock keyboard handler switches on. */
+#define KB_MODE_SYMBOLS "1#"
+#define KB_MODE_LETTERS "abc"
+#define KB_KEY(w)       (LV_BUTTONMATRIX_CTRL_POPOVER | (w))
+#define KB_MODE(w)      (LV_KEYBOARD_CTRL_BUTTON_FLAGS | (w))
+#define KB_H            220   /* was HY_CONTENT_H / 2 = 212; the Log button ends at y 194 of the 424 px content */
+#define KB_NINE         KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1)
+
+static const char *const kb_map_letters[] = {
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "\n",
+    "j", "k", "l", "m", "n", "o", "p", "q", "r", "\n",
+    "s", "t", "u", "v", "w", "x", "y", "z", "\n",
+    KB_MODE_SYMBOLS, " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""};
+static const char *const kb_map_symbols[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "\n",
+    "0", ".", ",", "-", ":", ";", "/", "(", ")", "\n",
+    "!", "?", "+", "=", "%", "@", "&", "'", "\n",
+    KB_MODE_LETTERS, " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""};
+static const lv_buttonmatrix_ctrl_t kb_ctrl_text[] = {
+    KB_NINE,
+    KB_NINE,
+    KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1),
+    KB_MODE(2), 5, LV_BUTTONMATRIX_CTRL_CHECKED | 2, KB_MODE(2)};
+
+static lv_font_t s_kb_font;   /* Inter 26 bold with Montserrat as the fallback for the keyboard's symbol keys */
 
 /* Cuts s to at most max bytes on a UTF-8 boundary */
 static void truncate_utf8(char *s, size_t max)
@@ -183,7 +209,7 @@ void note_create(void)
     s_root = ui_view_box();
     ui_register_view(HY_V_NOTE, s_root);
 
-    s_kb_font = *hy_type.body;
+    s_kb_font = *hy_type.title;
     s_kb_font.fallback = &lv_font_montserrat_14;
     s_name = ui_label(s_root, hy_type.title, HY_C_TEXT, "");
     lv_obj_set_pos(s_name, 24, 2);
@@ -228,8 +254,10 @@ void note_create(void)
     lv_obj_center(ui_label(log, hy_type.body_bold, HY_C_TEXT, HY_S_NOTE_LOG));
 
     s_kb = lv_keyboard_create(s_root);
-    lv_obj_set_size(s_kb, HY_SCREEN, HY_CONTENT_H / 2);
+    lv_obj_set_size(s_kb, HY_SCREEN, KB_H);
     lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_keyboard_set_map(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_letters, kb_ctrl_text);
+    lv_keyboard_set_map(s_kb, LV_KEYBOARD_MODE_SPECIAL, kb_map_symbols, kb_ctrl_text);
     lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_keyboard_set_textarea(s_kb, s_ta);
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_BG), 0);
