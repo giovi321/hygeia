@@ -9,6 +9,7 @@ idf_component_register(
         "src/storage_down.c"
         "src/home.c"
         "src/toast.c"
+        "src/due.c"
         "src/debug.c"
         "fonts/hy_inter_14.c"
         "fonts/hy_inter_17.c"

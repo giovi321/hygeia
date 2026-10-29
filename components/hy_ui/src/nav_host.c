@@ -1,5 +1,5 @@
 /* Navigation host: owns the hy_nav_t, keeps one view per hy_view_t inside ui_content() and shows the top of
- * the stack. Views that later tasks provide (due card, detail, quick settings, settings, set the time, idle)
+ * the stack. Views that later tasks provide (detail, quick settings, settings, set the time, idle)
  * are stubs here. */
 
 #include <stdio.h>
@@ -78,10 +78,10 @@ static lv_obj_t *stub_titled(const char *title, const char *body)
     return v;
 }
 
-/* fx handlers: the idle module (Task 17) and the due card (Task 13) replace these */
+/* fx handlers: the idle module (Task 17) replaces the wake stub */
 static void fx_wake(void) { ESP_LOGI(TAG, "fx WAKE (idle module not present)"); }
-static void fx_snooze(void) { ESP_LOGI(TAG, "fx SNOOZE (due card not present)"); }
-static void fx_due_next(void) { ESP_LOGI(TAG, "fx DUE_NEXT (due card not present)"); }
+static void fx_snooze(void) { due_snooze(); }
+static void fx_due_next(void) { due_next(); }
 
 /* ---- showing ---- */
 
@@ -127,7 +127,7 @@ void ui_show_view(hy_view_t v)
         /* animate only a page change within the pager */
         pager_show((int)(v - HY_V_HOME), s_started && is_pager(s_shown) && s_shown != v);
     }
-    topbar_set_grab(v == HY_V_HOME);
+    topbar_set_grab(v == HY_V_HOME && !s_nav.due);
     refresh_view(v);
     s_shown = v;
 }
@@ -182,6 +182,12 @@ void ui_nav_set_idle(bool idle)
 {
     s_nav.idle = idle;
     ESP_LOGI(TAG, "idle flag %s (stub until the idle module)", idle ? "set" : "cleared");
+}
+
+void ui_nav_set_due(bool due)
+{
+    s_nav.due = due;
+    topbar_set_grab(!due && s_shown == HY_V_HOME);   /* pull-down is ignored while the card is up */
 }
 
 void ui_nav_push(hy_view_t v)
@@ -244,6 +250,8 @@ void nav_host_init(void)
             s_views[v] = other;
         }
     }
+
+    due_create();   /* last: above every view, below the toast */
 
     s_shown = HY_V_HOME;
     hy_nav_set_root_flags(&s_nav, !hy_clock_valid(), s_storage_down);

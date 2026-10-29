@@ -75,6 +75,7 @@ void      ui_show_view(hy_view_t v);             /* nav_host: hides others, runs
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g);      /* applies hy_nav_gesture and its effect; WAKE = swallowed */
 bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
 void      ui_nav_set_idle(bool idle);            /* stub until the idle module (Task 17) */
+void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2, and the idle timer is held */
 void      ui_nav_push(hy_view_t v);
 void      ui_open_detail(uint32_t med_id);
 void      ui_set_storage_down(bool down);        /* LVGL task: storage state for the root */
@@ -111,6 +112,7 @@ int       pager_index(void);
 lv_obj_t *storage_down_create(lv_obj_t *parent);
 
 /* home.c */
+const char *ui_err_text(hy_err_t err);   /* plan-1 error toast text for a failed action */
 void home_create(lv_obj_t *page);
 void home_rebuild(void);                 /* meds changed */
 void home_refresh(bool animate);         /* tiles from the scheduler snapshot; LVGL only for changed ones */
@@ -120,9 +122,22 @@ bool home_med_id_by_code(const char *code, uint32_t *id);
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */
 
+/* due.c: the due card, an overlay inside ui_content() above every view */
+void due_create(void);
+void due_refresh(void);                  /* from the snapshot, when its generation changed; flash request too */
+bool due_visible(void);                  /* the idle timer is held while true */
+void due_next(void);                     /* swipe up: next showing entry, wrapping */
+void due_snooze(void);                   /* swipe left: snooze the shown entry by settings snooze_min */
+void due_slide_complete(void);           /* the knob reached 90%: log taken */
+void due_skip(void);                     /* the Skip tap: log skipped */
+#if CONFIG_HY_DEBUG_CONSOLE
+void due_flash_debug(void);              /* debug: runs the speaker-failure flash now */
+#endif
+
 /* toast.c */
 void toast_create(lv_obj_t *parent);
 void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id);
+void toast_show_skipped(const char *code, const char *hhmm, uint32_t log_id); /* "V skipped 08:31", Undo, same rules */
 void toast_show_info(const char *text);  /* warning style, no Undo */
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */
