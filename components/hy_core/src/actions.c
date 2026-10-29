@@ -41,7 +41,7 @@ static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out);
 static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id, int64_t slot)
 {
     hy_event_t ev;
-    ev.type = type; ev.ts = ts; ev.med_id = med_id; ev.log_id = log_id; ev.slot = slot;
+    ev.type = type; ev.ts = ts; ev.med_id = med_id; ev.log_id = log_id; ev.slot = slot; ev.value = 0;
     hy_ev_publish(&ev);
 }
 
