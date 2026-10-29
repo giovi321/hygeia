@@ -33,6 +33,14 @@ void      hy_power_alive_write(int64_t now, bool clean);
  * previous record for the next boot's gap. Off at boot. */
 void      hy_power_alive_enable(bool on);
 
+/* LVGL task. Clean power-off: heartbeat clean = true (valid clock only, no later heartbeat may clear it), RTC alarm
+ * off, display off, AXP2101 cut. Does not return when the cut works. If power is still on after 2 s it re-enables
+ * heartbeats, turns the display back on, logs an error and returns: the caller shows the failure and restores
+ * the brightness. */
+void hy_power_off(void);
+/* fakebatt is active (the readings are injected): a critical countdown must not really power off */
+bool hy_power_fake_active(void);
+
 #if CONFIG_HY_DEBUG_CONSOLE
 void hy_power_debug_pmu(const char *args);
 void hy_power_debug_batt(const char *args);

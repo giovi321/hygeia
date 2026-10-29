@@ -169,6 +169,50 @@ static void rate_save(int32_t r)
     }
 }
 
+/* A power-off begins: the heartbeat gets clean = true and no later write may clear it. Shared by the user power-off
+ * and the debug one. */
+static void stop_begin(void)
+{
+    alive_lock();
+    s_stopping = true;
+    if (hy_clock_valid()) {
+        alive_write_locked((int64_t)time(NULL), true);
+    } else {
+        ESP_LOGW(TAG, "poweroff: clock invalid, heartbeat not written");
+    }
+    alive_unlock();
+}
+
+/* The power is still on: heartbeats resume. */
+static void stop_abort(void)
+{
+    alive_lock();
+    s_stopping = false;
+    alive_unlock();
+}
+
+void hy_power_off(void)
+{
+    ESP_LOGI(TAG, "power: off by user");
+    stop_begin();
+    hy_clock_alarm_set(0);
+    hy_board_set_brightness(0);
+    hy_board_display_power(false);
+    hy_board_pmu_power_off();
+    vTaskDelay(pdMS_TO_TICKS(2000));   /* the cut takes effect within this time */
+    stop_abort();
+    ESP_LOGE(TAG, "power: off failed, still running");
+    hy_board_display_power(true);
+}
+
+bool hy_power_fake_active(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    bool f = s_fake;
+    portEXIT_CRITICAL(&s_mux);
+    return f;
+}
+
 /* ---- UI forwarding ---- */
 
 static hy_power_ui_t ui_get(void)
@@ -492,20 +536,11 @@ void hy_power_debug_alive(const char *args)
 void hy_power_debug_poweroff(const char *args)
 {
     (void)args;
-    alive_lock();
-    s_stopping = true;
-    if (hy_clock_valid()) {
-        alive_write_locked((int64_t)time(NULL), true);
-    } else {
-        ESP_LOGW(TAG, "poweroff: clock invalid, heartbeat not written");
-    }
-    alive_unlock();
+    stop_begin();
     ESP_LOGI(TAG, "power: off (debug)");
     hy_board_pmu_power_off();
     ESP_LOGE(TAG, "poweroff: still running");
-    alive_lock();
-    s_stopping = false;
-    alive_unlock();
+    stop_abort();
 }
 
 void hy_power_debug_pkey(const char *args)

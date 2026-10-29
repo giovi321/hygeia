@@ -100,6 +100,7 @@ hy_nav_fx_t ui_nav_gesture(hy_gesture_t g);      /* applies hy_nav_gesture and i
 hy_view_t ui_current_view(void);                  /* the view shown now */
 bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
 void      ui_nav_set_idle(bool idle);            /* the raw nav flag; idle.c owns it (the debug note wake test sets it alone) */
+void      ui_nav_set_poweroff(bool on);          /* the power-off overlay or the countdown is up: nav rule 0 */
 void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2, and the idle timer is held */
 void      ui_nav_push(hy_view_t v);
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -231,6 +232,9 @@ void idle_enter(void);
 void idle_wake(void);                            /* a touch (fx WAKE): overlay off, brightness back in 200 ms */
 void idle_wake_due(void);                        /* a due entry shows: the same, logged as "wake (due)" */
 bool idle_active(void);
+bool idle_next_text(char *out, size_t len);      /* "Next: A at 14:00"; false when nothing is scheduled or the clock is invalid */
+void idle_set_hold(bool hold);                   /* true: the timer does not enter the idle clock (overlays, until the screen state machine owns it) */
+void screen_pwr_short(void);                     /* PWR short with no overlay: toggles the screen (stub until Task 10) */
 void idle_brightness_stop(void);                 /* whoever sets the brightness itself stops a running idle fade first */
 
 /* splash.c */
@@ -250,6 +254,20 @@ void due_skip(void);                     /* the Skip tap: log skipped */
 #if CONFIG_HY_DEBUG_CONSOLE
 void due_flash_debug(void);
 void due_drag_debug(bool drop);          /* debug: simulated knob grab (false) and release (true) */              /* debug: runs the speaker-failure flash now */
+#endif
+
+/* poweroff.c: the power-off confirmation and the critical-battery countdown, overlays on lv_layer_top */
+void poweroff_create(void);                      /* after idle_create */
+void poweroff_show(void);                        /* the confirmation (PWR long); ignored while the countdown shows */
+void poweroff_cancel(void);                      /* closes the confirmation; no-op when it is not up */
+bool poweroff_visible(void);                     /* the confirmation is up */
+void poweroff_countdown_show(void);              /* critical battery: 60 s countdown, only USB cancels it */
+bool poweroff_countdown_visible(void);
+void poweroff_pwr_short(void);                   /* hy_power_ui_t.pwr_short */
+void poweroff_pwr_long(void);                    /* hy_power_ui_t.pwr_long */
+void poweroff_usb(bool in);                      /* hy_power_ui_t.usb */
+#if CONFIG_HY_DEBUG_CONSOLE
+void poweroff_debug(const char *arg);            /* show | slide | cancel | crit */
 #endif
 
 /* toast.c */

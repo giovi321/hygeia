@@ -138,6 +138,15 @@ static void cmd_perf(const char *args) { (void)args; hy_ui_debug_perf(); }
 static void cmd_gesture(const char *args) { hy_ui_debug_gesture(args); }
 static void cmd_nav(const char *args) { (void)args; hy_ui_debug_nav(); }
 static void cmd_storefail(const char *args) { hy_ui_debug_storefail(args); }
+/* "poweroff": the raw AXP2101 cut with a clean heartbeat; "poweroff show|cancel|slide|crit": the overlays */
+static void cmd_poweroff(const char *args)
+{
+    if (args[0]) {
+        hy_ui_debug_poweroff(args);
+    } else {
+        hy_power_debug_poweroff(args);
+    }
+}
 static void cmd_idle(const char *args) { hy_ui_debug_idle(args); }
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
@@ -312,7 +321,7 @@ void app_main(void)
     console_register("alive", hy_power_debug_alive);
     console_register("pkey", hy_power_debug_pkey);
     console_register("fakebatt", hy_power_debug_fakebatt);
-    console_register("poweroff", hy_power_debug_poweroff);
+    console_register("poweroff", cmd_poweroff);
     console_register("gaps", cmd_gaps);
     console_start();
 #endif
