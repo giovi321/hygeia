@@ -53,6 +53,14 @@ static void tick_cb(lv_timer_t *t)
     home_refresh_if_changed();
 }
 
+/* The first snapshot, as soon as the LVGL task runs; the tiles stay blank until then */
+static void first_tick(void *arg)
+{
+    (void)arg;
+    hy_sched_run_tick();
+    home_refresh_if_changed();
+}
+
 lv_obj_t *ui_content(void)
 {
     return s_content;
@@ -84,7 +92,6 @@ esp_err_t hy_ui_start(void)
     if (!hy_board_lock(2000)) {
         return ESP_ERR_TIMEOUT;
     }
-    hy_sched_run_tick();   /* the first snapshot, so the tiles never start from an empty one */
     s_screen = lv_obj_create(NULL);
     lv_obj_remove_style_all(s_screen);
     lv_obj_set_size(s_screen, HY_SCREEN, HY_SCREEN);
@@ -105,6 +112,7 @@ esp_err_t hy_ui_start(void)
     input_init(hy_board_indev());
     lv_screen_load(s_screen);
     lv_timer_create(tick_cb, 1000, NULL);
+    lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */
     int sub = hy_ev_subscribe(event_cb, NULL);
     hy_board_unlock();
 
