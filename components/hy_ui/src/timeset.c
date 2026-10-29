@@ -75,12 +75,21 @@ static void set_tap(void *ud)
     tm.tm_min = (int)lv_roller_get_selected(in->min);
     tm.tm_isdst = -1;
     hy_tz_lock();
-    int64_t ts = (int64_t)mktime(&tm);   /* normalises 31 Feb into March */
+    int hour = tm.tm_hour, minute = tm.tm_min;
+    time_t t = mktime(&tm);   /* normalises 31 Feb into March; a time in a DST gap lands on another wall time */
+    struct tm back;
+    localtime_r(&t, &back);   /* the wall time the instant really has: mktime may leave tm as given */
     hy_tz_unlock();
-    if (tm.tm_mday != day || tm.tm_mon != mon) {
+    int64_t ts = (int64_t)t;
+    if (back.tm_mday != day || back.tm_mon != mon) {
         toast_show_info(HY_S_TIME_BAD_DATE);
         return;
     }
+    if (back.tm_hour != hour || back.tm_min != minute) {
+        toast_show_info(HY_S_TIME_BAD_TIME);
+        return;
+    }
+    uint32_t seq0 = hy_clock_sync_seq(NULL);
     esp_err_t err = hy_clock_set(ts, NULL, "device");
     ESP_LOGI(TAG, "set %04d-%02d-%02d %02d:%02d: %s", tm.tm_year + 1900, mon + 1, day, tm.tm_hour, tm.tm_min,
              esp_err_to_name(err));
@@ -88,12 +97,13 @@ static void set_tap(void *ud)
         toast_show_info(HY_S_TIME_TOO_EARLY);
         return;
     }
-    if (err != ESP_OK && !hy_clock_valid()) {
+    if (hy_clock_sync_seq(NULL) == seq0) {
         toast_show_info(HY_S_ERR_IO);   /* the RTC write failed: nothing changed */
         return;
     }
+    /* the seq moved: the time is set even when err says the zone NVS write failed */
     ui_time_changed();   /* from the invalid root this also switches to Home */
-    if (!in->invalid) {
+    if (!in->invalid && ui_current_view() == HY_V_SET_TIME) {
         ui_nav_pop();
     }
 }

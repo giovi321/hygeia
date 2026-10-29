@@ -71,6 +71,7 @@ void ui_refresh_all(void)
 /* A time or zone set publishes no hy event: recompute the views that depend on the day and the zone */
 void ui_time_changed(void)
 {
+    hy_sched_run_invalidate();   /* a zone set bumps no sync seq: make the next tick evaluate at once */
     history_invalidate();
     detail_invalidate();
     ui_refresh_all();
@@ -237,6 +238,7 @@ static void slider_event_cb(lv_event_t *e)
             lv_slider_set_value(s, c->start, LV_ANIM_OFF);
         }
         break;
+    case LV_EVENT_PRESS_LOST:
     case LV_EVENT_RELEASED:
         if (c->ok) {
             c->commit(lv_slider_get_value(s));
@@ -280,10 +282,40 @@ lv_obj_t *ui_slider(lv_obj_t *parent, int32_t w, int32_t min, int32_t max, void 
     return s;
 }
 
-static void roller_consume_cb(lv_event_t *e)
+typedef struct {
+    lv_event_cb_t changed;
+    uint32_t start;
+    bool ok;      /* the stroke began on an awake screen; kept until the next press (the snap ends later) */
+} roller_ctx_t;
+
+static void roller_event_cb(lv_event_t *e)
 {
-    (void)e;
-    ui_input_consume();   /* turning a roller is the roller's stroke */
+    lv_event_code_t code = lv_event_get_code(e);
+    roller_ctx_t *c = lv_event_get_user_data(e);
+    lv_obj_t *r = lv_event_get_target_obj(e);
+    switch (code) {
+    case LV_EVENT_DELETE:
+        lv_free(c);
+        break;
+    case LV_EVENT_PRESSED:
+        ui_input_consume();   /* turning a roller is the roller stroke */
+        c->ok = !ui_input_waking();
+        c->start = lv_roller_get_selected(r);
+        break;
+    case LV_EVENT_PRESSING:
+    case LV_EVENT_SCROLL_BEGIN:
+        ui_input_consume();
+        break;
+    case LV_EVENT_VALUE_CHANGED:
+        if (!c->ok) {
+            lv_roller_set_selected(r, c->start, LV_ANIM_OFF);   /* a waking stroke turns nothing */
+        } else if (c->changed) {
+            c->changed(e);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 lv_obj_t *ui_roller(lv_obj_t *parent, const char *opts, lv_roller_mode_t mode, int32_t w, const lv_font_t *sel_font,
@@ -306,11 +338,12 @@ lv_obj_t *ui_roller(lv_obj_t *parent, const char *opts, lv_roller_mode_t mode, i
     lv_obj_set_style_text_color(r, lv_color_hex(HY_C_TEXT), LV_PART_SELECTED);
     lv_obj_set_style_bg_color(r, lv_color_hex(HY_C_SURFACE2), LV_PART_SELECTED);
     lv_obj_set_style_bg_opa(r, LV_OPA_COVER, LV_PART_SELECTED);
-    lv_obj_add_event_cb(r, roller_consume_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(r, roller_consume_cb, LV_EVENT_PRESSING, NULL);
-    lv_obj_add_event_cb(r, roller_consume_cb, LV_EVENT_SCROLL_BEGIN, NULL);
-    if (changed) {
-        lv_obj_add_event_cb(r, changed, LV_EVENT_VALUE_CHANGED, NULL);
+    roller_ctx_t *c = lv_malloc(sizeof *c);
+    if (c) {
+        c->changed = changed;
+        c->start = 0;
+        c->ok = true;
+        lv_obj_add_event_cb(r, roller_event_cb, LV_EVENT_ALL, c);
     }
     return r;
 }
