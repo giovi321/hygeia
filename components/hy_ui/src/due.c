@@ -17,6 +17,7 @@
 #include "hy/clock.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
+#include "slide.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_due";
@@ -29,18 +30,13 @@ static const char *TAG = "ui_due";
 #define DUE_Y         255
 #define TRACK_X       26
 #define TRACK_Y       291
-#define TRACK_W       (HY_SCREEN - 2 * TRACK_X)
-#define TRACK_H       88
-#define KNOB_D        72
-#define KNOB_PAD      ((TRACK_H - KNOB_D) / 2)
-#define TRAVEL        (TRACK_W - 2 * KNOB_PAD - KNOB_D)
-#define COMPLETE_PCT  90
+#define TRACK_W       SLIDE_TRACK_W
+#define TRACK_H       SLIDE_TRACK_H
 #define ROW_CY        404          /* centre line of the bottom row */
 #define SIDE_X        40
 #define SKIP_W        120
 #define SKIP_H        48
 #define FADE_MS       150
-#define BACK_MS       150
 #define FLASH_STEP_MS 200
 #define PD_MAX        6            /* entry dots at the left edge; the last one stands for "this and more" */
 #define PD            8
@@ -68,10 +64,9 @@ static lv_obj_t *s_card, *s_ring, *s_code, *s_name, *s_due, *s_track, *s_knob, *
     *s_snooze_lbl, *s_skip_lbl, *s_skip_hit;
 
 /* knob drag */
-static bool s_drag;
+static slide_t s_slide;
 static entry_t s_cap;          /* the entry the knob was grabbed on: (med, slot, code) */
 static bool s_deferred;        /* a refresh arrived during the drag; applied after the release */
-static int32_t s_x0, s_off0, s_off;
 
 /* flash */
 static lv_timer_t *s_flash_t;
@@ -111,23 +106,14 @@ static void opa_exec(void *o, int32_t v)
     lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0);
 }
 
-static void x_exec(void *o, int32_t v)
-{
-    lv_obj_set_x((lv_obj_t *)o, v);
-}
-
 static void knob_reset(void)
 {
-    lv_anim_delete(s_knob, x_exec);
-    lv_obj_set_x(s_knob, KNOB_PAD);
-    s_off = 0;
-    s_drag = false;
+    slide_reset(&s_slide);
 }
 
 /* ---- speaker failure flash ---- */
 
 static bool drag_begin(void);
-static void drag_end(bool released);
 
 static void flash_apply(bool bright)
 {
@@ -334,7 +320,7 @@ void due_refresh(void)
         s_idx = 0;
     }
 
-    if (s_drag) {
+    if (s_slide.drag) {
         /* P38: the card does not change under the finger; the list is kept, drawing waits for the release */
         s_deferred = true;
         ESP_LOGI(TAG, "due: refresh deferred during the knob drag (%u showing)", (unsigned)n);
@@ -381,11 +367,10 @@ void due_drag_debug(bool drop)
             ESP_LOGW(TAG, "drag: nothing to grab");
             return;
         }
-        s_off = TRAVEL;
-        lv_obj_set_x(s_knob, KNOB_PAD + s_off);
-        ESP_LOGI(TAG, "drag: grabbed %s slot %lld at %d px", s_cap.code, (long long)s_cap.slot, (int)s_off);
-    } else if (s_drag) {
-        drag_end(true);
+        slide_debug_grab(&s_slide);
+        ESP_LOGI(TAG, "drag: grabbed %s slot %lld at %d px", s_cap.code, (long long)s_cap.slot, (int)s_slide.off);
+    } else if (s_slide.drag) {
+        slide_end(&s_slide, true);
     } else {
         ESP_LOGW(TAG, "drop: no drag");
     }
@@ -488,19 +473,6 @@ void due_skip(void)
 
 /* ---- touch ---- */
 
-static void knob_back(void)
-{
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, s_knob);
-    lv_anim_set_exec_cb(&a, x_exec);
-    lv_anim_set_values(&a, lv_obj_get_x(s_knob), KNOB_PAD);
-    lv_anim_set_duration(&a, BACK_MS);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-    lv_anim_start(&a);
-    s_off = 0;
-}
-
 static void deferred_refresh(void *arg)
 {
     (void)arg;
@@ -516,18 +488,14 @@ static bool drag_begin(void)
         return false;
     }
     s_cap = *e;
-    s_drag = true;
     s_deferred = false;
     return true;
 }
 
-static void drag_end(bool released)
+/* The slide ended (the knob is back at the start): a complete one logs the captured slot if it is still open */
+static void drag_end(bool complete)
 {
-    s_drag = false;
-    bool complete = released && s_off * 100 >= TRAVEL * COMPLETE_PCT;
-    ESP_LOGI(TAG, "knob released at %d of %d px: %s", (int)s_off, TRAVEL, complete ? "complete" : "back");
     if (complete) {
-        knob_reset();
         const entry_t *open = NULL;   /* the captured slot, if it is still showing in the latest list */
         for (size_t i = 0; i < s_n; i++) {
             if (s_list[i].med_id == s_cap.med_id && s_list[i].slot == s_cap.slot) {
@@ -540,53 +508,10 @@ static void drag_end(bool released)
         } else {
             ESP_LOGW(TAG, "take %s: slot no longer open, nothing logged", s_cap.code);
         }
-    } else {
-        knob_back();
     }
     if (s_deferred) {
         s_deferred = false;
         lv_async_call(deferred_refresh, NULL);
-    }
-}
-
-/* The knob owns its stroke from the first sample (PRESSED and PRESSING both consume: whichever of them the input
- * layer sees after its own PRESSED handler is the one that sticks). A stroke that only wakes the dimmed screen
- * never moves it. */
-static void knob_cb(lv_event_t *e)
-{
-    lv_event_code_t c = lv_event_get_code(e);
-    lv_point_t p;
-    switch (c) {
-    case LV_EVENT_PRESSED:
-        if (!drag_begin()) {
-            return;
-        }
-        ui_input_consume();
-        lv_anim_delete(s_knob, x_exec);
-        s_off = lv_obj_get_x(s_knob) - KNOB_PAD;
-        lv_indev_get_point(lv_event_get_indev(e), &p);
-        s_x0 = p.x;
-        s_off0 = s_off;
-        break;
-    case LV_EVENT_PRESSING: {
-        if (!s_drag) {
-            return;
-        }
-        ui_input_consume();
-        lv_indev_get_point(lv_event_get_indev(e), &p);
-        int32_t off = s_off0 + (p.x - s_x0);
-        s_off = off < 0 ? 0 : off > TRAVEL ? TRAVEL : off;
-        lv_obj_set_x(s_knob, KNOB_PAD + s_off);
-        break;
-    }
-    case LV_EVENT_RELEASED:
-    case LV_EVENT_PRESS_LOST:
-        if (s_drag) {
-            drag_end(c == LV_EVENT_RELEASED);
-        }
-        break;
-    default:
-        break;
     }
 }
 
@@ -686,14 +611,12 @@ void due_create(void)
     lv_label_set_text(tl, HY_S_DUE_SLIDE);
     lv_obj_center(tl);
 
-    s_knob = plain(s_track, KNOB_D, KNOB_D, KNOB_PAD, KNOB_PAD);
+    s_knob = plain(s_track, SLIDE_KNOB_D, SLIDE_KNOB_D, SLIDE_KNOB_PAD, SLIDE_KNOB_PAD);
     lv_obj_set_style_radius(s_knob, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(s_knob, LV_OPA_COVER, 0);
     lv_obj_set_clickable(s_knob, true);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_PRESSING, NULL);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_add_event_cb(s_knob, knob_cb, LV_EVENT_PRESS_LOST, NULL);
+    s_slide = (slide_t){.knob = s_knob, .tag = TAG, .begin = drag_begin, .end = drag_end};
+    slide_attach(&s_slide);
     s_check = lv_line_create(s_knob);
     lv_line_set_points(s_check, check_pts, 3);
     lv_obj_set_style_line_width(s_check, 5, 0);
