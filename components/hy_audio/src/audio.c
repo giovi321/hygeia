@@ -84,7 +84,14 @@ static void audio_task(void *arg)
     }
 }
 
-esp_err_t hy_audio_init(void)
+static atomic_bool s_pending = true;
+
+bool hy_audio_pending(void)
+{
+    return atomic_load(&s_pending);
+}
+
+static esp_err_t audio_init_impl(void)
 {
     if (s_task) {
         return ESP_OK;
@@ -134,6 +141,13 @@ fail_free:
     s_samples = s_total = 0;
     esp_codec_dev_delete(s_dev);
     s_dev = NULL;
+    return err;
+}
+
+esp_err_t hy_audio_init(void)
+{
+    esp_err_t err = audio_init_impl();
+    atomic_store(&s_pending, false);
     return err;
 }
 

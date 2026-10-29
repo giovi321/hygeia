@@ -170,6 +170,26 @@ static const char *code_of(uint32_t id, size_t nm)
 
 /* One evaluation at `now`. pre_jump: the state just before a clock jump; only the missed entries are
  * written (no due events, no chime, no snapshot), so slots already overdue then are not lost. */
+static bool s_chime_deferred;
+
+static void play_chime(void)
+{
+    const hy_settings_t *st = hy_settings();
+    if (!st->sound) {
+        ESP_LOGI(TAG, "chime silent (sound off)");
+    } else if (st->dnd) {
+        ESP_LOGI(TAG, "chime silent (do not disturb)");
+    } else {
+        if (!hy_audio_ok()) {
+            /* not silenced, but the speaker failed: the UI flashes; the play is still attempted,
+               so a speaker that recovers is heard again */
+            s_flash = true;
+            ESP_LOGW(TAG, "chime silent (audio unavailable)");
+        }
+        hy_audio_chime();
+    }
+}
+
 static void evaluate(int64_t now, bool pre_jump)
 {
     int64_t t0 = esp_timer_get_time();
@@ -240,19 +260,11 @@ static void evaluate(int64_t now, bool pre_jump)
         s_flash = false;   /* nothing left to draw attention to */
     }
     if (out.chime) {
-        const hy_settings_t *st = hy_settings();
-        if (!st->sound) {
-            ESP_LOGI(TAG, "chime silent (sound off)");
-        } else if (st->dnd) {
-            ESP_LOGI(TAG, "chime silent (do not disturb)");
+        if (hy_audio_pending()) {
+            s_chime_deferred = true;   /* audio starts after the splash: play when it is up, no flash meanwhile */
+            ESP_LOGI(TAG, "chime waits for the audio init");
         } else {
-            if (!hy_audio_ok()) {
-                /* not silenced, but the speaker failed: the UI flashes; the play is still attempted,
-                   so a speaker that recovers is heard again */
-                s_flash = true;
-                ESP_LOGW(TAG, "chime silent (audio unavailable)");
-            }
-            hy_audio_chime();
+            play_chime();
         }
     }
 
@@ -283,6 +295,17 @@ void hy_sched_run_tick(void)
 {
     if (!s_inited) {
         return;
+    }
+    if (s_chime_deferred && !hy_audio_pending()) {
+        s_chime_deferred = false;
+        if (s_snap.out.n_showing > 0) {   /* still something showing: the chime that waited for the audio init */
+            bool was = s_flash;
+            play_chime();
+            if (s_flash != was) {
+                s_snap.flash = s_flash;
+                s_gen++;   /* the UI reads the flash request from a new generation */
+            }
+        }
     }
     bool alarm = hy_clock_alarm_take();    /* the only caller: one-shot, re-armed after every evaluation */
     /* The sequence is read before the time: a set landing in between shows as a step without a sync,
