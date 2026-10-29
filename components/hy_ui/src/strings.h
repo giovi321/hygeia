@@ -1,12 +1,9 @@
 /*
  * Every user-visible string of the device UI, English only. No literal user text lives in the .c files.
  *
- * This file shares its name with the C library's <strings.h>, and "src" is on this component's include
- * path, so <string.h> reaches this file first. The include_next below hands that lookup on to the C library
- * header; the guard keeps the definitions single.
+ * Reached only through the quoted include in ui_internal.h: "src" is deliberately not an include directory of
+ * this component, so the C library's <strings.h> is never shadowed by this file.
  */
-#include_next <strings.h>
-
 #ifndef HY_UI_STRINGS_H
 #define HY_UI_STRINGS_H
 

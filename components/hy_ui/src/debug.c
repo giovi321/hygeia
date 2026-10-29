@@ -23,7 +23,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE };
 typedef struct {
     int kind;
     char arg[24];
@@ -477,6 +477,20 @@ static void run_job(void *arg)
     case J_NAV:
         ui_nav_log();
         break;
+    case J_IDLE:
+        ui_nav_set_idle(strcmp(j->arg, "off") != 0);
+        break;
+    case J_TAPSTROKE: {
+        /* a still 80 ms stroke through the input layer, then the tile's SHORT_CLICKED handler */
+        uint32_t id;
+        if (!home_med_id_by_code(j->arg, &id)) {
+            ESP_LOGW(TAG, "tapstroke: no active medicine with code \"%s\"", j->arg);
+            break;
+        }
+        input_debug_stroke(240, 240, 242, 241, 80);
+        home_tile_click(id);
+        break;
+    }
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -515,5 +529,7 @@ void hy_ui_debug_perf(void) { post(J_PERF, NULL); }
 void hy_ui_debug_gesture(const char *name) { post(J_GESTURE, name); }
 void hy_ui_debug_nav(void) { post(J_NAV, NULL); }
 void hy_ui_debug_storefail(const char *arg) { post(J_STOREFAIL, arg); }
+void hy_ui_debug_idle(const char *arg) { post(J_IDLE, arg); }
+void hy_ui_debug_tapstroke(const char *code) { post(J_TAPSTROKE, code); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

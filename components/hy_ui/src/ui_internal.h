@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "lvgl.h"
+#include "sdkconfig.h"
 #include "hy/actions.h"
 #include "hy/nav.h"
 #include "strings.h"
@@ -65,23 +66,34 @@ lv_color_t hy_med_color(uint8_t idx);
 /* ui.c */
 lv_obj_t *ui_content(void);                      /* y 56..480 container hosting every view */
 void      ui_log_hwm(const char *what);          /* logs the LVGL task stack margin once per `what` */
+void      ui_fmt_hhmm(int64_t ts, const char *tz, char *out, size_t len); /* "HH:MM" of ts in tz */
 
 /* nav_host.c */
 void      nav_host_init(void);                   /* creates the views in ui_content(), shows the root */
 void      nav_host_tick(void);                   /* root flags from the clock and the storage state */
 void      ui_show_view(hy_view_t v);             /* nav_host: hides others, runs the view's refresh */
-void      ui_nav_gesture(hy_gesture_t g);        /* applies hy_nav_gesture and its effect */
+hy_nav_fx_t ui_nav_gesture(hy_gesture_t g);      /* applies hy_nav_gesture and its effect; WAKE = swallowed */
+bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
+void      ui_nav_set_idle(bool idle);            /* stub until the idle module (Task 17) */
 void      ui_nav_push(hy_view_t v);
 void      ui_open_detail(uint32_t med_id);
 void      ui_set_storage_down(bool down);        /* LVGL task: storage state for the root */
 void      ui_nav_log(void);                      /* "nav: HOME > QS" */
 const char *ui_gesture_name(hy_gesture_t g);
 
-/* input.c */
+/* input.c
+ * The indev RELEASED callback (classification and navigation) runs before the pressed widget gets its own
+ * RELEASED / SHORT_CLICKED / CLICKED. So a widget that owns a stroke (a slider, the due card knob, a scrolling
+ * list) must call ui_input_consume() on LV_EVENT_PRESSED, LV_EVENT_PRESSING or LV_EVENT_SCROLL_BEGIN; from a
+ * RELEASED or CLICKED handler it is too late and the gesture has already navigated. A stroke that only woke
+ * the dimmed screen is neither a tap nor still, so no widget acts on it. */
 void      input_init(lv_indev_t *indev);
 bool      ui_input_last_was_tap(void);           /* the stroke that produced the current click classified as TAP */
 bool      ui_input_still(void);                  /* the current or last stroke never left the tap slop */
 void      ui_input_consume(void);                /* the current stroke belongs to a widget: no gesture */
+#if CONFIG_HY_DEBUG_CONSOLE
+void      input_debug_stroke(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms); /* press + release */
+#endif
 
 /* topbar.c */
 void      topbar_create(void);                   /* on lv_layer_top, below every overlay */
@@ -102,7 +114,8 @@ lv_obj_t *storage_down_create(lv_obj_t *parent);
 void home_create(lv_obj_t *page);
 void home_rebuild(void);                 /* meds changed */
 void home_refresh(bool animate);         /* tiles from the scheduler snapshot; LVGL only for changed ones */
-void home_tap_med(uint32_t med_id);      /* the tile tap handler */
+void home_tap_med(uint32_t med_id);      /* logs a dose (debug `tap` calls it directly) */
+void home_tile_click(uint32_t med_id);   /* a tile's SHORT_CLICKED: logs only when the stroke was a TAP */
 bool home_med_id_by_code(const char *code, uint32_t *id);
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */

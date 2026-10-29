@@ -24,8 +24,6 @@ idf_component_register(
         "fonts/hy_inter_l120.c"
     INCLUDE_DIRS
         "include"
-    PRIV_INCLUDE_DIRS
-        "src"
     REQUIRES
         hy_core
         hy_store

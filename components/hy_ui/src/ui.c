@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -5,6 +6,7 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/events.h"
+#include "hy/occ.h"
 #include "hy/sched_run.h"
 #include "hy/ui.h"
 #include "ui_internal.h"
@@ -64,6 +66,14 @@ static void first_tick(void *arg)
 lv_obj_t *ui_content(void)
 {
     return s_content;
+}
+
+void ui_fmt_hhmm(int64_t ts, const char *tz, char *out, size_t len)
+{
+    char full[32];
+    hy_format_local(ts, tz, full, sizeof full);   /* "Tue 27 Oct 22:04" */
+    size_t n = strlen(full);
+    snprintf(out, len, "%s", n >= 5 ? full + n - 5 : full);
 }
 
 void ui_log_hwm(const char *what)
