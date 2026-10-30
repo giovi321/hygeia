@@ -749,7 +749,7 @@ static void job_settz(const char *iana)
 static void job_gaps(void)
 {
     enum { GAPS_MAX = 64 };
-    static hy_gap_t g[GAPS_MAX + 1];      /* one more than shown: tells whether more exist */
+    static HY_EXT_BSS hy_gap_t g[GAPS_MAX + 1];      /* one more than shown: tells whether more exist */
     static uint8_t why[GAPS_MAX + 1];
     if (!hy_clock_valid()) {
         ESP_LOGW(TAG, "gaps: clock invalid");

@@ -37,7 +37,7 @@ static uint32_t s_gen_seen;
 static uint32_t s_sig;
 static bool s_drawn;
 static uint32_t s_last_us;
-static hy_today_row_t s_trows[MAX_ROWS];
+static HY_EXT_BSS hy_today_row_t s_trows[MAX_ROWS];
 
 static const lv_point_precise_t s_check_pts[] = {{0, 6}, {4, 11}, {12, 1}};
 

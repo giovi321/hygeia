@@ -24,11 +24,11 @@ static const char *TAG = "sched";
 #define JUMP_RESTART_S 120
 #define UNSYNCED_SKIP_MAX 5     /* ticks skipped for an unannounced clock step before it counts as a jump */
 
-static hy_sched_t s_sched;
-static hy_snapshot_t s_snap;
+static HY_EXT_BSS hy_sched_t s_sched;
+static HY_EXT_BSS hy_snapshot_t s_snap;
 static hy_log_t *s_logs;                /* LOG_CAP entries, PSRAM */
 static hy_med_t *s_meds;                /* HY_MAX_STORED entries, PSRAM: a stable copy for the snapshot */
-static hy_snooze_t s_snoozes[HY_MAX_MEDS];   /* hy_snoozes skips archived medicines */
+static HY_EXT_BSS hy_snooze_t s_snoozes[HY_MAX_MEDS];   /* hy_snoozes skips archived medicines */
 static char s_tz[HY_TZ_LEN];
 static hy_tzchange_t s_change;
 
@@ -352,7 +352,7 @@ static void evaluate(int64_t now, bool pre_jump)
         .tz = s_tz, .last_change = has_change ? &s_change : NULL,
         .now = now,
     };
-    static hy_sched_out_t out;
+    static HY_EXT_BSS hy_sched_out_t out;
     hy_sched_eval(&s_sched, &in, &out);
 
     unsigned written = 0;

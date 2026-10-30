@@ -9,12 +9,6 @@
 #define QUERY_MAX 128
 #define LOOKBACK_S (8 * 86400LL)
 
-/* Placement of the large medicine arrays: the device build defines it (component CMakeLists.txt) to
- * put them in PSRAM; empty on the host. */
-#ifndef HY_EXT_BSS
-#define HY_EXT_BSS
-#endif
-
 typedef struct {
     bool used;
     uint32_t log_id, med_id;
@@ -36,13 +30,13 @@ static void *clk_ctx;
 static HY_EXT_BSS hy_med_t meds[HY_MAX_STORED];
 static HY_EXT_BSS hy_med_t scratch[HY_MAX_STORED];
 static size_t n_meds;
-static undo_rec_t undo[UNDO_SLOTS];
+static HY_EXT_BSS undo_rec_t undo[UNDO_SLOTS];
 static size_t undo_next;
 static bool inited;
-static hy_log_t qbuf[QUERY_MAX];
-static hy_snooze_t snz[HY_MAX_MEDS];      /* archived medicines have no snooze */
+static HY_EXT_BSS hy_log_t qbuf[QUERY_MAX];
+static HY_EXT_BSS hy_snooze_t snz[HY_MAX_MEDS];      /* archived medicines have no snooze */
 static size_t n_snz;
-static hy_snooze_t snz_out[HY_MAX_MEDS];
+static HY_EXT_BSS hy_snooze_t snz_out[HY_MAX_MEDS];
 static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out);
 
 static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id, int64_t slot)

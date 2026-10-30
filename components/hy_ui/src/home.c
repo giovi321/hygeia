@@ -33,7 +33,7 @@ typedef struct {
     char text[32];
 } tile_t;
 
-static tile_t s_tiles[HY_MAX_MEDS];
+static HY_EXT_BSS tile_t s_tiles[HY_MAX_MEDS];
 static size_t s_ntiles;
 static lv_obj_t *s_grid;
 static uint32_t s_gen_seen;

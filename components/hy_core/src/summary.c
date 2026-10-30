@@ -223,7 +223,7 @@ size_t hy_today_rows(const hy_sched_in_t *in, const hy_sched_t *s, hy_today_row_
     uint16_t n_taken = 0, n_total = 0;
     size_t n_out = 0;
     if (in && in->meds) {
-        static slot_ref_t refs[ROW_SCRATCH];
+        static HY_EXT_BSS slot_ref_t refs[ROW_SCRATCH];
         size_t nr = 0;
         const char *tz = tz_of(in);
         int32_t today = hy_local_date(in->now, tz);

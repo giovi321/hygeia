@@ -5,6 +5,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* Placement of large static buffers that no ISR, DMA or cache-disabled code touches: the device build defines
+ * it (hy_core CMakeLists.txt, public to every component that requires hy_core) to put them in PSRAM; empty on
+ * the host. */
+#ifndef HY_EXT_BSS
+#define HY_EXT_BSS
+#endif
+
 typedef enum { HY_OK = 0, HY_E_INVALID, HY_E_CODE, HY_E_CODE_DUP, HY_E_NAME,
                HY_E_TIMES, HY_E_NOT_FOUND, HY_E_CLOCK, HY_E_UNDO_EXPIRED,
                HY_E_IO, HY_E_FULL, HY_W_TOO_SOON, HY_E_INTERVAL, HY_E_DOSE } hy_err_t;

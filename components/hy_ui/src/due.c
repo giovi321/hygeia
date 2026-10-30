@@ -53,7 +53,8 @@ typedef struct {
     char code[3], name[33], dose[17];
 } entry_t;
 
-static entry_t s_list[HY_SCHED_MAX_OPEN], s_new[HY_SCHED_MAX_OPEN];
+static HY_EXT_BSS entry_t s_list[HY_SCHED_MAX_OPEN];
+static HY_EXT_BSS entry_t s_new[HY_SCHED_MAX_OPEN];
 static size_t s_n, s_idx;
 static char s_tz[HY_TZ_LEN];
 static uint32_t s_gen_seen;
