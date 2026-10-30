@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "hy/clock.h"
@@ -192,14 +193,21 @@ void ui_nav_log(void)
 
 /* The form draft lives in medform.c; the nav rules only need to know whether it has unsaved changes. The flag is
  * cleared when the form leaves the stack, whatever took it away (back, a discard, a root change). */
-static void form_sync(void)
+static bool in_stack(hy_view_t v)
 {
     for (uint8_t i = 0; i < s_nav.depth; i++) {
-        if (s_nav.stack[i] == HY_V_MEDFORM) {
-            return;
+        if (s_nav.stack[i] == v) {
+            return true;
         }
     }
-    s_nav.form_dirty = false;
+    return false;
+}
+
+static void form_sync(void)
+{
+    if (!in_stack(HY_V_MEDFORM)) {
+        s_nav.form_dirty = false;
+    }
 }
 
 void ui_nav_set_form_dirty(bool dirty)
@@ -207,10 +215,13 @@ void ui_nav_set_form_dirty(bool dirty)
     s_nav.form_dirty = dirty;
 }
 
+static void drop_unused(void);
+
 static void show_top(void)
 {
     form_sync();
     ui_show_view(hy_nav_view(&s_nav));
+    drop_unused();
 }
 
 hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
@@ -337,13 +348,56 @@ void hy_ui_set_storage_ok(bool ok)
 
 /* Views that are not on screen at boot are created after the splash (one every WARM_MS from nav_host_warm_start)
  * or at their first show, whichever comes first. The splash needs steady frames; each create below is one
- * blocking LVGL step. With CONFIG_HY_DEBUG_CONSOLE every create logs its cost. */
+ * blocking LVGL step. The medicine form and the archive confirmation are the exception: they are created only at
+ * their first show and deleted once they leave the nav stack (drop_unused), because together they hold about
+ * 120 LVGL objects and a second keyboard that would otherwise sit in internal RAM from boot. A form under quick
+ * settings or Settings is still in the stack, so it keeps its widgets and its draft (R13, R14, M1, M2). With
+ * CONFIG_HY_DEBUG_CONSOLE every create logs its cost in time and in internal and PSRAM heap. */
 typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_MEDFORM, LZ_ARCHIVE, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_N } lazy_t;
 
 #define WARM_MS 250
 
 static bool s_lazy_done[LZ_N];
 static lv_timer_t *s_warm_t;
+
+/* Created on first show only, deleted when not in the nav stack */
+static bool on_demand(lazy_t k)
+{
+    return k == LZ_MEDFORM || k == LZ_ARCHIVE;
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+typedef struct {
+    int64_t t0;
+    size_t in0, ps0;
+} heap_mark_t;
+
+static heap_mark_t heap_mark(void)
+{
+    heap_mark_t m = {esp_timer_get_time(), heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     heap_caps_get_free_size(MALLOC_CAP_SPIRAM)};
+    return m;
+}
+
+/* Logs a create or a delete: its time and what it took from (negative: gave back to) each heap. Internal alone
+ * misleads once the general pool is empty, because malloc() then spills the rest into PSRAM. */
+static void heap_log(const char *what, const char *name, heap_mark_t m)
+{
+    int64_t us = esp_timer_get_time() - m.t0;
+    size_t in = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t ps = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "%s %s: %lld us, internal %ld (free %u, min %u), psram %ld", what, name, (long long)us,
+             (long)m.in0 - (long)in, (unsigned)in,
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+             (long)m.ps0 - (long)ps);
+}
+
+static const char *lazy_name(lazy_t k)
+{
+    static const char *const names[LZ_N] = {"detail", "note", "earlier", "medform", "archive", "qs", "settings", "time", "clock-invalid"};
+    return (unsigned)k < LZ_N ? names[k] : "?";
+}
+#endif
 
 static lazy_t lazy_of(hy_view_t v, bool *is_lazy)
 {
@@ -384,7 +438,7 @@ static void create_lazy(lazy_t k)
     }
     s_lazy_done[k] = true;
 #if CONFIG_HY_DEBUG_CONSOLE
-    int64_t t0 = esp_timer_get_time();
+    heap_mark_t m = heap_mark();
 #endif
     switch (k) {
     case LZ_DETAIL:
@@ -421,9 +475,30 @@ static void create_lazy(lazy_t k)
     }
     due_raise();   /* the card stays above every view, as when it was created last */
 #if CONFIG_HY_DEBUG_CONSOLE
-    static const char *const names[LZ_N] = {"detail", "note", "earlier", "medform", "archive", "qs", "settings", "time", "clock-invalid"};
-    ESP_LOGI(TAG, "create %s: %lld us", names[k], (long long)(esp_timer_get_time() - t0));
+    heap_log("create", lazy_name(k), m);
 #endif
+}
+
+/* After every stack change: the on-demand views that left the stack give their widgets back. The delete is deferred
+ * (lv_obj_delete_async), so a tap handler inside the view can finish; the next show creates a fresh copy. */
+static void drop_unused(void)
+{
+    static const struct {
+        lazy_t k;
+        hy_view_t v;
+        void (*destroy)(void);
+    } od[] = {{LZ_MEDFORM, HY_V_MEDFORM, medform_destroy}, {LZ_ARCHIVE, HY_V_MED_ARCHIVE, medarchive_destroy}};
+    for (size_t i = 0; i < sizeof od / sizeof od[0]; i++) {
+        if (!s_lazy_done[od[i].k] || in_stack(od[i].v) || s_shown == od[i].v) {
+            continue;
+        }
+        od[i].destroy();
+        s_views[od[i].v] = NULL;
+        s_lazy_done[od[i].k] = false;
+#if CONFIG_HY_DEBUG_CONSOLE
+        ESP_LOGI(TAG, "delete %s (deferred to the next LVGL cycle)", lazy_name(od[i].k));
+#endif
+    }
 }
 
 static void ensure_view(hy_view_t v)
@@ -438,7 +513,7 @@ static void ensure_view(hy_view_t v)
 static void warm_cb(lv_timer_t *t)
 {
     for (int k = 0; k < LZ_N; k++) {
-        if (!s_lazy_done[k]) {
+        if (!s_lazy_done[k] && !on_demand((lazy_t)k)) {
             create_lazy((lazy_t)k);
             return;
         }
@@ -464,11 +539,11 @@ void nav_host_warm_all(void)
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
-#define TIMED(name, call)                                                                \
-    do {                                                                                 \
-        int64_t t0_ = esp_timer_get_time();                                              \
-        call;                                                                            \
-        ESP_LOGI(TAG, "create %s: %lld us", name, (long long)(esp_timer_get_time() - t0_)); \
+#define TIMED(name, call)             \
+    do {                              \
+        heap_mark_t m_ = heap_mark(); \
+        call;                         \
+        heap_log("create", name, m_); \
     } while (0)
 #else
 #define TIMED(name, call) call

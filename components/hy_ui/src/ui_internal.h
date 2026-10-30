@@ -206,6 +206,7 @@ void earlier_debug_set(int hour, int minute);    /* sets the rollers as turning 
 
 /* medarchive.c: the archive confirmation opened from the detail. */
 void medarchive_create(void);                   /* registers HY_V_MED_ARCHIVE */
+void medarchive_destroy(void);                  /* deletes the widgets (deferred); nav_host recreates on the next show */
 void medarchive_show(uint32_t med_id);          /* nav_host: the view became the top, for the nav med_id */
 void medarchive_refresh_if_shown(void);         /* recomputes the "dose is due" line when the scheduler snapshot changed */
 void medarchive_confirm(void);                  /* the Archive button's action (also the debug "archive <code> yes") */
@@ -213,6 +214,7 @@ void medarchive_confirm(void);                  /* the Archive button's action (
 /* medform.c: the step-by-step form that adds or edits a medicine on the device (hy_core hy/medform.h holds the draft
  * and the rules). The draft is static RAM, so it survives dimming, a due card and the power-off overlay. */
 void medform_create(void);                       /* registers HY_V_MEDFORM */
+void medform_destroy(void);                      /* deletes the widgets (deferred), keeps the draft; nav_host recreates */
 void medform_open_new(void);                     /* hy_mf_new on hy_meds(), push HY_V_MEDFORM */
 void medform_open_edit(uint32_t med_id);         /* hy_mf_edit; on error the info toast, no push */
 void medform_show(void);                         /* nav_host: the view became the top; redraws the current page */

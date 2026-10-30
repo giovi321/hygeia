@@ -1409,3 +1409,22 @@ void medform_create(void)
     lv_obj_set_pos(s_back, PAD_X, BTN_Y);
     lv_obj_set_pos(s_next, NEXT_X, BTN_Y);
 }
+
+/* nav_host, once the form has left the nav stack: the widgets go, the draft (s_f) stays until the next open. The
+ * delete is deferred because the last tap (Save, Cancel, Discard) is still running inside one of these objects. */
+void medform_destroy(void)
+{
+    if (!s_root) {
+        return;
+    }
+    lv_obj_delete_async(s_root);
+    s_root = s_title = s_step = s_err = s_back = s_next = s_back_l = s_next_l = NULL;
+    memset(s_c, 0, sizeof s_c);
+    s_ta = s_kb = s_ring = s_code_lbl = s_pick_prev = s_pick_grid = s_color_prev = NULL;
+    memset(s_dot, 0, sizeof s_dot);
+    memset(s_dot_lbl, 0, sizeof s_dot_lbl);
+    memset(s_opt, 0, sizeof s_opt);
+    s_days = s_list = s_add_btn = s_hour = s_min = s_iroller = NULL;
+    memset(s_rows, 0, sizeof s_rows);
+    memset(s_rv, 0, sizeof s_rv);
+}
