@@ -353,6 +353,15 @@ static void pick_done_cb(void *ud)
     }
 }
 
+/* Index into s_pick_used (A to Z, then 0 to 9) of a key's text, or -1 for the backspace key */
+static int pick_key_index(const char *t)
+{
+    if (!t || !t[0] || t[1]) {
+        return -1;
+    }
+    return t[0] >= 'A' && t[0] <= 'Z' ? t[0] - 'A' : (t[0] >= '0' && t[0] <= '9' ? 26 + t[0] - '0' : -1);
+}
+
 static void pick_key_cb(lv_event_t *e)
 {
     if (!ui_input_last_was_tap() || !form_open() || s_page != PG_PICK) {
@@ -361,12 +370,13 @@ static void pick_key_cb(lv_event_t *e)
     lv_obj_t *g = lv_event_get_target_obj(e);
     uint32_t id = lv_buttonmatrix_get_selected_button(g);
     size_t len = strlen(s_pick);
-    if (id < N_CODE_KEYS) {
+    const char *t = id == LV_BUTTONMATRIX_BUTTON_NONE ? NULL : lv_buttonmatrix_get_button_text(g, id);
+    if (t && pick_key_index(t) >= 0) {
         if (len < 2) {   /* a third character is ignored */
-            s_pick[len] = (char)(id < 26 ? 'A' + id : '0' + (id - 26));
+            s_pick[len] = t[0];
             s_pick[len + 1] = 0;
         }
-    } else if (id == N_CODE_KEYS && len > 0) {
+    } else if (t && strcmp(t, LV_SYMBOL_BACKSPACE) == 0 && len > 0) {
         s_pick[len - 1] = 0;
     }
     pick_refresh();
@@ -376,7 +386,11 @@ static void pick_draw_cb(lv_event_t *e)
 {
     lv_draw_task_t *t = lv_event_get_draw_task(e);
     lv_draw_dsc_base_t *base = (lv_draw_dsc_base_t *)lv_draw_task_get_draw_dsc(t);
-    if (!base || base->part != LV_PART_ITEMS || base->id1 >= N_CODE_KEYS || !s_pick_used[base->id1]) {
+    if (!base || base->part != LV_PART_ITEMS) {
+        return;
+    }
+    int k = pick_key_index(lv_buttonmatrix_get_button_text(lv_event_get_target_obj(e), base->id1));
+    if (k < 0 || !s_pick_used[k]) {
         return;
     }
     if (lv_draw_task_get_type(t) == LV_DRAW_TASK_TYPE_LABEL) {
@@ -1184,19 +1198,22 @@ static void create_code(void)
     lv_obj_set_pos(chg, PAD_X, 232);
 }
 
+/* QWERTY like the main keyboard (kbd.c): a key is 2 width units, a row is 20 units, so rows of 10 keys give about
+ * 40 px wide keys. Digits row on top, no shift (codes are upper-case), backspace right of M. Keys are 76 px tall. */
 static const char *const k_pick_map[] = {
-    "A", "B", "C", "D", "E", "F", "G", "\n",
-    "H", "I", "J", "K", "L", "M", "N", "\n",
-    "O", "P", "Q", "R", "S", "T", "U", "\n",
-    "V", "W", "X", "Y", "Z", "0", "1", "\n",
-    "2", "3", "4", "5", "6", "7", "8", "\n",
-    "9", LV_SYMBOL_BACKSPACE, " ", " ", " ", " ", ""};
-#define PK_KEY (LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT | 1)
-#define PK_GAP (LV_BUTTONMATRIX_CTRL_HIDDEN | LV_BUTTONMATRIX_CTRL_DISABLED | 1)
-#define PK_R   PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+    " ", "A", "S", "D", "F", "G", "H", "J", "K", "L", " ", "\n",
+    " ", "Z", "X", "C", "V", "B", "N", "M", LV_SYMBOL_BACKSPACE, ""};
+#define PK_KEY (LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT | 2)
+#define PK_GAP(w) (LV_BUTTONMATRIX_CTRL_HIDDEN | LV_BUTTONMATRIX_CTRL_DISABLED | (w))
+#define PK_TEN PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY
 static const lv_buttonmatrix_ctrl_t k_pick_ctrl[] = {
-    PK_R, PK_R, PK_R, PK_R, PK_R,
-    PK_KEY, (LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT | 2), PK_GAP, PK_GAP, PK_GAP, PK_GAP};
+    PK_TEN,
+    PK_TEN,
+    PK_GAP(1), PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_GAP(1),
+    PK_GAP(3), PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY, PK_KEY,
+    (LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT | 3)};
 
 static void create_pick(void)
 {
@@ -1211,7 +1228,7 @@ static void create_pick(void)
     s_pick_grid = lv_buttonmatrix_create(c);
     lv_buttonmatrix_set_map(s_pick_grid, k_pick_map);
     lv_buttonmatrix_set_ctrl_map(s_pick_grid, k_pick_ctrl);
-    lv_obj_set_size(s_pick_grid, FULL_W, 356);   /* 7 x 60 and 6 x 56 keys with 4 px gaps */
+    lv_obj_set_size(s_pick_grid, FULL_W, 316);   /* 4 rows of 76 px keys with 4 px gaps: ends at y 382 */
     lv_obj_set_pos(s_pick_grid, PAD_X, 66);
     lv_obj_set_style_bg_opa(s_pick_grid, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_pick_grid, 0, 0);
