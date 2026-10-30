@@ -105,7 +105,7 @@ void hy_batt_text(const hy_batt_t *b, char *buf, size_t len, const char *unknown
     if (red)
         *red = b->pct >= 0 && b->pct < HY_BATT_LOW_PCT;
     if (bolt)
-        *bolt = b->raw.chg == HY_CHG_CHARGING;
+        *bolt = b->raw.present && b->raw.vbus; /* USB power, so a full battery (chg DONE) keeps it */
 }
 
 bool hy_batt_estimate(const hy_batt_t *b, char *buf, size_t len)
