@@ -62,7 +62,7 @@ static int64_t s_slpin_us;
  * s_bri_want and applied by refr_ready_cb. */
 static volatile bool s_bri_hold;
 static volatile bool s_wake_flushed;
-static volatile uint8_t s_bri_want = 80;
+static volatile uint8_t s_bri_want = 50;
 
 #define USER_KEY_GPIO 18   /* spec Hardware table: user key GPIO 18 */
 #define RTC_INT_GPIO  13   /* PCF85063 INT, owned by hy_clock (falling-edge interrupt) */
@@ -603,13 +603,13 @@ static esp_err_t board_init_once(void)
         ESP_LOGE(TAG, "lvgl adapter start: %s", esp_err_to_name(err));
         return err;
     }
-    bsp_display_brightness_set(80);
+    bsp_display_brightness_set(50);
 
     ESP_LOGI(TAG, "heap free: internal %u, dma %u, psram %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    ESP_LOGI(TAG, "board ready, brightness 80%%");
+    ESP_LOGI(TAG, "board ready, brightness 50%%");
     return ESP_OK;
 }
 

@@ -5,7 +5,7 @@ void hy_settings_defaults(hy_settings_t *s)
     s->sound = true;
     s->dnd = false;
     s->volume = 60;
-    s->brightness = 80;
+    s->brightness = 50;
     s->snooze_min = 15;
     s->dim_s = 30;
     s->off_bat_s = 120;
