@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
@@ -153,6 +154,50 @@ static void cmd_mf(const char *args) { hy_ui_debug_mf(args); }
 static void cmd_archive(const char *args) { hy_ui_debug_archive(args); }
 static void cmd_limits(const char *args) { (void)args; hy_ui_debug_limits(); }
 static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
+static void cmd_imu(const char *args)
+{
+    bool raw = strncmp(args, "raw", 3) == 0;
+    int secs = 0;
+    bool rec = sscanf(args, "rec %d", &secs) == 1;
+    int16_t mg[3];
+    if (strncmp(args, "regs", 4) == 0) {
+        uint8_t r[3];
+        esp_err_t rerr = hy_board_imu_regs(r);
+        if (rerr != ESP_OK) {
+            ESP_LOGE(TAG, "imu regs: %s", esp_err_to_name(rerr));
+            return;
+        }
+        printf("imu regs: CTRL1=0x%02x CTRL2=0x%02x CTRL7=0x%02x\n", r[0], r[1], r[2]);
+        return;
+    }
+    if (strncmp(args, "rec", 3) == 0 && (!rec || secs < 1 || secs > 120)) {
+        ESP_LOGE(TAG, "usage: imu rec <1..120 s>");
+        return;
+    }
+    esp_err_t err = hy_board_imu_power(true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "imu: power on: %s", esp_err_to_name(err));
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(30));
+    TickType_t last = xTaskGetTickCount();
+    int n = rec ? secs * 50 : 10;
+    for (int i = 0; i < n; i++) {
+        err = raw ? hy_board_imu_read_raw(mg) : hy_board_imu_read(mg);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "imu: read: %s", esp_err_to_name(err));
+            break;
+        }
+        if (rec) {
+            printf("imu,%lu,%d,%d,%d\n", (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS), mg[0], mg[1], mg[2]);
+        } else {
+            float a = sqrtf((float)mg[0] * mg[0] + (float)mg[1] * mg[1] + (float)mg[2] * mg[2]);
+            printf("imu: x=%d y=%d z=%d mg |a|=%d\n", mg[0], mg[1], mg[2], (int)(a + 0.5f));
+        }
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(20));
+    }
+    hy_board_imu_power(false);
+}
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
 static void cmd_history(const char *args) { hy_ui_debug_history(args); }
@@ -334,6 +379,7 @@ void app_main(void)
     console_register("archive", cmd_archive);
     console_register("limits", cmd_limits);
     console_register("sleepstat", cmd_sleepstat);
+    console_register("imu", cmd_imu);
     console_start();
 #endif
 }

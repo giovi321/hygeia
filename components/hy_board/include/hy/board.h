@@ -63,6 +63,25 @@ void      hy_board_set_user_key_isr_hook(void (*fn)(void));
 void      hy_board_sleep_wake_arm(bool on);
 bool      hy_board_rtc_int_low(void);                /* RTC INT (GPIO 13) reads low: an alarm is pending */
 
+/* QMI8658 at 0x6b on the shared bus, 400 kHz. WHO_AM_I (0x00) must read 0x05, else ESP_ERR_NOT_FOUND and every
+   later call returns ESP_ERR_INVALID_STATE. Soft reset (0x60 <- 0xB0, wait 20 ms), CTRL1 (0x02) address
+   auto-increment, little-endian data; CTRL2 (0x03) accel +-8 g, ODR about 125 Hz; gyro never enabled; left powered
+   down (CTRL7 (0x08) = 0, CTRL1 bit 0 sensor disable = 1). Called from hy_board_init after the power gate. */
+esp_err_t hy_board_imu_init(void);
+/* on: CTRL1 bit 0 = 0, CTRL7 = 0x01 (accel only), first valid sample about 20 ms later. off: CTRL7 = 0, CTRL1 bit 0 = 1 */
+esp_err_t hy_board_imu_power(bool on);
+/* One burst read of AX_L..AZ_H (0x35..0x3A), converted to milli-g (raw * 1000 / 4096) and mapped to the screen
+   frame of hy_accel_t through HY_IMU_MAP (a per-axis source index and sign in qmi8658.c). */
+esp_err_t hy_board_imu_read(int16_t mg[3]);
+/* The same read before the axis map (sensor frame), for the bring-up commands */
+esp_err_t hy_board_imu_read_raw(int16_t mg[3]);
+/* One sample at boot (power up, wait 30 ms, read, power down) for the boot orientation; ESP_FAIL when absent. */
+esp_err_t hy_board_imu_sample_once(int16_t mg[3]);
+#if CONFIG_HY_DEBUG_CONSOLE
+/* CTRL1, CTRL2, CTRL7 as read from the chip */
+esp_err_t hy_board_imu_regs(uint8_t out[3]);
+#endif
+
 #if CONFIG_HY_DEBUG_CONSOLE
 /* Log the raw PMU registers: STATUS1/2, 0xA4, battery mV, INTEN1..3, 0x22, 0x27, 0x30, 0x50, 0x61..0x64 */
 void hy_board_pmu_dump(void);
