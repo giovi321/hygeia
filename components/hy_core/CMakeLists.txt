@@ -19,6 +19,7 @@ idf_component_register(
         "src/battery.c"
         "src/gap.c"
         "src/screen.c"
+        "src/orient.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
