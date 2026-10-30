@@ -7,6 +7,8 @@
 #include "sdkconfig.h"
 #include "hy/actions.h"
 #include "hy/nav.h"
+#include "hy/power_run.h"
+#include "hy/screen.h"
 #include "esp_err.h"
 #include "strings.h"
 
@@ -100,7 +102,8 @@ hy_nav_fx_t ui_nav_gesture(hy_gesture_t g);      /* applies hy_nav_gesture and i
 hy_view_t ui_current_view(void);                  /* the view shown now */
 bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
 void      ui_nav_set_idle(bool idle);            /* the raw nav flag; idle.c owns it (the debug note wake test sets it alone) */
-void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2, and the idle timer is held */
+void      ui_nav_set_poweroff(bool on);          /* the power-off overlay or the countdown is up: nav rule 0 */
+void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2 (it holds the screen on USB only, R1) */
 void      ui_nav_push(hy_view_t v);
 #if CONFIG_HY_DEBUG_CONSOLE
 void      ui_nav_reset(void);                    /* debug: back to the root whatever overlay is showing */
@@ -136,7 +139,13 @@ void      input_debug_release(int16_t x1, int16_t y1); /* release a held stroke 
 
 /* topbar.c */
 void      topbar_create(void);                   /* on lv_layer_top, below every overlay */
-void      topbar_refresh(void);                  /* time, Wi-Fi off icon, battery placeholder */
+void      topbar_refresh(void);                  /* time and the Wi-Fi off icon */
+void      topbar_battery_refresh(void);          /* percent, red, bolt; also the idle line and quick settings; no LVGL work when unchanged */
+/* Battery text for every place that shows it. *known false: pct holds the placeholder. est empty when hidden. */
+void      ui_battery_text(char *pct, size_t pct_len, bool *red, bool *bolt, char *est, size_t est_len, bool *has_est,
+                          bool *known);
+void      idle_status_refresh(void);             /* idle.c: battery percent in the status line */
+void      qs_battery_refresh(void);              /* qs.c: battery line */
 void      topbar_set_visible(bool on);
 void      topbar_set_grab(bool on);              /* pull-down handle, Home only */
 
@@ -219,13 +228,29 @@ bool home_med_id_by_code(const char *code, uint32_t *id);
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */
 
-/* idle.c: the idle clock overlay on lv_layer_top; the nav idle flag is set and cleared with it */
-void idle_create(void);                          /* after topbar_create */
-void idle_enter(void);
-void idle_wake(void);                            /* a touch (fx WAKE): overlay off, brightness back in 200 ms */
-void idle_wake_due(void);                        /* a due entry shows: the same, logged as "wake (due)" */
-bool idle_active(void);
+/* idle.c: the screen state machine (ON, DIM, OFF) and its views: DIM is the idle clock overlay on lv_layer_top, OFF
+ * blanks the panel and asks the power task for the sleep mode. The nav idle flag follows "state is not ON". */
+void idle_create(void);                          /* after topbar_create, before poweroff_create */
+void screen_init(void);                          /* after poweroff_create: ON, USB from the PMU state */
+void screen_event(hy_scr_ev_t ev);
+hy_scr_t screen_state(void);
+void screen_wake(const char *why);               /* an overlay that wakes the screen on USB and on battery */
+void screen_tick(void);                          /* ui.c, every second: USB sync, TICK, the sleep request while OFF */
+void screen_sched_evaluated(void);               /* after each scheduler evaluation: CHIME on a chime moment */
+void screen_usb(bool in);                        /* hy_power_ui_t.usb: USB_IN / USB_OUT */
+void screen_touch_wake(void);                    /* a touch woke the CPU from the sleep mode */
+bool screen_wake_guard_take(void);               /* input.c at a press: a stroke right after screen_touch_wake only wakes */
+void screen_activity(void);                      /* input.c: a stroke on an awake screen restarts the timers */
+void screen_pwr_short(void);                     /* PWR short with no confirmation: toggles ON <-> OFF */
+void idle_enter(void);                           /* debug `idle`: DIM now (as if dim_s passed) */
+void idle_wake(void);                            /* a waking stroke (fx WAKE): TOUCH, logged "wake (touch)" */
+void idle_wake_due(void);                        /* a due entry shows: DUE, logged "wake (due)" */
+bool idle_active(void);                          /* the state is DIM or OFF */
+bool idle_next_text(char *out, size_t len);      /* "Next: A at 14:00"; false when nothing is scheduled or the clock is invalid */
 void idle_brightness_stop(void);                 /* whoever sets the brightness itself stops a running idle fade first */
+#if CONFIG_HY_DEBUG_CONSOLE
+void screen_debug(const char *arg);              /* `scr [off|nousb|usb]` */
+#endif
 
 /* splash.c */
 int  splash_remaining_ms(void);                  /* ms until the splash has run 1000 ms, 0 when over or not running */
@@ -236,7 +261,7 @@ void splash_finish(lv_obj_t *next);              /* LVGL lock held: loads next w
 /* due.c: the due card, an overlay inside ui_content() above every view */
 void due_create(void);
 void due_refresh(void);                  /* from the snapshot, when its generation changed; flash request too */
-bool due_visible(void);                  /* the idle timer is held while true */
+bool due_visible(void);                  /* on USB the screen is held on while true (R1) */
 void due_next(void);                     /* swipe up: next showing entry, wrapping */
 void due_snooze(void);                   /* swipe left: snooze the shown entry by settings snooze_min */
 void due_slide_complete(void);           /* the knob reached 90%: log taken */
@@ -246,10 +271,28 @@ void due_flash_debug(void);
 void due_drag_debug(bool drop);          /* debug: simulated knob grab (false) and release (true) */              /* debug: runs the speaker-failure flash now */
 #endif
 
+/* poweroff.c: the power-off confirmation and the critical-battery countdown, overlays on lv_layer_top */
+void poweroff_create(void);                      /* after idle_create */
+void poweroff_show(void);                        /* the confirmation (PWR long); ignored while the countdown shows */
+void poweroff_cancel(void);                      /* closes the confirmation; no-op when it is not up */
+bool poweroff_visible(void);                     /* the confirmation is up */
+void poweroff_countdown_show(void);              /* critical battery: 60 s countdown, only USB cancels it */
+bool poweroff_countdown_visible(void);
+void poweroff_pwr_short(void);                   /* hy_power_ui_t.pwr_short */
+void poweroff_pwr_long(void);                    /* hy_power_ui_t.pwr_long */
+void poweroff_usb(bool in);                      /* hy_power_ui_t.usb */
+#if CONFIG_HY_DEBUG_CONSOLE
+void poweroff_debug(const char *arg);            /* show | slide | cancel | crit */
+#endif
+
 /* toast.c */
 void toast_create(lv_obj_t *parent);
 void toast_show_logged(const char *code, const char *hhmm, uint32_t log_id);
 void toast_show_skipped(const char *code, const char *hhmm, uint32_t log_id); /* "V skipped 08:31", Undo, same rules */
+/* Low-battery toast: held in one pending slot (a newer percent replaces it) while the Undo toast is open or the
+ * screen is not fully on, shown when the Undo toast ends or on the next wake. The flush is the wake hook. */
+void ui_battery_toast(int pct);
+void ui_battery_toast_flush(void);
 void toast_show_info(const char *text);  /* warning style, no Undo */
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */

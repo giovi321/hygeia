@@ -12,6 +12,7 @@
 #include "hy/board.h"
 #include "hy/actions.h"
 #include "hy/clock.h"
+#include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
 #include "hy/ui.h"
@@ -128,6 +129,7 @@ static void cmd_tap(const char *args)
 
 static void cmd_undo(const char *args) { (void)args; hy_ui_debug_undo(); }
 static void cmd_logs(const char *args) { (void)args; hy_ui_debug_logs(); }
+static void cmd_gaps(const char *args) { (void)args; hy_ui_debug_gaps(); }
 static void cmd_seed4(const char *args) { hy_ui_debug_seed4(args); }
 static void cmd_shot(const char *args) { (void)args; hy_ui_debug_shot(); }
 static void cmd_chime(const char *args) { (void)args; hy_audio_chime(); }
@@ -136,7 +138,18 @@ static void cmd_perf(const char *args) { (void)args; hy_ui_debug_perf(); }
 static void cmd_gesture(const char *args) { hy_ui_debug_gesture(args); }
 static void cmd_nav(const char *args) { (void)args; hy_ui_debug_nav(); }
 static void cmd_storefail(const char *args) { hy_ui_debug_storefail(args); }
+/* "poweroff": the raw AXP2101 cut with a clean heartbeat; "poweroff show|cancel|slide|crit": the overlays */
+static void cmd_poweroff(const char *args)
+{
+    if (args[0]) {
+        hy_ui_debug_poweroff(args);
+    } else {
+        hy_power_debug_poweroff(args);
+    }
+}
 static void cmd_idle(const char *args) { hy_ui_debug_idle(args); }
+static void cmd_scr(const char *args) { hy_ui_debug_scr(args); }
+static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
 static void cmd_history(const char *args) { hy_ui_debug_history(args); }
@@ -258,6 +271,11 @@ void app_main(void)
     }
 
     init_storage();
+    if (err == ESP_OK) {
+        esp_err_t perr = hy_power_init();
+        ESP_LOGI(TAG, "hy_power_init: %s", esp_err_to_name(perr));
+    }
+    hy_power_set_next_wake_fn(hy_sched_run_next_wake);   /* the power task wakes for it while asleep (R11) */
     esp_err_t rerr = hy_sched_run_init();
     if (rerr == ESP_OK) {
         ESP_LOGI(TAG, "hy_sched_run_init: %s", esp_err_to_name(rerr));
@@ -267,6 +285,7 @@ void app_main(void)
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
         ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));
+        hy_power_start();
         esp_err_t aerr = hy_audio_init();   /* about 0.4 s: not on the splash's path */
         ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
     }
@@ -299,6 +318,16 @@ void app_main(void)
     console_register("qs", cmd_qs);
     console_register("settz", cmd_settz);
     console_register("settings", cmd_settings);
+    console_register("pmu", hy_power_debug_pmu);
+    console_register("batt", hy_power_debug_batt);
+    console_register("batlog", hy_power_debug_batlog);
+    console_register("alive", hy_power_debug_alive);
+    console_register("pkey", hy_power_debug_pkey);
+    console_register("fakebatt", hy_power_debug_fakebatt);
+    console_register("poweroff", cmd_poweroff);
+    console_register("gaps", cmd_gaps);
+    console_register("scr", cmd_scr);
+    console_register("sleepstat", cmd_sleepstat);
     console_start();
 #endif
 }

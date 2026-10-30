@@ -45,7 +45,7 @@ void hy_nav_init(hy_nav_t *n)
     n->stack[0] = HY_V_HOME;
     n->depth = 1;
     n->med_id = 0;
-    n->due = n->idle = n->clock_invalid = n->storage_down = false;
+    n->due = n->idle = n->clock_invalid = n->storage_down = n->poweroff = false;
 }
 
 hy_view_t hy_nav_view(const hy_nav_t *n) { return n->stack[n->depth - 1]; }
@@ -83,6 +83,14 @@ static void pop(hy_nav_t *n)
 
 hy_nav_fx_t hy_nav_gesture(hy_nav_t *n, hy_gesture_t g)
 {
+    /* 0a. an overlay up on a DIM or OFF screen (the countdown after PWR short): the stroke only wakes, as rule 1
+       does for every other view */
+    if (n->poweroff && n->idle) {
+        n->idle = false;
+        return HY_FX_WAKE;
+    }
+    /* 0. power-off confirmation: the slider and buttons are widgets, gestures do nothing */
+    if (n->poweroff) return HY_FX_NONE;
     /* 1. idle: every gesture only wakes */
     if (n->idle) {
         n->idle = false;

@@ -60,4 +60,7 @@ void hy_delta_text(int32_t delta_min, char *buf, size_t len);
 int32_t hy_local_date(int64_t ts, const char *posix_tz);
 int32_t hy_date_add(int32_t date, int days);
 
+/* Any fixed, non-archived medicine active at that time with an occurrence in (now, now + horizon_s]. */
+bool hy_due_within(const hy_med_t *meds, size_t n, const char *posix_tz, int64_t now, int64_t horizon_s);
+
 #endif

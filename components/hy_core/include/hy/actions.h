@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "hy/gap.h"
 #include "hy/occ.h"
 #include "hy/types.h"
 
@@ -15,6 +16,12 @@ typedef struct {
     hy_err_t (*delete_log)(void *ctx, uint32_t id, int64_t ts);  /* ts locates the month */
     size_t   (*query_log)(void *ctx, int64_t from, int64_t to, uint32_t med_id /*0 = all*/,
                           hy_log_t *out, size_t max);
+    /* Untracked gaps. Both may be NULL (host fixtures that do not need them; the device port has both):
+     * hy_act_record_gap then returns HY_E_INVALID. query_gaps returns the gaps overlapping
+     * [from, to) ascending by start, with their reasons (a hy_gap_reason_t value). */
+    hy_err_t (*append_gap)(void *ctx, const hy_gap_t *g, uint8_t reason);
+    size_t   (*query_gaps)(void *ctx, int64_t from, int64_t to, hy_gap_t *out, uint8_t *reasons,
+                           size_t max);
 } hy_store_port_t;
 
 typedef struct {
@@ -137,5 +144,12 @@ size_t hy_snoozes(const hy_snooze_t **out);
 hy_err_t hy_act_log_edit(const hy_log_t *e);
 /* delete_log, then publishes HY_EV_LOG_EDITED (there is no delete event). No clock needed. */
 hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts);
+
+/*
+ * Appends the gap through the store port and publishes HY_EV_UNTRACKED {ts = end, slot = start,
+ * value = reason}. HY_E_INVALID when end <= start, the reason is out of range, or the port lacks
+ * append_gap; HY_E_IO when the append fails (nothing published). Does not need a valid clock.
+ */
+hy_err_t hy_act_record_gap(const hy_gap_t *g, hy_gap_reason_t reason);
 
 #endif

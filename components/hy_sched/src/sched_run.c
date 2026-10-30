@@ -5,11 +5,14 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "hy/actions.h"
 #include "hy/audio.h"
 #include "hy/clock.h"
 #include "hy/events.h"
+#include "hy/gap.h"
 #include "hy/occ.h"
+#include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
 
@@ -36,6 +39,35 @@ static uint32_t s_query_us;
 /* Monotonic cross-check: UTC and esp_timer at the last tick that passed it (ref_us 0 = none) */
 static int64_t s_ref_utc, s_ref_us;
 static unsigned s_unsynced_skips;
+
+/* Untracked gaps. s_alive: the record the next tracking start measures its gap from (alive 0 = none): the
+ * NVS heartbeat as it was at init (read before the power task starts rewriting it), then the last valid time
+ * whenever the clock turns invalid while tracking. Consumed by the start that uses it, so a gap is recorded
+ * once. s_last_gap_end: end of the last gap recorded this boot; the gap file stays in end order. */
+static hy_alive_t s_alive;
+static bool s_clock_was_invalid;
+static int64_t s_last_gap_end;
+/* A forward jump's gap, held HY_GAP_CONFIRM_S before it is recorded (ruling R12). RAM only. */
+static hy_gap_pending_t s_pend;
+
+/* out.next_wake of the last evaluation, 0 when none or not tracking; read by the power task */
+static portMUX_TYPE s_wake_mux = portMUX_INITIALIZER_UNLOCKED;
+static int64_t s_next_wake;
+
+static void set_next_wake(int64_t t)
+{
+    portENTER_CRITICAL(&s_wake_mux);
+    s_next_wake = t;
+    portEXIT_CRITICAL(&s_wake_mux);
+}
+
+int64_t hy_sched_run_next_wake(void)
+{
+    portENTER_CRITICAL(&s_wake_mux);
+    int64_t t = s_next_wake;
+    portEXIT_CRITICAL(&s_wake_mux);
+    return t;
+}
 
 /* Actions run in the LVGL task, so this runs there too. Our own DUE events need no new evaluation. */
 static void event_cb(const hy_event_t *ev, void *ctx)
@@ -78,6 +110,10 @@ esp_err_t hy_sched_run_init(void)
         return ESP_FAIL;
     }
     hy_sched_init(&s_sched);
+    /* before hy_power_start: the power task's first pass overwrites the heartbeat */
+    if (!hy_power_alive_load(&s_alive)) {
+        s_alive.alive = 0;   /* no heartbeat yet (first boot): nothing to measure a gap from */
+    }
     memset(&s_snap, 0, sizeof s_snap);
     s_snap.sched = &s_sched;
     s_seq = hy_clock_sync_seq(NULL);
@@ -147,15 +183,109 @@ static size_t load_logs(int64_t now, const hy_med_t *ms, size_t nm, bool *trunca
     return n;
 }
 
+static void fmt_local(int64_t t, char *buf, size_t len)
+{
+    char d[32];
+    hy_format_local(t, s_tz, d, sizeof d);      /* "Tue 27 Oct 22:04"; zone offsets are whole minutes */
+    snprintf(buf, len, "%s:%02d", d, (int)(((t % 60) + 60) % 60));
+}
+
 static void fmt_wake(int64_t t, char *buf, size_t len)
 {
     if (!t) {
         snprintf(buf, len, "none");
         return;
     }
-    char d[32];
-    hy_format_local(t, s_tz, d, sizeof d);      /* "Tue 27 Oct 22:04"; zone offsets are whole minutes */
-    snprintf(buf, len, "%s:%02d", d, (int)(((t % 60) + 60) % 60));
+    fmt_local(t, buf, len);
+}
+
+/* Stores the gap and publishes its one HY_EV_UNTRACKED (hy_act_record_gap). */
+static void record_gap(const hy_gap_t *g, hy_gap_reason_t why)
+{
+    char a[40], b[40];
+    hy_clock_tz_copy(s_tz, sizeof s_tz);
+    fmt_local(g->start, a, sizeof a);
+    fmt_local(g->end, b, sizeof b);
+    if (g->end <= s_last_gap_end) {
+        /* only after a backward clock step this boot: the span lies in time already passed */
+        ESP_LOGW(TAG, "gap: %s .. %s (%s) ends before the last recorded gap, not recorded", a, b,
+                 hy_gap_reason_str(why));
+        return;
+    }
+    hy_err_t err = hy_act_record_gap(g, why);
+    if (err != HY_OK) {
+        ESP_LOGE(TAG, "gap: %s .. %s (%s) not recorded: %s", a, b, hy_gap_reason_str(why), hy_err_str(err));
+        return;
+    }
+    s_last_gap_end = g->end;
+    ESP_LOGI(TAG, "gap: %s .. %s (%s)", a, b, hy_gap_reason_str(why));
+}
+
+/* Tracking starts at now (boot, or the clock valid again): the gap since the stored heartbeat, then a fresh
+ * heartbeat at once, so a crash within the first minute still has a recent record. */
+static void gap_on_start(int64_t now)
+{
+    hy_alive_t a = s_alive;
+    bool was_invalid = s_clock_was_invalid;
+    s_alive.alive = 0;
+    s_clock_was_invalid = false;
+    hy_gap_t g;
+    hy_gap_reason_t why;
+    if (a.alive > now) {
+        ESP_LOGW(TAG, "gap: heartbeat ahead of clock by %lld s", (long long)(a.alive - now));
+    } else if (hy_gap_on_start(&a, now, was_invalid, &g, &why)) {
+        record_gap(&g, why);
+    }
+    hy_power_alive_write(now, false);
+    hy_power_alive_enable(true);   /* from now on the power task keeps the heartbeat fresh */
+}
+
+/* The clock was set back to now: a pending jump gap is clipped to [start, now) or dropped. */
+static void pend_on_back(int64_t now)
+{
+    char a[40], b[40];
+    hy_gap_back_t r = hy_gap_pend_back(&s_pend, now);
+    if (r == HY_GAP_PEND_CLIPPED) {
+        hy_clock_tz_copy(s_tz, sizeof s_tz);
+        fmt_local(s_pend.gap.start, a, sizeof a);
+        fmt_local(s_pend.gap.end, b, sizeof b);
+        ESP_LOGI(TAG, "gap: pending jump clipped to %s .. %s", a, b);
+    } else if (r == HY_GAP_PEND_DROPPED) {
+        ESP_LOGI(TAG, "gap: pending jump dropped (clock set back)");
+    }
+}
+
+/* Records the pending jump gap at once (the clock turns invalid). */
+static void pend_flush(void)
+{
+    hy_gap_t g;
+    if (hy_gap_pend_take(&s_pend, &g)) {
+        record_gap(&g, HY_GAP_JUMP);
+    }
+}
+
+/* A clock jump from pre to now while tracking. Forward by HY_GAP_MIN_S or more: the gap [pre, now) is held
+ * pending; one already pending is recorded first. Backward: the pending gap is clipped or dropped. The
+ * heartbeat follows the new clock either way. pre <= 0: no usable time before the jump, no gap. */
+static void gap_on_jump(int64_t pre, int64_t now)
+{
+    if (pre > 0 && now > pre) {
+        hy_gap_t f;
+        if (hy_gap_pend_jump(&s_pend, pre, now, &f)) {
+            record_gap(&f, HY_GAP_JUMP);
+        }
+        if (now - pre >= HY_GAP_MIN_S) {   /* hy_gap_pend_jump made [pre, now) the pending gap */
+            char a[40], b[40];
+            hy_clock_tz_copy(s_tz, sizeof s_tz);
+            fmt_local(pre, a, sizeof a);
+            fmt_local(now, b, sizeof b);
+            ESP_LOGI(TAG, "gap: pending jump %s .. %s, recorded in %d s unless the clock is set back", a, b,
+                     HY_GAP_CONFIRM_S);
+        }
+    } else if (now < pre) {
+        pend_on_back(now);
+    }
+    hy_power_alive_write(now, false);
 }
 
 static const char *code_of(uint32_t id, size_t nm)
@@ -268,6 +398,7 @@ static void evaluate(int64_t now, bool pre_jump)
         }
     }
 
+    set_next_wake(out.next_wake);
     esp_err_t aerr = hy_clock_alarm_set(out.next_wake);
     if (aerr != ESP_OK) {
         ESP_LOGW(TAG, "alarm_set %lld: %s", (long long)out.next_wake, esp_err_to_name(aerr));
@@ -286,7 +417,8 @@ static void evaluate(int64_t now, bool pre_jump)
     s_query_us = query_us;
     char wake[40];
     fmt_wake(out.next_wake, wake, sizeof wake);
-    ESP_LOGI(TAG, "open=%u showing=%u new=%u miss=%u chime=%d next_wake=%s in %u ms",
+    /* "eval": how long this evaluation took, not the time to next_wake */
+    ESP_LOGI(TAG, "open=%u showing=%u new=%u miss=%u chime=%d next_wake=%s (eval %u ms)",
              (unsigned)out.n_open, (unsigned)out.n_showing, (unsigned)out.n_newly_due, written,
              out.chime ? 1 : 0, wake, (unsigned)((total_us + 500) / 1000));
 }
@@ -317,6 +449,16 @@ void hy_sched_run_tick(void)
     const hy_clock_port_t *ck = hy_clock_port();
     if (!ck->valid(NULL)) {
         s_seq = seq;
+        pend_flush();   /* a jump gap still pending is recorded before the clock gap that follows it */
+        if (s_tracking && s_ref_us) {
+            /* the last trusted time: the gap of this invalid period starts there; the power task stops its
+             * heartbeat so a crash meanwhile keeps this record */
+            hy_power_alive_enable(false);
+            s_alive.alive = s_ref_utc;
+            s_alive.clean = false;
+            hy_power_alive_write(s_ref_utc, false);
+        }
+        s_clock_was_invalid = true;
         s_ref_us = 0;
         if (s_tracking || !s_invalid_published) {
             hy_sched_stop_tracking(&s_sched);
@@ -326,6 +468,7 @@ void hy_sched_run_tick(void)
             s_snap.sched = &s_sched;
             s_last_minute = -1;
             hy_clock_alarm_set(0);
+            set_next_wake(0);
             s_gen++;
             s_invalid_published = true;
             ESP_LOGI(TAG, "clock invalid, reminders paused");
@@ -336,8 +479,9 @@ void hy_sched_run_tick(void)
     int64_t now = ck->now(NULL);
     int64_t mono = esp_timer_get_time();
     bool forced_jump = false;
+    int64_t expect = 0;
     if (!synced && s_tracking && s_ref_us) {
-        int64_t expect = s_ref_utc + (mono - s_ref_us) / 1000000;
+        expect = s_ref_utc + (mono - s_ref_us) / 1000000;
         int64_t step = now - expect;
         if (llabs(step) > JUMP_RESTART_S) {
             if (++s_unsynced_skips <= UNSYNCED_SKIP_MAX) {
@@ -355,24 +499,35 @@ void hy_sched_run_tick(void)
     s_ref_utc = now;
     s_ref_us = mono;
 
+    if (synced && jump < 0 && llabs(jump) <= JUMP_RESTART_S) {
+        pend_on_back(now);   /* a small step back: no restart, but a pending jump gap may now be too long */
+    }
+    hy_gap_t confirmed;
+    if (hy_gap_pend_due(&s_pend, now, &confirmed)) {
+        record_gap(&confirmed, HY_GAP_JUMP);   /* HY_GAP_CONFIRM_S passed without a correction */
+    }
+
     bool wake_due = s_snap.out.next_wake && now >= s_snap.out.next_wake;
     if (!(s_dirty || !s_tracking || synced || forced_jump || alarm || wake_due || now / 60 != s_last_minute)) {
         return;
     }
 
     if (!s_tracking) {
+        gap_on_start(now);
         hy_sched_start_tracking(&s_sched, now);
         s_tracking = true;
         ESP_LOGI(TAG, "tracking starts");
     } else if (forced_jump) {
+        gap_on_jump(expect, now);
         hy_sched_start_tracking(&s_sched, now);
         ESP_LOGI(TAG, "tracking restarts");
     } else if (synced && llabs(jump) > JUMP_RESTART_S) {
         /* first the state just before the jump, so slots already overdue then get their missed entries */
         int64_t pre = now - jump;
         if (pre > 0) {
-            evaluate(pre, true);
+            evaluate(pre, true);   /* returns before set_next_wake and the alarm: only missed entries */
         }
+        gap_on_jump(pre, now);     /* guards pre > 0 itself */
         hy_sched_start_tracking(&s_sched, now);
         ESP_LOGI(TAG, "clock jump %+lld s, tracking restarts", (long long)jump);
     }

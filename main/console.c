@@ -12,7 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define MAX_CMDS 32
+#define MAX_CMDS 48
 #define LINE_MAX_LEN 96
 
 static const char *TAG = "console";

@@ -3,6 +3,7 @@
 #include <string.h>
 #include "unity.h"
 #include "hy/codec.h"
+#include "hy/gap.h"
 #include "hy/med.h"
 
 void setUp(void) {}
@@ -328,9 +329,46 @@ void test_trailing_data_rejected(void)
     TEST_ASSERT_EQUAL(HY_E_INVALID, hy_meds_from_json("{\"v\":1,\"meds\":[]} x", m, 2, &n));
 }
 
+static void test_gap_roundtrip(void)
+{
+    for (int r = HY_GAP_OFF; r <= HY_GAP_JUMP; r++) {
+        hy_gap_t g = { 1793000000LL, 1793003600LL }, o = { 0, 0 };
+        hy_gap_reason_t ro = HY_GAP_OFF;
+        char buf[96];
+        int n = hy_gap_to_jsonl(&g, (hy_gap_reason_t)r, buf, sizeof buf);
+        TEST_ASSERT_TRUE(n > 0);
+        TEST_ASSERT_EQUAL_INT((int)strlen(buf), n);
+        TEST_ASSERT_NULL(strchr(buf, '\n'));
+        TEST_ASSERT_EQUAL(HY_OK, hy_gap_from_jsonl(buf, &o, &ro));
+        TEST_ASSERT_EQUAL_INT64(g.start, o.start);
+        TEST_ASSERT_EQUAL_INT64(g.end, o.end);
+        TEST_ASSERT_EQUAL(r, ro);
+    }
+    hy_gap_t g = { 1793000000LL, 1793003600LL };
+    char buf[96];
+    TEST_ASSERT_TRUE(hy_gap_to_jsonl(&g, HY_GAP_OFF, buf, sizeof buf) > 0);
+    TEST_ASSERT_EQUAL_STRING("{\"s\":1793000000,\"e\":1793003600,\"r\":\"off\"}", buf);
+    TEST_ASSERT_EQUAL(-1, hy_gap_to_jsonl(&g, HY_GAP_OFF, buf, 10));
+}
+
+static void test_gap_bad_lines(void)
+{
+    hy_gap_t g;
+    hy_gap_reason_t r;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_gap_from_jsonl("{\"s\":10,\"r\":\"off\"}", &g, &r));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_gap_from_jsonl("{\"s\":10,\"e\":5,\"r\":\"off\"}", &g, &r));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_gap_from_jsonl("{\"s\":10,\"e\":20,\"r\":\"nap\"}", &g, &r));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_gap_from_jsonl("{\"s\":10,\"e\":20}", &g, &r));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_gap_from_jsonl("{\"e\":20,\"r\":\"off\"}", &g, &r));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_gap_from_jsonl("not json", &g, &r));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_gap_from_jsonl("{\"s\":10,\"e\":10,\"r\":\"off\"}", &g, &r));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_gap_roundtrip);
+    RUN_TEST(test_gap_bad_lines);
     RUN_TEST(test_log_roundtrip);
     RUN_TEST(test_log_optional_fields_omitted);
     RUN_TEST(test_log_newline_in_note_escaped);

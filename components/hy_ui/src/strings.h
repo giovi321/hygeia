@@ -25,7 +25,7 @@
 
 /* ---- top bar ---- */
 #define HY_S_TIME_UNSET    "--:--"
-#define HY_S_BATTERY_NONE  HY_S_DASH "%"            /* battery placeholder until plan 3 */
+#define HY_S_BATTERY_NONE  HY_S_DASH "%"            /* battery unknown (no battery or PMU error) */
 
 /* ---- home tiles ---- */
 #define HY_S_TILE_AS_NEEDED   "as needed"
@@ -56,6 +56,7 @@
 #define HY_S_UNDO_EXPIRED  "Too late to undo"
 #define HY_S_TOAST_BANG    "!"
 #define HY_S_NOT_YET       "Not available yet"
+#define HY_S_BATT_LOW      "Battery low" HY_S_DOT "%d%%"  /* percent */
 
 /* ---- storage-down root ---- */
 #define HY_S_STORAGE_TITLE "Storage unavailable"
@@ -129,7 +130,7 @@
 #define HY_S_ON            "On"
 #define HY_S_OFF           "Off"
 #define HY_S_QS_BRIGHTNESS "Brightness"
-#define HY_S_QS_BATTERY    "Battery " HY_S_DASH "%"
+#define HY_S_QS_BATTERY_LEFT "%s left"             /* "~2 d" */
 #define HY_S_QS_SETTINGS   "Settings " HY_S_RSAQ
 #define HY_S_QS_QR         "Web UI QR " HY_S_RSAQ
 
@@ -164,8 +165,20 @@
 
 /* ---- idle clock ---- */
 #define HY_S_IDLE_NEXT     "Next: %s at %s"         /* code, HH:MM */
+#define HY_S_IDLE_DUE_ONE  "%s due"                 /* code of the open dose */
+#define HY_S_IDLE_DUE_MORE "%s and %u more due"      /* code of the first open dose, count of the others */
 #define HY_S_IDLE_NONE     "No doses scheduled"
 #define HY_S_IDLE_SET_TIME HY_S_TIME_TITLE
-#define HY_S_IDLE_STATUS   HY_S_DASH "%" HY_S_DOT "Wi-Fi off"
+#define HY_S_IDLE_STATUS   "%s" HY_S_DOT "Wi-Fi off"   /* battery text */
+
+/* ---- power-off confirmation and the critical-battery countdown ---- */
+#define HY_S_CANCEL        "Cancel"
+#define HY_S_POWEROFF_TITLE  "Power off"
+#define HY_S_POWEROFF_WARN   "Reminders will not fire while off"
+#define HY_S_POWEROFF_SLIDE  "Slide to power off " HY_S_RSAQ
+#define HY_S_POWEROFF_FAILED "Power off failed"
+#define HY_S_CRIT_TITLE     "Battery critical"
+#define HY_S_CRIT_LINE      "Powering off in %u s"     /* seconds left */
+#define HY_S_CRIT_HINT      "Plug in USB to keep it on"
 
 #endif /* HY_UI_STRINGS_H */
