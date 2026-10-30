@@ -508,6 +508,7 @@ static esp_err_t board_init_once(void)
     }
     power_gate();
     i2c_scan();
+    hy_board_imu_init(); /* absent or failed: logged, the motion features stay off */
 
     esp_lv_adapter_config_t acfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
     /* The LVGL task also runs the actions and the store (line buffers, JSON): more than the 8 KB default */
