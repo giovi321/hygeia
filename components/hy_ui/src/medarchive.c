@@ -99,7 +99,7 @@ void medarchive_confirm(void)
     ui_nav_home();
     char b[48];
     snprintf(b, sizeof b, HY_S_ARCH_DONE, code);
-    toast_show_info(b);
+    toast_show_ok(b);
 }
 
 static void confirm_cb(void *ud)

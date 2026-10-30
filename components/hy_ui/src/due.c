@@ -425,7 +425,7 @@ void due_snooze(void)
         ui_fmt_hhmm(until, s_tz, hhmm, sizeof hhmm);
         ESP_LOGI(TAG, "snooze %s: %s until %s", code, hy_err_str(err), hhmm);
         snprintf(msg, sizeof msg, HY_S_SNOOZED_UNTIL, hhmm);
-        toast_show_info(msg);
+        toast_show_ok(msg);
     } else {
         ESP_LOGW(TAG, "snooze %s: %s (%d)", code, hy_err_str(err), (int)err);
         const char *t = ui_err_text(err);
