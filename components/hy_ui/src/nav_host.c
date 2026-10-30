@@ -97,6 +97,9 @@ static void refresh_view(hy_view_t v)
     case HY_V_EARLIER:
         earlier_show(s_nav.med_id);
         break;
+    case HY_V_MEDFORM:
+        medform_show();
+        break;
     case HY_V_QS:
         qs_show();
         break;
@@ -183,8 +186,26 @@ void ui_nav_log(void)
     ESP_LOGI(TAG, "%s", b);
 }
 
+/* The form draft lives in medform.c; the nav rules only need to know whether it has unsaved changes. The flag is
+ * cleared when the form leaves the stack, whatever took it away (back, a discard, a root change). */
+static void form_sync(void)
+{
+    for (uint8_t i = 0; i < s_nav.depth; i++) {
+        if (s_nav.stack[i] == HY_V_MEDFORM) {
+            return;
+        }
+    }
+    s_nav.form_dirty = false;
+}
+
+void ui_nav_set_form_dirty(bool dirty)
+{
+    s_nav.form_dirty = dirty;
+}
+
 static void show_top(void)
 {
+    form_sync();
     ui_show_view(hy_nav_view(&s_nav));
 }
 
@@ -205,7 +226,8 @@ hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
         fx_due_prev();
         break;
     case HY_FX_FORM_BACK:
-        break; /* Task 7 calls medform_back() here */
+        medform_back();
+        break;
     case HY_FX_NONE:
         break;
     }
@@ -253,6 +275,16 @@ void ui_nav_pop(void)
 {
     if (s_nav.depth > 1) {
         s_nav.depth--;
+    }
+    show_top();
+    ui_nav_log();
+}
+
+void ui_nav_home(void)
+{
+    s_nav.depth = 1;
+    if (s_nav.stack[0] == HY_V_OVERVIEW || s_nav.stack[0] == HY_V_HISTORY) {
+        s_nav.stack[0] = HY_V_HOME;
     }
     show_top();
     ui_nav_log();
@@ -306,7 +338,7 @@ void hy_ui_set_storage_ok(bool ok)
 /* Views that are not on screen at boot are created after the splash (one every WARM_MS from nav_host_warm_start)
  * or at their first show, whichever comes first. The splash needs steady frames; each create below is one
  * blocking LVGL step. With CONFIG_HY_DEBUG_CONSOLE every create logs its cost. */
-typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_N } lazy_t;
+typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_MEDFORM, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_N } lazy_t;
 
 #define WARM_MS 250
 
@@ -323,6 +355,8 @@ static lazy_t lazy_of(hy_view_t v, bool *is_lazy)
         return LZ_NOTE;
     case HY_V_EARLIER:
         return LZ_EARLIER;
+    case HY_V_MEDFORM:
+        return LZ_MEDFORM;
     case HY_V_QS:
         return LZ_QS;
     case HY_V_SETTINGS:
@@ -360,6 +394,9 @@ static void create_lazy(lazy_t k)
     case LZ_EARLIER:
         earlier_create();
         break;
+    case LZ_MEDFORM:
+        medform_create();
+        break;
     case LZ_QS:
         qs_create();
         break;
@@ -379,7 +416,7 @@ static void create_lazy(lazy_t k)
     }
     due_raise();   /* the card stays above every view, as when it was created last */
 #if CONFIG_HY_DEBUG_CONSOLE
-    static const char *const names[LZ_N] = {"detail", "note", "earlier", "qs", "settings", "time", "clock-invalid"};
+    static const char *const names[LZ_N] = {"detail", "note", "earlier", "medform", "qs", "settings", "time", "clock-invalid"};
     ESP_LOGI(TAG, "create %s: %lld us", names[k], (long long)(esp_timer_get_time() - t0));
 #endif
 }
