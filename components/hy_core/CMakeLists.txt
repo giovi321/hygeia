@@ -20,6 +20,7 @@ idf_component_register(
         "src/gap.c"
         "src/screen.c"
         "src/orient.c"
+        "src/shake.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
