@@ -530,11 +530,13 @@ void nav_host_warm_start(void)
     }
 }
 
-/* Creates every hidden view now (the debug console pokes widgets of views that were never shown) */
+/* Creates every hidden view except the on-demand ones now (the debug console pokes widgets of views that were never shown) */
 void nav_host_warm_all(void)
 {
     for (int k = 0; k < LZ_N; k++) {
-        create_lazy((lazy_t)k);
+        if (!on_demand((lazy_t)k)) {   /* the form and archive views are built by their normal open path */
+            create_lazy((lazy_t)k);
+        }
     }
 }
 
