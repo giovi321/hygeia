@@ -21,18 +21,18 @@ Source: the Waveshare documentation and the Waveshare example repository, read 2
 | Buttons | BOOT on GPIO 0, user key on GPIO 18, PWR through the AXP2101 |
 | Other | QMI8658 IMU, ES7210 dual microphone ADC, microSD slot (SPI) |
 
-The firmware uses the display, touch, the PMU (power-on gate only), the RTC and the audio codec. The IMU, microphones, microSD slot and user key are not used.
+The firmware uses the display, touch, the PMU (power-on gate, battery readings, PWR key and power off), the RTC, the audio codec and the user key as a wake source. The IMU, microphones and microSD slot are not used.
 
 ## Verified on the board
 
-Observed from the serial log and by the owner, 2026-10-28 and 2026-10-29. Full notes are in `design/hardware-notes.md` in the repository.
+Observed from the serial log and on the board, 2026-10-28 and 2026-10-29. Full notes are in `design/hardware-notes.md` in the repository.
 
 - Display: full 480x480 flushes, all four corners visible, no offset or tearing
 - Touch: no axis swap or mirror needed; corner touches report the expected coordinates
 - I2C devices answer at 0x18, 0x34, 0x40, 0x51, 0x5a and 0x6b. The mapping of address to chip follows the usual addresses of these parts and was not read back from the chips
 - RTC: keeps time over a reset, over a USB power cycle and over 74 s with USB unplugged and the battery connected
 - RTC alarm: fires through the hardware interrupt at the set time
-- Audio: the ES8311 path plays the chime; volume 60 was judged fine by the owner
+- Audio: the ES8311 path plays the chime; volume 60 was judged fine by ear
 - Power-on source: the AXP2101 reports whether the PWR key started the device (see [Idle clock and power](../../user-guide/idle-power/))
 
 ## Not verified

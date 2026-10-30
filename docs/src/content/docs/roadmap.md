@@ -1,10 +1,10 @@
 ---
 title: Roadmap
-description: Planned features. None of them is built yet.
+description: Features that are planned and not built. No dates are given.
 ---
 
-:::danger[Not built]
-Everything on this page is planned and does not exist in the firmware. Nothing here works today. The plans come from `design/spec.md` and can change.
+:::caution[Not built]
+Everything on this page is planned and does not exist in the firmware. The plans come from `design/spec.md` and can change. No dates are given.
 :::
 
 ## Wi-Fi and access point mode
@@ -17,7 +17,7 @@ Today the Wi-Fi tile, the Access point tile and the Web UI QR button show "Not a
 
 Planned: a single-page app served by the device from flash, with a REST API and a WebSocket event stream. It would cover the dashboard, medicines (add, edit, reorder, archive), the log (edit, delete, add, export, import), a schedule view, settings, backup and restore, and firmware update with rollback. An optional password would protect it. There would be no TLS on the device, so it is meant for a trusted LAN. Every action available on the screen would also exist in the REST API.
 
-Today medicines cannot be added or edited, and log entries cannot be edited or deleted.
+Today the device adds, edits and archives medicines (see [Add, edit and archive medicines](../user-guide/medicines/)), but log entries cannot be edited or deleted, and archived medicines cannot be brought back.
 
 ## MQTT and Home Assistant discovery
 
@@ -27,15 +27,14 @@ Planned: MQTT with a configurable base topic, availability through a last will, 
 
 Planned: HTTP POST of events (taken, skipped, missed, due, snoozed, battery low, battery critical, clock invalid) to one or more URLs, with an optional HMAC-SHA256 signature, retry with backoff and a persistent outbox for events not yet delivered.
 
-## Battery percentage and sleep
+## Auto-rotate and shake to undo
 
-Planned: battery percentage in the top bar, a charging indicator, low (15 percent) and critical (5 percent) events, a battery life estimate, screen off after 2 minutes on battery with CPU light sleep and wake on touch, RTC alarm and PMU interrupt, and a power-off confirmation.
-
-Today the battery field shows a placeholder and the screen only dims; it never turns off. Battery capacity and battery life target are not decided.
+Planned: rotate the screen with the board, and undo the last log by shaking it. Both would use the onboard motion sensor, which the firmware does not use today.
 
 ## Other planned items
 
 - Export (CSV, JSON) and import
 - Time sync from the browser or NTP
 - Persisted untracked intervals and a retention policy for the log
-- On-device editing of medicines is not planned; editing is meant for the web UI
+- Editing every medicine detail (weekdays, dose windows, pill count, order) and unarchiving: the device edits the basics only, the rest is meant for the web UI
+- Battery capacity and a battery life target: no discharge measurement exists yet

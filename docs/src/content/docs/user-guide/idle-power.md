@@ -1,6 +1,6 @@
 ---
 title: Idle clock and power
-description: The dimmed idle clock and the rule that only the PWR key powers the device on.
+description: The dimmed idle clock, screen off and sleep, the PWR key, the battery and the rule that only the PWR key powers the device on.
 ---
 
 ## Idle clock
@@ -11,13 +11,34 @@ After 30 seconds without a touch, and with no due card showing, a black overlay 
 
 - The time in large digits
 - "Next: V at 08:30", naming the next scheduled dose, or "No doses scheduled", or "Set the time" while the clock is invalid
-- A status line with a dash and a percent sign for the battery, and "Wi-Fi off"
+- A status line with the battery percentage and "Wi-Fi off"
 
 The whole group moves by a few pixels each minute to limit burn-in on the AMOLED panel.
 
 Any touch only wakes the screen; it is not passed to the screen underneath. A due card wakes the screen by itself.
 
-The screen never turns fully off and the CPU never enters sleep in the current firmware. Battery-saving sleep is not built.
+## Screen off and sleep
+
+- On USB power the screen dims after 30 seconds and stays dimmed. A due card on USB keeps the screen on
+- On battery the screen turns off 2 minutes after the last activity and the CPU enters light sleep. A touch, the RTC alarm for the next dose, the PWR key, the user key or plugging in USB wakes it. A due card wakes the screen. A repeat chime on battery does not turn the screen on
+- Unplugging USB starts the 2 minute timer from the unplug
+
+## PWR key
+
+- Short press: turns the screen on or off
+- Long press, about 2 seconds: opens the power-off confirmation. It shows the next dose and, when a dose is due within 24 hours or open now, the warning "Reminders will not fire while off". Slide the knob to power off through the AXP2101. Cancel, a short press of PWR or 30 seconds without a touch close it
+- Pressing PWR while the device is off turns it on
+
+While the device is off, reminders do not fire. Doses that fall in that gap are recorded as untracked, not missed.
+
+## Battery
+
+The top bar shows the battery percentage. It turns red below 15%. A bolt next to it shows USB power with a battery connected. Quick settings shows an estimate such as "~2 d left" once enough discharge data exists (see [Quick settings and settings](../settings/)).
+
+- Low, at 15%: a toast "Battery low" with the percentage. It waits while the Undo toast or the power-off screen shows
+- Critical, at 5%: a full-screen "Battery critical" page with "Powering off in 60 s" counting down and the hint "Plug in USB to keep it on". It opens only after two critical readings 10 seconds apart, with a low battery voltage and no USB, so a bad reading does not power the device off. Plugging in USB cancels it. At zero the device powers off. A short press of PWR still turns the screen off and on while it counts
+
+Both levels re-arm after the battery recovers, or when USB is plugged in.
 
 ## PWR-only power-on
 
@@ -30,8 +51,6 @@ Early in boot, before the display starts, the firmware reads the AXP2101 power-o
 - If it came from USB insertion or battery insertion, the firmware powers off through the AXP2101. The battery still charges while off
 - The gate fails open: a power-on reset with no known source bit, or with EN mode set, boots. If the chip id register does not read 0x4A, the gate is skipped
 
-Verified by the owner on the board: after a power-off, replugging USB leaves the screen dark with the charge LED on, and a PWR press boots. The BOOT bypass was not tested.
+Verified on the board: after a power-off, replugging USB leaves the screen dark with the charge LED on, and a PWR press boots. The BOOT bypass was not tested.
 
 To bypass the gate, press and hold BOOT right after pressing PWR or plugging in, until the log shows `gate bypassed (BOOT held)`. To reflash a device that keeps powering off, hold BOOT before the reset to enter ROM download mode.
-
-Holding PWR powers the board off through the AXP2101. The firmware has no power-off confirmation screen and no warning that reminders will not fire while off; both are planned in the design but not built. While off, reminders do not fire.

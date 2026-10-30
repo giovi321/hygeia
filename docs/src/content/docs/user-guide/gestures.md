@@ -17,12 +17,13 @@ description: Every touch gesture, with the thresholds the firmware uses.
 | Slide the knob right on the due card | logs the dose as taken |
 | Swipe left on the due card | snoozes |
 | Swipe up on the due card | shows the next due dose |
+| Swipe down on the due card | shows the previous due dose |
 | Double tap on History | switches between 7 and 30 days |
 | Any touch while the screen is dimmed | wakes the screen; nothing else happens |
 
 ## Thresholds
 
-Measured on the panel (owner session 2026-10-29):
+Measured on the panel on 2026-10-29:
 
 - Edge zone: 40 px from the screen border
 - Swipe: movement on the dominant axis of at least 60 px and at least 1.5 times the other axis
