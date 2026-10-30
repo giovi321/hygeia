@@ -43,4 +43,26 @@ bool     hy_orient_feed(hy_orient_t *o, uint32_t t_ms, hy_accel_t a);
 hy_rot_t hy_orient_current(const hy_orient_t *o);
 void     hy_orient_set(hy_orient_t *o, hy_rot_t r);   /* forced (lock, debug): cur = r, candidate cleared */
 
+#define HY_SHK_PEAK_MG     1300  /* high-passed value on one axis that counts as a peak */
+#define HY_SHK_REARM_MG     600  /* the axis must fall below this before the next peak counts */
+#define HY_SHK_PEAKS          4  /* alternating-sign peaks on the same axis */
+#define HY_SHK_MIN_GAP_MS    60  /* closer peaks are a rebound, not a new peak */
+#define HY_SHK_MAX_GAP_MS   400  /* a longer pause restarts the count */
+#define HY_SHK_WINDOW_MS   1500  /* first to last counted peak */
+#define HY_SHK_SETTLE_MS    200  /* after reset: samples only train the baseline */
+#define HY_SHK_COOLDOWN_MS 1000  /* after a detection */
+
+/* lat_axis is the axis that latched the last peak. */
+typedef struct { int32_t base[3]; uint32_t start_ms, first_ms, last_ms, cool_until_ms; int8_t axis, sign, lat_axis;
+                 uint8_t count; bool latched, primed; } hy_shake_t;
+
+void hy_shake_reset(hy_shake_t *s, uint32_t now_ms);
+/* Per axis: hp = a - base, then base += (a - base) / 16 (the first sample after reset sets base = a and hp = 0).
+   A peak is the axis with the largest |hp| when |hp| >= HY_SHK_PEAK_MG and the detector is not latched; it latches
+   until that axis' |hp| < HY_SHK_REARM_MG. A peak on the counting axis with the opposite sign, HY_SHK_MIN_GAP_MS to
+   HY_SHK_MAX_GAP_MS after the last one, counts; a peak closer than HY_SHK_MIN_GAP_MS is ignored; anything else
+   (same sign, other axis, longer gap, outside the window) starts a new count of 1 with this peak. The count
+   reaching HY_SHK_PEAKS returns true once, then cooldown. */
+bool hy_shake_feed(hy_shake_t *s, uint32_t t_ms, hy_accel_t a);
+
 #endif
