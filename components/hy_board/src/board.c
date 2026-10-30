@@ -22,6 +22,7 @@
 #include "esp_timer.h"
 #include "esp_attr.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_io.h"
 #include "esp_lv_adapter.h"
 #include "esp_sleep.h"
 #include "hal/gpio_ll.h"
@@ -42,6 +43,25 @@ static void (*volatile s_key_hook)(void);
 static void touch_isr(esp_lcd_touch_handle_t tp, void *ctx);
 static void key_and_sleep_pins_init(void);
 static volatile bool s_panel_off;    /* flushes are dropped while the panel is off */
+static esp_lcd_panel_io_handle_t s_io;
+
+/* Screen off and on use the CO5300 Sleep In / Sleep Out commands sent here, not esp_lcd_panel_disp_sleep: the
+ * esp_lcd_co5300 2.2.0 driver follows Sleep In with Deep Standby (0x4F) whenever a reset GPIO is configured, and
+ * its wake then pulses the reset and reruns the BSP init sequence (600 ms after Sleep Out, 0x51 = 0xFF, Display On,
+ * 600 ms): about 1.4 s, with the panel lit at full brightness on a GRAM that Deep Standby did not keep (the green
+ * flash). Plain Sleep In keeps the GRAM and the registers, so Sleep Out needs no init. */
+#define PANEL_CMD_SLPIN   0x10
+#define PANEL_CMD_SLPOUT  0x11
+#define PANEL_CMD_DISPOFF 0x28
+#define PANEL_CMD_DISPON  0x29
+#define PANEL_SLEEP_GAP_US (120 * 1000)   /* Sleep In to Sleep Out and Sleep Out to Display On, as the driver waits */
+static int64_t s_slpin_us;
+
+/* After a wake the brightness stays 0 until the first frame has been sent: a brightness set meanwhile is kept in
+ * s_bri_want and applied by refr_ready_cb. */
+static volatile bool s_bri_hold;
+static volatile bool s_wake_flushed;
+static volatile uint8_t s_bri_want = 80;
 
 #define USER_KEY_GPIO 18   /* spec Hardware table: user key GPIO 18 */
 #define RTC_INT_GPIO  13   /* PCF85063 INT, owned by hy_clock (falling-edge interrupt) */
@@ -83,6 +103,27 @@ static void flush_wrap(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
         return;
     }
     s_orig_flush(disp, area, px);
+    s_wake_flushed = true;
+}
+
+/* QSPI command write, as the BSP sends 0x51: opcode 0x02, the command in bits 8..15 */
+static esp_err_t panel_cmd(uint8_t cmd, const void *param, size_t len)
+{
+    return esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | ((int)cmd << 8), param, len);
+}
+
+/* End of an LVGL refresh, LVGL task. The first one after a wake that sent pixels releases the held brightness. The
+ * panel IO queue keeps the order: the brightness command goes out after the frame's colour data. */
+static void refr_ready_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!s_bri_hold || !s_wake_flushed || s_panel_off) {
+        return;
+    }
+    s_bri_hold = false;
+    bsp_display_brightness_set(s_bri_want);
+    ESP_LOGI(TAG, "display: first frame sent, brightness %u at %lld ms", (unsigned)s_bri_want,
+             (long long)(esp_timer_get_time() / 1000));
 }
 
 static void touch_cb(lv_event_t *e)
@@ -461,6 +502,7 @@ static esp_err_t board_init_once(void)
         return err;
     }
     s_panel = panel;
+    s_io = io;
 
     size_t free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     esp_lv_adapter_display_config_t disp_cfg = {
@@ -490,6 +532,7 @@ static esp_err_t board_init_once(void)
              BSP_LCD_H_RES, BSP_LCD_V_RES, HY_BUF_LINES, BSP_LCD_H_RES * HY_BUF_LINES * 2,
              (unsigned)(free_before - free_after));
     lv_display_add_event_cb(s_disp, rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+    lv_display_add_event_cb(s_disp, refr_ready_cb, LV_EVENT_REFR_READY, NULL);
     s_orig_flush = lv_display_get_flush_cb(s_disp);
     lv_display_set_flush_cb(s_disp, flush_wrap);
 
@@ -530,23 +573,53 @@ static esp_err_t board_init_once(void)
 
 void hy_board_display_power(bool on)
 {
-    if (!s_panel) {
+    if (!s_panel || !s_io) {
         return;
     }
-    esp_err_t e1, e2;
+    esp_err_t e1, e2, e3;
+    int64_t t0 = esp_timer_get_time();
     if (on) {
-        e1 = esp_lcd_panel_disp_sleep(s_panel, false);
-        e2 = esp_lcd_panel_disp_on_off(s_panel, true);
+        if (!s_panel_off) {
+            return;
+        }
+        int64_t since = t0 - s_slpin_us;
+        if (since < PANEL_SLEEP_GAP_US) {
+            vTaskDelay(pdMS_TO_TICKS((PANEL_SLEEP_GAP_US - since) / 1000 + 1));
+        }
+        s_bri_hold = true;   /* brightness is 0 since the off: it stays there until a frame is sent */
+        s_wake_flushed = false;
+        e1 = panel_cmd(PANEL_CMD_SLPOUT, NULL, 0);
+        vTaskDelay(pdMS_TO_TICKS(PANEL_SLEEP_GAP_US / 1000));
+        e2 = panel_cmd(PANEL_CMD_DISPON, NULL, 0);
+        e3 = ESP_OK;
         s_panel_off = false;
+        /* redraw everything: the caller does it too, this covers the power-off fallback */
+        if (s_disp) {
+            if (hy_board_in_lvgl_task()) {
+                lv_obj_invalidate(lv_display_get_screen_active(s_disp));
+            } else if (hy_board_lock(200)) {
+                lv_obj_invalidate(lv_display_get_screen_active(s_disp));
+                hy_board_unlock();
+            }
+        }
     } else {
+        if (s_panel_off) {
+            return;
+        }
         s_panel_off = true;   /* first: later flushes are dropped */
-        e1 = esp_lcd_panel_disp_on_off(s_panel, false);
-        e2 = esp_lcd_panel_disp_sleep(s_panel, true);
+        s_bri_hold = false;
+        e1 = bsp_display_brightness_set(0);
+        e2 = panel_cmd(PANEL_CMD_DISPOFF, NULL, 0);
+        e3 = panel_cmd(PANEL_CMD_SLPIN, NULL, 0);
+        s_slpin_us = esp_timer_get_time();
+        vTaskDelay(pdMS_TO_TICKS(10));   /* at least 5 ms after Sleep In before the bus goes quiet or the next command */
     }
-    if (e1 != ESP_OK || e2 != ESP_OK) {
-        ESP_LOGE(TAG, "display power %s: %s, %s", on ? "on" : "off", esp_err_to_name(e1), esp_err_to_name(e2));
+    int ms = (int)((esp_timer_get_time() - t0) / 1000);
+    if (e1 != ESP_OK || e2 != ESP_OK || e3 != ESP_OK) {
+        ESP_LOGE(TAG, "display power %s: %s, %s, %s", on ? "on" : "off", esp_err_to_name(e1), esp_err_to_name(e2),
+                 esp_err_to_name(e3));
     } else {
-        ESP_LOGI(TAG, "display power %s", on ? "on" : "off");
+        ESP_LOGI(TAG, "display power %s (sleep %s), %d ms", on ? "on" : "off", on ? "out" : "in", ms);
     }
 }
 
@@ -700,6 +773,10 @@ void hy_board_set_brightness(uint8_t pct)
 {
     if (pct > 100) {
         pct = 100;
+    }
+    s_bri_want = pct;
+    if (s_panel_off || s_bri_hold) {
+        return;   /* applied by the wake once the first frame is sent */
     }
     bsp_display_brightness_set(pct);
 }
