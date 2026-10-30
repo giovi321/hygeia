@@ -354,6 +354,31 @@ hy_mf_step_t hy_mf_step_for_err(hy_err_t e)
     }
 }
 
+static bool draft_times_ok(const hy_med_t *d)
+{
+    if (d->type != HY_SCHED_FIXED) return true;
+    if (d->n_times < 1 || d->n_times > HY_MAX_TIMES) return false;
+    for (size_t i = 0; i < d->n_times; i++) {
+        if (d->times[i] >= 1440) return false;
+        for (size_t j = 0; j < i; j++) {
+            if (d->times[j] == d->times[i]) return false;
+        }
+    }
+    return true;
+}
+
+/* A step is named only when the form can fix the error there. Errors that come from web-only fields of the
+   live record (dates, weekdays) or from a kept interval on a fixed medicine go to Review. */
+static hy_mf_step_t build_bad_step(hy_err_t e, const hy_med_t *draft, const hy_med_t *out)
+{
+    switch (e) {
+    case HY_E_INVALID:  return draft->color > 9 ? HY_MF_COLOR : HY_MF_REVIEW;
+    case HY_E_TIMES:    return draft_times_ok(draft) ? HY_MF_REVIEW : HY_MF_TIMES;
+    case HY_E_INTERVAL: return out->type == HY_SCHED_AS_NEEDED ? HY_MF_INTERVAL : HY_MF_REVIEW;
+    default:            return hy_mf_step_for_err(e);
+    }
+}
+
 hy_err_t hy_mf_build(const hy_medform_t *f, const hy_med_t *meds, size_t n, hy_med_t *out, hy_mf_step_t *bad)
 {
     hy_err_t e;
@@ -391,7 +416,7 @@ hy_err_t hy_mf_build(const hy_medform_t *f, const hy_med_t *meds, size_t n, hy_m
     }
     e = hy_med_validate(out, meds, n);
 done:
-    if (bad) *bad = hy_mf_step_for_err(e);
+    if (bad) *bad = build_bad_step(e, d, out);
     return e;
 }
 

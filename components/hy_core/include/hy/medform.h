@@ -85,14 +85,19 @@ int          hy_mf_step_number(const hy_medform_t *f);   /* 1..6 for the counted
    Edit: the CURRENT live record of edit_id from meds (not the copy taken at hy_mf_edit) with only code,
    name, dose, color, type, times, n_times, min_interval_min replaced. As needed: n_times 0 and times zeroed.
    Fixed: min_interval_min keeps the live value (0 for a new medicine). Then hy_med_validate against meds.
-   HY_E_NOT_FOUND when edit_id is gone or archived. *bad (may be NULL) = hy_mf_step_for_err(result). */
+   HY_E_NOT_FOUND when edit_id is gone or archived. *bad (may be NULL) = hy_mf_step_for_err(result), except
+   that a step is named only when the form can fix the error there: HY_E_INVALID gives COLOR only when the
+   draft colour is above 9, HY_E_TIMES gives TIMES only when the draft's own times are invalid, and
+   HY_E_INTERVAL gives INTERVAL only for an as-needed medicine; otherwise REVIEW (the error comes from a
+   web-only field of the live record). */
 hy_err_t hy_mf_build(const hy_medform_t *f, const hy_med_t *meds, size_t n, hy_med_t *out, hy_mf_step_t *bad);
 /* NAME for HY_E_NAME; DOSE for HY_E_DOSE; CODE for HY_E_CODE and HY_E_CODE_DUP; COLOR for HY_E_INVALID;
    TIMES for HY_E_TIMES; INTERVAL for HY_E_INTERVAL; REVIEW for everything else. */
 hy_mf_step_t hy_mf_step_for_err(hy_err_t e);
 
 /* Today's occurrences of the built record that would be due right away at save: occurrences in
-   (now - missed_after_min * 60, now] in posix_tz. On edit only times not present in `old` count.
+   (now - missed_after_min * 60, now] in posix_tz. The window can reach the previous local day when now is
+   early in the morning. On edit only times not present in `old` count.
    Returns the count, at most max. */
 size_t   hy_mf_due_on_save(const hy_med_t *built, const hy_med_t *old /* NULL = new */, int64_t now,
                            const char *posix_tz, int64_t *out, size_t max);
