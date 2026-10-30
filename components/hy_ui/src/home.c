@@ -489,8 +489,7 @@ void home_create(lv_obj_t *page)
     lv_obj_set_scroll_dir(s_grid, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_grid, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_event_cb(s_grid, grid_scroll_cb, LV_EVENT_SCROLL_BEGIN, NULL);
-    lv_obj_set_scroll_elastic(s_grid, false);
-    lv_obj_set_scroll_momentum(s_grid, false);
+    ui_scroller(s_grid);
     home_rebuild();
 }
 

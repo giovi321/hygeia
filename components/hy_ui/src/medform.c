@@ -1321,8 +1321,7 @@ static void create_times(void)
     lv_obj_set_style_pad_row(s_list, 8, 0);
     lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_list, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_scroll_elastic(s_list, false);
-    lv_obj_set_scroll_momentum(s_list, false);
+    ui_scroller(s_list);
     lv_obj_add_event_cb(s_list, consume_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_list, consume_cb, LV_EVENT_SCROLL_BEGIN, NULL);
     for (int i = 0; i < HY_MAX_TIMES; i++) {

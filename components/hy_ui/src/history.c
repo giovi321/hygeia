@@ -499,8 +499,7 @@ void history_create(lv_obj_t *page)
     lv_obj_set_pos(s_rows, 0, ROWS_Y);
     lv_obj_set_scroll_dir(s_rows, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_rows, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_scroll_elastic(s_rows, false);
-    lv_obj_set_scroll_momentum(s_rows, false);
+    ui_scroller(s_rows);
     lv_obj_set_clickable(s_rows, false);
     lv_obj_add_event_cb(s_rows, rows_scroll_cb, LV_EVENT_SCROLL_BEGIN, NULL);
 
