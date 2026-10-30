@@ -73,7 +73,8 @@ static void fx_due_prev(void) { due_prev(); }
 
 static bool in_detail_group(hy_view_t v)
 {
-    return v == HY_V_DETAIL || v == HY_V_NOTE || v == HY_V_EARLIER;
+    return v == HY_V_DETAIL || v == HY_V_NOTE || v == HY_V_EARLIER || v == HY_V_MEDFORM ||
+           v == HY_V_MED_ARCHIVE;
 }
 
 static void refresh_view(hy_view_t v)

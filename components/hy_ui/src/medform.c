@@ -41,6 +41,9 @@ static hy_medform_t s_f;
 static page_t s_page, s_discard_from;
 static bool s_loading;                      /* the text area is being set by code: its change handler stays quiet */
 static bool s_via_code_row;                 /* opened from the Code and colour row: Next goes on to Colour */
+static char s_open_text[HY_MF_NAME_MAX + 1]; /* the Name or Dose value a Review-opened text page started with */
+static bool s_open_dirty;                   /* the form was changed before that text page opened */
+static char s_suggested[3];                 /* the last code suggested in the add flow */
 static char s_pick[3];                      /* the code typed in the picker */
 static bool s_pick_used[N_CODE_KEYS];       /* single characters another active medicine uses */
 static uint16_t s_iopts[N_OPTS];
@@ -185,13 +188,15 @@ static void go_step(hy_mf_step_t step)
         s_f.from_review = false;
         s_via_code_row = false;
     }
-    if (step == HY_MF_CODE && !s_f.draft.code[0]) {
+    if (step == HY_MF_CODE && (!s_f.draft.code[0] || (!s_f.edit_id && !strcmp(s_f.draft.code, s_suggested)))) {
+        /* empty, or in the add flow still the last suggestion: follow the name */
         const hy_med_t *ms;
         size_t n = hy_meds(&ms);
         char c[3];
         hy_mf_suggest_code(s_f.draft.name, ms, n, s_f.edit_id, c);
         if (c[0]) {
             hy_mf_set_code(&s_f, c, ms, n, NULL);
+            snprintf(s_suggested, sizeof s_suggested, "%s", c);
         }
     }
     show_page(page_of(step));
@@ -218,6 +223,10 @@ static void open_from_review(hy_mf_step_t step)
 {
     s_f.from_review = true;
     s_via_code_row = step == HY_MF_CODE;
+    if (step == HY_MF_NAME || step == HY_MF_DOSE) {
+        s_open_dirty = s_f.dirty;
+        snprintf(s_open_text, sizeof s_open_text, "%s", step == HY_MF_NAME ? s_f.draft.name : s_f.draft.dose);
+    }
     go_step(step);
 }
 
@@ -658,7 +667,7 @@ static void save_failed(hy_err_t e, hy_mf_step_t bad)
     log_err(e, bad);
     if (e == HY_E_NOT_FOUND) {
         toast_show_info(HY_S_MF_ERR_GONE);
-        close_form();
+        ui_nav_home();   /* the medicine's detail is gone too: nav_host clears the dirty flag */
         return;
     }
     char b[96];
@@ -787,6 +796,16 @@ static void do_back(void)
         break;
     }
     if (on_text_page()) {
+        if (s_f.from_review) {
+            /* Back means never mind: the value the page opened with returns to the draft and the field */
+            if (s_page == PG_NAME) {
+                hy_mf_set_name(&s_f, s_open_text);
+            } else {
+                hy_mf_set_dose(&s_f, s_open_text);
+            }
+            s_f.dirty = s_open_dirty;
+            ui_nav_set_form_dirty(s_f.dirty);
+        }
         text_load();   /* the draft holds the last accepted value: the field shows it again, so Review never differs from it */
     }
     if (s_f.from_review) {
@@ -880,6 +899,9 @@ static void show_page(page_t pg)
     }
     set_err(NULL);
     lv_obj_set_pos(s_err, PAD_X, 300);
+    /* the Code page error (a long other name) is cut with dots inside 444 x 34 and never reaches the button row */
+    lv_label_set_long_mode(s_err, pg == PG_CODE ? LV_LABEL_LONG_MODE_DOTS : LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_size(s_err, FULL_W, pg == PG_CODE ? 34 : LV_SIZE_CONTENT);
 
     switch (pg) {
     case PG_NAME:
@@ -971,6 +993,7 @@ void medform_open_new(void)
         return;
     }
     hy_mf_new(&s_f, ms, n);
+    s_suggested[0] = 0;
     s_page = PG_NAME;
     s_via_code_row = false;
     ui_nav_set_form_dirty(false);
@@ -1182,12 +1205,12 @@ static void create_pick(void)
     s_pick_grid = lv_buttonmatrix_create(c);
     lv_buttonmatrix_set_map(s_pick_grid, k_pick_map);
     lv_buttonmatrix_set_ctrl_map(s_pick_grid, k_pick_ctrl);
-    lv_obj_set_size(s_pick_grid, 456, 342);
-    lv_obj_set_pos(s_pick_grid, 12, 72);
+    lv_obj_set_size(s_pick_grid, FULL_W, 356);   /* 7 x 60 and 6 x 56 keys with 4 px gaps */
+    lv_obj_set_pos(s_pick_grid, PAD_X, 66);
     lv_obj_set_style_bg_opa(s_pick_grid, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_pick_grid, 0, 0);
     lv_obj_set_style_pad_all(s_pick_grid, 0, 0);
-    lv_obj_set_style_pad_gap(s_pick_grid, 6, 0);
+    lv_obj_set_style_pad_gap(s_pick_grid, 4, 0);
     lv_obj_set_style_text_font(s_pick_grid, &s_pick_font, LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_pick_grid, lv_color_hex(HY_C_TEXT), LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_pick_grid, lv_color_hex(HY_C_SURFACE2), LV_PART_ITEMS);
@@ -1331,7 +1354,8 @@ static void create_review(void)
         ui_on_tap(r, review_row_cb, (void *)(uintptr_t)k_row_step[i]);
         lv_obj_align(ui_label(r, hy_type.status, HY_C_TEXT2, labels[i]), LV_ALIGN_LEFT_MID, 20, 0);
         lv_obj_t *v = ui_label(r, hy_type.body, HY_C_TEXT, "");
-        lv_obj_set_width(v, 300);
+        lv_obj_set_size(v, 300, lv_font_get_line_height(hy_type.body));
+        lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);   /* eight times or a long name stay on one line */
         lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
         lv_obj_align(v, LV_ALIGN_RIGHT_MID, -20, 0);
         s_rv[i].val = v;

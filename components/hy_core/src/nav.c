@@ -120,8 +120,17 @@ hy_nav_fx_t hy_nav_gesture(hy_nav_t *n, hy_gesture_t g)
         if (g == HY_G_EDGE_RIGHT) return HY_FX_FORM_BACK;
         if (g == HY_G_EDGE_UP && n->form_dirty) return HY_FX_NONE;
     }
-    /* 5. EDGE_UP elsewhere: back to the root, pager root becomes HOME */
+    /* 5. EDGE_UP elsewhere: back to the root, pager root becomes HOME. A changed form in the
+     * stack is kept: the stack is cut back to the form, which asks "Discard changes?" on leaving */
     if (g == HY_G_EDGE_UP) {
+        if (n->form_dirty) {
+            for (int i = 0; i < n->depth; i++) {
+                if (n->stack[i] == HY_V_MEDFORM) {
+                    n->depth = i + 1;
+                    return HY_FX_NONE;
+                }
+            }
+        }
         n->depth = 1;
         if (is_pager(n->stack[0])) n->stack[0] = HY_V_HOME;
         return HY_FX_NONE;
