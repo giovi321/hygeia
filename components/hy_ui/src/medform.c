@@ -39,7 +39,6 @@ typedef enum {
 
 static hy_medform_t s_f;
 static page_t s_page, s_discard_from;
-static bool s_fresh;                        /* just opened: the first medform_show draws the page; later shows keep the sub-page state */
 static bool s_loading;                      /* the text area is being set by code: its change handler stays quiet */
 static bool s_via_code_row;                 /* opened from the Code and colour row: Next goes on to Colour */
 static char s_pick[3];                      /* the code typed in the picker */
@@ -947,11 +946,10 @@ void medform_show(void)
         return;
     }
     /* After the quick settings closed, the picker, Add time and Times pages keep what the person had entered */
-    if (!s_fresh && (s_page == PG_PICK || s_page == PG_ADD_TIME || s_page == PG_TIMES)) {
+    if (s_page == PG_PICK || s_page == PG_ADD_TIME || s_page == PG_TIMES) {
         ui_nav_set_form_dirty(s_f.dirty);
         return;
     }
-    s_fresh = false;
     show_page(s_page);
 }
 
@@ -975,7 +973,6 @@ void medform_open_new(void)
     hy_mf_new(&s_f, ms, n);
     s_page = PG_NAME;
     s_via_code_row = false;
-    s_fresh = true;
     ui_nav_set_form_dirty(false);
     ESP_LOGI(TAG, "medform: new");
     ui_nav_push(HY_V_MEDFORM);
@@ -993,7 +990,6 @@ void medform_open_edit(uint32_t med_id)
     }
     s_page = PG_REVIEW;
     s_via_code_row = false;
-    s_fresh = true;
     ui_nav_set_form_dirty(false);
     ESP_LOGI(TAG, "medform: edit id %u", (unsigned)med_id);
     ui_nav_push(HY_V_MEDFORM);

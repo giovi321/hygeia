@@ -15,6 +15,7 @@ static const char *TAG = "ui_archive";
 
 static lv_obj_t *s_root, *s_title, *s_due;
 static uint32_t s_med_id;
+static uint32_t s_gen_seen;
 
 static bool find_med(uint32_t id, hy_med_t *out)
 {
@@ -44,9 +45,20 @@ static bool has_open_dose(uint32_t id)
     return false;
 }
 
+/* The amber line follows the snapshot: a dose that falls due, is snoozed or is handled while the confirmation is open
+ * changes it before Archive can be tapped */
+void medarchive_refresh_if_shown(void)
+{
+    if (s_root && ui_current_view() == HY_V_MED_ARCHIVE && hy_sched_generation() != s_gen_seen) {
+        s_gen_seen = hy_sched_generation();
+        lv_obj_set_hidden(s_due, !has_open_dose(s_med_id));
+    }
+}
+
 void medarchive_show(uint32_t med_id)
 {
     s_med_id = med_id;
+    s_gen_seen = hy_sched_generation();
     hy_med_t m;
     char t[64];
     if (find_med(med_id, &m)) {

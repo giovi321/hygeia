@@ -204,11 +204,14 @@ void note_debug_text(const char *text);          /* sets the note field as typin
 void earlier_debug_set(int hour, int minute);    /* sets the rollers as turning them would */
 #endif
 
-/* medform.c: the step-by-step form that adds or edits a medicine on the device (hy_core hy/medform.h holds the draft
- * and the rules). The draft is static RAM, so it survives dimming, a due card and the power-off overlay. */
+/* medarchive.c: the archive confirmation opened from the detail. */
 void medarchive_create(void);                   /* registers HY_V_MED_ARCHIVE */
 void medarchive_show(uint32_t med_id);          /* nav_host: the view became the top, for the nav med_id */
+void medarchive_refresh_if_shown(void);         /* recomputes the "dose is due" line when the scheduler snapshot changed */
 void medarchive_confirm(void);                  /* the Archive button's action (also the debug "archive <code> yes") */
+
+/* medform.c: the step-by-step form that adds or edits a medicine on the device (hy_core hy/medform.h holds the draft
+ * and the rules). The draft is static RAM, so it survives dimming, a due card and the power-off overlay. */
 void medform_create(void);                       /* registers HY_V_MEDFORM */
 void medform_open_new(void);                     /* hy_mf_new on hy_meds(), push HY_V_MEDFORM */
 void medform_open_edit(uint32_t med_id);         /* hy_mf_edit; on error the info toast, no push */
@@ -247,7 +250,7 @@ void home_refresh(bool animate);         /* tiles from the scheduler snapshot; L
 void home_tap_med(uint32_t med_id);      /* logs a dose (debug `tap` calls it directly) */
 void home_tile_click(uint32_t med_id);   /* a tile's SHORT_CLICKED: logs only when the stroke was a TAP */
 bool home_med_id_by_code(const char *code, uint32_t *id);
-void home_scroll_to(uint32_t med_id);           /* scrolls the grid so the tile is fully visible (same as home_show_med) */
+void home_scroll_to(uint32_t med_id);           /* scrolls the grid so the tile is fully visible; new code calls this one */
 void home_show_med(uint32_t med_id);     /* scroll that medicine's tile into view (now, or at the next rebuild) */
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */

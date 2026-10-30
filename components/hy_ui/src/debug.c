@@ -203,10 +203,20 @@ static void sort_times(uint16_t *t, size_t n)
     }
 }
 
-/* "seed4": adds Z (Zinc), the 4th medicine; "seed4 5" also adds C (Calcium) for a 3rd row, which scrolls.
- * "seed4 <n>" (n >= 6) fills up to n active medicines (at most 50) with Z1..Z9, ZA..ZZ, Z0, then Y1.., four
- * daily times 6 h apart each, the first 60 to 107 min from now: no dose is open while measuring.
- * "seed4 off" archives all of them. */
+/* Largest stored order + 1, as for a new medicine */
+static uint16_t next_order(void)
+{
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    uint16_t o = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (ms[i].order >= o) {
+            o = (uint16_t)(ms[i].order + 1);
+        }
+    }
+    return o;
+}
+
 static bool code_in_use(const char *code)
 {
     const hy_med_t *ms;
@@ -236,14 +246,14 @@ static void seed_archived(int count)
             hy_med_defaults(&m);
             m.id = 0;
             snprintf(m.code, sizeof m.code, "%s", code);
-            snprintf(m.name, sizeof m.name, "Old %s", code);
+            snprintf(m.name, sizeof m.name, "Zinc");
             m.color = (uint8_t)(added % 10);
             m.type = HY_SCHED_FIXED;
             m.times[0] = 8 * 60;
             m.n_times = 1;
             m.active_from = hy_clock_today_ymd();
             m.archived = true;
-            m.order = (uint16_t)(500 + added);
+            m.order = next_order();
             hy_err_t err = hy_act_med_upsert(&m);
             if (err != HY_OK) {
                 ESP_LOGW(TAG, "seed4 arch: %s: %s", code, hy_err_str(err));
@@ -258,10 +268,19 @@ static void seed_archived(int count)
     ESP_LOGI(TAG, "seed4 arch: %u active, %u stored", (unsigned)hy_meds_active_count(), (unsigned)stored);
 }
 
+/* "seed4": adds Z (Zinc), the 4th medicine; "seed4 5" also adds C (Calcium) for a 3rd row, which scrolls.
+ * "seed4 <n>" (n >= 6) fills up to n active medicines (at most 50) with Z1..Z9, ZA..ZZ, Z0, then Y1.., four
+ * daily times 6 h apart each, the first 60 to 107 min from now: no dose is open while measuring.
+ * "seed4 off" archives all of them. "seed4 arch <n>" adds n archived Zinc records (see seed_archived). */
 static void job_seed4(const char *arg)
 {
-    if (strncmp(arg, "arch ", 5) == 0) {
-        seed_archived(atoi(arg + 5));
+    if (strncmp(arg, "arch", 4) == 0 && (arg[4] == 0 || arg[4] == ' ')) {
+        int count = atoi(arg + 4);
+        if (count < 1) {
+            ESP_LOGE(TAG, "usage: seed4 arch <n>");
+            return;
+        }
+        seed_archived(count);
         return;
     }
     if (strcmp(arg, "off") == 0) {
