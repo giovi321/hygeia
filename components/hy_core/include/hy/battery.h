@@ -33,7 +33,7 @@ void hy_batt_init(hy_batt_t *b, int32_t saved_rate_cph); /* both armed; rate fro
 /* One reading at now (monotonic s). Returns the flags above. */
 uint32_t hy_batt_update(hy_batt_t *b, const hy_batt_raw_t *r, int64_t now);
 /* Top-bar text "78%"; the caller supplies the text for an unknown percent. *red when 0 <= pct < 15;
- * *bolt when raw.chg == CHARGING. */
+ * *bolt when USB power is present and a battery is detected (raw.vbus && raw.present), charging or full. */
 void hy_batt_text(const hy_batt_t *b, char *buf, size_t len, const char *unknown, bool *red, bool *bolt);
 /* Estimate text "~2 d" (>= 48 h, days rounded half up), "~9 h" (>= 1 h, hours rounded half up), "<1 h";
  * false (hidden) when rate unknown, USB present, or pct unknown. */

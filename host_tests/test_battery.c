@@ -130,8 +130,19 @@ static void test_text_red_and_bolt(void)
     hy_batt_text(&B, buf, sizeof buf, "--", &red, &bolt);
     TEST_ASSERT_EQUAL_STRING("78%", buf);
     TEST_ASSERT_TRUE(bolt);
-    r.chg = HY_CHG_DONE;
+    r.chg = HY_CHG_DONE; /* full battery on USB: bolt stays on */
     hy_batt_update(&B, &r, T0 + 120);
+    hy_batt_text(&B, buf, sizeof buf, "--", &red, &bolt);
+    TEST_ASSERT_TRUE(bolt);
+    r.vbus = false; /* no USB */
+    r.chg = HY_CHG_NONE;
+    hy_batt_update(&B, &r, T0 + 180);
+    hy_batt_text(&B, buf, sizeof buf, "--", &red, &bolt);
+    TEST_ASSERT_FALSE(bolt);
+    r.present = false; /* USB but no battery */
+    r.vbus = true;
+    r.pct = -1;
+    hy_batt_update(&B, &r, T0 + 240);
     hy_batt_text(&B, buf, sizeof buf, "--", &red, &bolt);
     TEST_ASSERT_FALSE(bolt);
 }

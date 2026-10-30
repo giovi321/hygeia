@@ -139,9 +139,10 @@ void ui_battery_text(char *pct, size_t pct_len, bool *red, bool *bolt, char *est
     if (!st.pmu_ok) {
         st.batt.pct = -1;
         st.batt.raw.chg = HY_CHG_NONE;
+        st.batt.raw.present = false;
     }
     if (st.batt.pct < 0) {
-        st.batt.raw.chg = HY_CHG_NONE;   /* no battery: no bolt */
+        st.batt.raw.present = false;   /* no battery: no bolt */
     }
     hy_batt_text(&st.batt, pct, pct_len, HY_S_BATTERY_NONE, red, bolt);
     *has_est = hy_batt_estimate(&st.batt, est, est_len);
