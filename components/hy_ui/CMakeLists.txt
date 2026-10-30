@@ -20,6 +20,7 @@ idf_component_register(
         "src/kbd.c"
         "src/note.c"
         "src/earlier.c"
+        "src/medform.c"
         "src/qs.c"
         "src/settings.c"
         "src/timeset.c"

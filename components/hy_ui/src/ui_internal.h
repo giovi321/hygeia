@@ -109,6 +109,8 @@ void      ui_nav_push(hy_view_t v);
 void      ui_nav_reset(void);                    /* debug: back to the root whatever overlay is showing */
 #endif
 void      ui_nav_pop(void);                      /* one level up, whatever overlay is showing */
+void      ui_nav_home(void);                     /* back to the root; a pager root becomes HOME */
+void      ui_nav_set_form_dirty(bool dirty);     /* medform.c: the draft has unsaved changes (nav rule 4b) */
 lv_obj_t *ui_view_box(void);                     /* a hidden 480 x 424 view container in ui_content() */
 void      ui_register_view(hy_view_t v, lv_obj_t *obj); /* the view nav_host shows for v */
 void      ui_open_detail(uint32_t med_id);
@@ -202,6 +204,17 @@ void note_debug_text(const char *text);          /* sets the note field as typin
 void earlier_debug_set(int hour, int minute);    /* sets the rollers as turning them would */
 #endif
 
+/* medform.c: the step-by-step form that adds or edits a medicine on the device (hy_core hy/medform.h holds the draft
+ * and the rules). The draft is static RAM, so it survives dimming, a due card and the power-off overlay. */
+void medform_create(void);                       /* registers HY_V_MEDFORM */
+void medform_open_new(void);                     /* hy_mf_new on hy_meds(), push HY_V_MEDFORM */
+void medform_open_edit(uint32_t med_id);         /* hy_mf_edit; on error the info toast, no push */
+void medform_show(void);                         /* nav_host: the view became the top; redraws the current page */
+void medform_back(void);                         /* HY_FX_FORM_BACK: previous page, or "Discard changes?" */
+#if CONFIG_HY_DEBUG_CONSOLE
+void medform_debug(const char *arg);             /* "new|edit <code>|name <text>|...|state": see hy_ui_debug_mf */
+#endif
+
 /* qs.c, settings.c, timeset.c: quick settings, Settings and its sub-views, the set-the-time screen */
 void qs_create(void);
 void qs_show(void);                              /* the view became the top: values and the 200 ms slide */
@@ -231,6 +244,7 @@ void home_refresh(bool animate);         /* tiles from the scheduler snapshot; L
 void home_tap_med(uint32_t med_id);      /* logs a dose (debug `tap` calls it directly) */
 void home_tile_click(uint32_t med_id);   /* a tile's SHORT_CLICKED: logs only when the stroke was a TAP */
 bool home_med_id_by_code(const char *code, uint32_t *id);
+void home_show_med(uint32_t med_id);     /* scroll that medicine's tile into view (now, or at the next rebuild) */
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */
 

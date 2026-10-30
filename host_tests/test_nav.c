@@ -375,6 +375,15 @@ static void test_form_edge_right_back(void)
     TEST_ASSERT_EQUAL(HY_V_MEDFORM, hy_nav_view(&n));
 }
 
+static void test_form_edge_right_dirty_back(void)
+{
+    hy_nav_t n = form_nav();
+    n.form_dirty = true;
+    TEST_ASSERT_EQUAL(HY_FX_FORM_BACK, hy_nav_gesture(&n, HY_G_EDGE_RIGHT));
+    TEST_ASSERT_EQUAL(2, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_MEDFORM, hy_nav_view(&n));
+}
+
 static void test_form_edge_up_dirty_ignored(void)
 {
     hy_nav_t n = form_nav();
@@ -486,6 +495,7 @@ int main(void)
     RUN_TEST(test_off_counts_as_idle);
     RUN_TEST(test_due_swipe_down_prev);
     RUN_TEST(test_form_edge_right_back);
+    RUN_TEST(test_form_edge_right_dirty_back);
     RUN_TEST(test_form_edge_up_dirty_ignored);
     RUN_TEST(test_form_edge_up_clean_home);
     RUN_TEST(test_form_qs_opens);
