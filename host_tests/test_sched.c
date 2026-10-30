@@ -547,6 +547,46 @@ static void test_boot_inside_window_then_missed(void)
     TEST_ASSERT_EQUAL_INT64(L(8, 0), out.to_miss[0].slot);
 }
 
+/* 100 stored: 50 archived listed first, then 50 active, all fixed 08:00. The archived medicines
+ * take no seen, candidate or to_miss entry, so every active medicine is tracked, due and missed. */
+static void test_archived_take_no_active_slot(void)
+{
+    static hy_med_t big[HY_MAX_STORED];
+    reset();
+    for (int i = 0; i < HY_MAX_STORED; i++) {
+        hy_med_t *m = &big[i];
+        memset(m, 0, sizeof *m);
+        hy_med_defaults(m);
+        m->id = (uint32_t)(i + 1);
+        m->code[0] = (char)('A' + i % 26);
+        m->code[1] = (char)('0' + i / 26);
+        strcpy(m->name, "Filler");
+        m->type = HY_SCHED_FIXED;
+        m->times[0] = 8 * 60;
+        m->n_times = 1;
+        m->archived = i < HY_MAX_STORED - HY_MAX_MEDS;
+        m->order = (uint16_t)(i == HY_MAX_STORED - 1 ? 0 : i + 1);   /* the last one sorts first */
+    }
+    hy_sched_in_t in;
+    memset(&in, 0, sizeof in);
+    in.meds = big;
+    in.n_meds = HY_MAX_STORED;
+    in.tz = tz;
+
+    hy_sched_start_tracking(&s, L(7, 0));
+    in.now = L(8, 5);
+    hy_sched_eval(&s, &in, &out);
+    TEST_ASSERT_EQUAL_size_t(HY_MAX_MEDS, s.n_seen);
+    TEST_ASSERT_EQUAL_UINT(HY_SCHED_MAX_OPEN, out.n_open);
+    TEST_ASSERT_EQUAL_UINT32(HY_MAX_STORED, out.open[0].med_id);   /* last stored, first by order */
+    for (size_t i = 0; i < out.n_open; i++) TEST_ASSERT_TRUE(out.open[i].med_id > HY_MAX_STORED - HY_MAX_MEDS);
+
+    in.now = L(10, 5);
+    hy_sched_eval(&s, &in, &out);
+    TEST_ASSERT_EQUAL_UINT(HY_MAX_MEDS, out.n_to_miss);
+    TEST_ASSERT_TRUE(in_list(out.to_miss, out.n_to_miss, HY_MAX_STORED, L(8, 0)));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -570,5 +610,6 @@ int main(void)
     RUN_TEST(test_boot_late_slot_still_due);
     RUN_TEST(test_boot_after_window_untracked);
     RUN_TEST(test_boot_inside_window_then_missed);
+    RUN_TEST(test_archived_take_no_active_slot);
     return UNITY_END();
 }

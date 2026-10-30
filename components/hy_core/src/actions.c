@@ -9,6 +9,12 @@
 #define QUERY_MAX 128
 #define LOOKBACK_S (8 * 86400LL)
 
+/* Placement of the large medicine arrays: the device build defines it (component CMakeLists.txt) to
+ * put them in PSRAM; empty on the host. */
+#ifndef HY_EXT_BSS
+#define HY_EXT_BSS
+#endif
+
 typedef struct {
     bool used;
     uint32_t log_id, med_id;
@@ -27,14 +33,14 @@ static void *store_ctx;
 static const hy_clock_port_t *clk;
 static void *clk_ctx;
 
-static hy_med_t meds[HY_MAX_MEDS];
-static hy_med_t scratch[HY_MAX_MEDS];
+static HY_EXT_BSS hy_med_t meds[HY_MAX_STORED];
+static HY_EXT_BSS hy_med_t scratch[HY_MAX_STORED];
 static size_t n_meds;
 static undo_rec_t undo[UNDO_SLOTS];
 static size_t undo_next;
 static bool inited;
 static hy_log_t qbuf[QUERY_MAX];
-static hy_snooze_t snz[HY_MAX_MEDS];
+static hy_snooze_t snz[HY_MAX_MEDS];      /* archived medicines have no snooze */
 static size_t n_snz;
 static hy_snooze_t snz_out[HY_MAX_MEDS];
 static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out);
@@ -78,12 +84,12 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
     store = NULL; clk = NULL; store_ctx = NULL; clk_ctx = NULL;
     if (!s || !c) return HY_E_INVALID;
     size_t n = 0;
-    hy_err_t err = s->load_meds(sctx, meds, HY_MAX_MEDS, &n);
+    hy_err_t err = s->load_meds(sctx, meds, HY_MAX_STORED, &n);
     if (err != HY_OK) {
         memset(meds, 0, sizeof meds);
         return HY_E_IO;
     }
-    if (n > HY_MAX_MEDS) n = HY_MAX_MEDS;
+    if (n > HY_MAX_STORED) n = HY_MAX_STORED;
     n_meds = n;
     sort_meds(meds, n_meds);
     store = s; store_ctx = sctx; clk = c; clk_ctx = cctx;
@@ -95,6 +101,14 @@ size_t hy_meds(const hy_med_t **out)
 {
     if (out) *out = meds;
     return n_meds;
+}
+
+size_t hy_meds_active_count(void)
+{
+    size_t k = 0;
+    for (size_t i = 0; i < n_meds; i++)
+        if (!meds[i].archived) k++;
+    return k;
 }
 
 /* ---- medicines ---- */
@@ -110,7 +124,8 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
     bool drop_snooze = false;
     hy_med_t entry = *m;
     if (m->id == 0) {
-        if (n_meds >= HY_MAX_MEDS) return HY_E_FULL;
+        if (n_meds >= HY_MAX_STORED) return HY_E_FULL;
+        if (!m->archived && hy_meds_active_count() >= HY_MAX_MEDS) return HY_E_FULL;
         uint32_t max_id = 0;
         for (size_t i = 0; i < n_meds; i++)
             if (meds[i].id > max_id) max_id = meds[i].id;
@@ -121,6 +136,8 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
         for (i = 0; i < n; i++)
             if (scratch[i].id == m->id) break;
         if (i == n) return HY_E_NOT_FOUND;
+        if (scratch[i].archived && !entry.archived && hy_meds_active_count() >= HY_MAX_MEDS)
+            return HY_E_FULL;
         /* The caller's copy may be stale: the pill count is owned by this module, unless
          * the caller turns counting on, when its value is the starting count. */
         if (!(m->pills_enabled && !scratch[i].pills_enabled))

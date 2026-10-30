@@ -12,7 +12,7 @@
 /* ---- in-memory store port that records calls ---- */
 #define MAXLOG 200
 static struct {
-    hy_med_t meds[HY_MAX_MEDS]; size_t n_meds;
+    hy_med_t meds[HY_MAX_STORED]; size_t n_meds;
     hy_log_t logs[MAXLOG]; size_t n_logs; uint32_t next_id;
     int saves, appends, append_attempts, updates, deletes, loads;
     bool fail_load, fail_save, fail_append, fail_update, fail_delete;
@@ -333,21 +333,111 @@ static void test_upsert_id_uses_max_including_archived(void)
     TEST_ASSERT_EQUAL_UINT32(4, m.id);
 }
 
+/* Distinct 2-character code for filler medicine i (0..287): Q0..QZ, R0..RZ, ... */
+static void filler_code(int i, char code[3])
+{
+    static const char alnum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    code[0] = "QRSTUWXY"[i / 36];
+    code[1] = alnum[i % 36];
+    code[2] = 0;
+}
+
+/* Replaces the store with n_active active then n_archived archived medicines (ids 1..n, distinct
+ * codes) and re-initialises the module. */
+static void load_fixture(int n_active, int n_archived)
+{
+    memset(st.meds, 0, sizeof st.meds);
+    int n = n_active + n_archived;
+    for (int i = 0; i < n; i++) {
+        char code[3]; filler_code(i, code);
+        fixed_med(&st.meds[i], (uint32_t)(i + 1), code, "Filler", (uint16_t)i);
+        st.meds[i].archived = i >= n_active;
+    }
+    st.n_meds = (size_t)n;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    st.saves = 0;
+}
+
 static void test_upsert_unknown_id_and_full(void)
 {
     hy_med_t m; fixed_med(&m, 77, "N", "New", 9);
     TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_med_upsert(&m));
     TEST_ASSERT_EQUAL_INT(0, st.saves);
-    /* fill to the limit with archived medicines (codes may repeat among archived) */
+    /* fill to the limit with active medicines (3 from setUp) */
     for (int i = 3; i < HY_MAX_MEDS; i++) {
-        hy_med_t f; fixed_med(&f, 0, "Z", "Filler", 10);
-        f.archived = true;
+        hy_med_t f; char code[3]; filler_code(i, code);
+        fixed_med(&f, 0, code, "Filler", 10);
         TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&f));
     }
+    TEST_ASSERT_EQUAL_size_t(HY_MAX_MEDS, hy_meds_active_count());
     fixed_med(&m, 0, "N", "New", 9);
     st.saves = 0;
     TEST_ASSERT_EQUAL_INT(HY_E_FULL, hy_act_med_upsert(&m));
     TEST_ASSERT_EQUAL_INT(0, st.saves);
+    /* a new archived medicine does not count toward the active limit */
+    m.archived = true;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&m));
+    TEST_ASSERT_EQUAL_size_t(HY_MAX_MEDS, hy_meds_active_count());
+}
+
+static void test_full_counts_active_only(void)
+{
+    load_fixture(50, 0);
+    hy_med_t m; fixed_med(&m, 0, "N", "New", 99);
+    TEST_ASSERT_EQUAL_INT(HY_E_FULL, hy_act_med_upsert(&m));
+    TEST_ASSERT_EQUAL_INT(0, st.saves);
+    TEST_ASSERT_EQUAL_size_t(50, st.n_meds);
+    const hy_med_t *p;
+    TEST_ASSERT_EQUAL_size_t(50, hy_meds(&p));
+
+    load_fixture(49, 30);
+    fixed_med(&m, 0, "N", "New", 99);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&m));
+    TEST_ASSERT_EQUAL_UINT32(80, m.id);   /* max id 79, archived included */
+    TEST_ASSERT_EQUAL_INT(1, st.saves);
+    TEST_ASSERT_EQUAL_size_t(80, st.n_meds);
+    TEST_ASSERT_EQUAL_size_t(50, hy_meds_active_count());
+}
+
+static void test_stored_cap(void)
+{
+    load_fixture(40, 60);
+    hy_med_t m; fixed_med(&m, 0, "N", "New", 99);
+    TEST_ASSERT_EQUAL_INT(HY_E_FULL, hy_act_med_upsert(&m));
+    m.archived = true;
+    TEST_ASSERT_EQUAL_INT(HY_E_FULL, hy_act_med_upsert(&m));
+    TEST_ASSERT_EQUAL_INT(0, st.saves);
+    TEST_ASSERT_EQUAL_size_t(100, st.n_meds);
+    /* editing an existing medicine at the cap still works */
+    fixed_med(&m, 1, "Q0", "Renamed", 0);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&m));
+}
+
+static void test_unarchive_full(void)
+{
+    load_fixture(50, 1);   /* id 51 archived */
+    TEST_ASSERT_EQUAL_INT(HY_E_FULL, hy_act_med_archive(51, false));
+    TEST_ASSERT_EQUAL_INT(0, st.saves);
+    TEST_ASSERT_TRUE(med_by_id(51)->archived);
+    /* the same through a plain upsert of the stored record */
+    hy_med_t m = *med_by_id(51);
+    m.archived = false;
+    TEST_ASSERT_EQUAL_INT(HY_E_FULL, hy_act_med_upsert(&m));
+    TEST_ASSERT_EQUAL_INT(0, st.saves);
+
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_archive(1, true));   /* 49 active */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_archive(51, false));
+    TEST_ASSERT_FALSE(med_by_id(51)->archived);
+    TEST_ASSERT_EQUAL_size_t(50, hy_meds_active_count());
+}
+
+static void test_load_stored_100(void)
+{
+    load_fixture(37, 63);
+    const hy_med_t *p;
+    TEST_ASSERT_EQUAL_size_t(100, hy_meds(&p));
+    TEST_ASSERT_EQUAL_size_t(37, hy_meds_active_count());
+    TEST_ASSERT_EQUAL_UINT32(100, med_by_id(100)->id);
 }
 
 static void test_upsert_save_failure_keeps_state(void)
@@ -1041,6 +1131,10 @@ int main(void)
     RUN_TEST(test_upsert_validates);
     RUN_TEST(test_upsert_id_uses_max_including_archived);
     RUN_TEST(test_upsert_unknown_id_and_full);
+    RUN_TEST(test_full_counts_active_only);
+    RUN_TEST(test_stored_cap);
+    RUN_TEST(test_unarchive_full);
+    RUN_TEST(test_load_stored_100);
     RUN_TEST(test_upsert_save_failure_keeps_state);
     RUN_TEST(test_upsert_sorts_by_order_stably);
     RUN_TEST(test_archive);

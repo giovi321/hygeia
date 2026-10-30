@@ -23,3 +23,7 @@ idf_component_register(
     PRIV_REQUIRES
         espressif__cjson
 )
+
+# The action module's medicine arrays (HY_MAX_STORED entries each) live in PSRAM
+# (CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY); the host build leaves HY_EXT_BSS empty.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE [[HY_EXT_BSS=__attribute__((section(".ext_ram.bss")))]])
