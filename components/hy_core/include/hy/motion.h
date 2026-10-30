@@ -52,9 +52,9 @@ void     hy_orient_set(hy_orient_t *o, hy_rot_t r);   /* forced (lock, debug): c
 #define HY_SHK_SETTLE_MS    200  /* after reset: samples only train the baseline */
 #define HY_SHK_COOLDOWN_MS 1000  /* after a detection */
 
-/* lat_axis is the axis that latched the last peak. */
+/* lat_axis is the axis that latched the last peak; cooling is true from a detection until the cooldown ends. */
 typedef struct { int32_t base[3]; uint32_t start_ms, first_ms, last_ms, cool_until_ms; int8_t axis, sign, lat_axis;
-                 uint8_t count; bool latched, primed; } hy_shake_t;
+                 uint8_t count; bool latched, primed, cooling; } hy_shake_t;
 
 void hy_shake_reset(hy_shake_t *s, uint32_t now_ms);
 /* Per axis: hp = a - base, then base += (a - base) / 16 (the first sample after reset sets base = a and hp = 0).
