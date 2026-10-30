@@ -12,46 +12,8 @@
 
 static const char *TAG = "ui_note";
 
-LV_FONT_DECLARE(lv_font_montserrat_14);
-
 static lv_obj_t *s_root, *s_name, *s_ta, *s_kb;
 static uint32_t s_med_id;
-static char s_prev[HY_NOTE_MAX * 4 + 1];
-/* Simplified QWERTY keyboard: ten keys in the top row so every key is about 43 px wide on the 480 px panel (the stock
- * map has 10 to 12 per row at about 35 px). All lowercase, no shift or cursor keys, and a bottom row with the mode
- * key, space, backspace and OK. The shorter letter rows are centred with hidden spacer buttons: a key is 2 width
- * units, a row is 20 units. The mode texts are the ones the stock keyboard handler switches on. */
-#define KB_MODE_SYMBOLS "1#"
-#define KB_MODE_LETTERS "abc"
-#define KB_KEY(w)       (LV_BUTTONMATRIX_CTRL_POPOVER | (w))
-#define KB_MODE(w)      (LV_KEYBOARD_CTRL_BUTTON_FLAGS | (w))
-#define KB_GAP(w)       (LV_BUTTONMATRIX_CTRL_HIDDEN | LV_BUTTONMATRIX_CTRL_DISABLED | (w))
-#define KB_H            220   /* was HY_CONTENT_H / 2 = 212; the Log button ends at y 194 of the 424 px content */
-#define KB_NINE         KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1)
-#define KB_W2           KB_KEY(2)
-
-static const char *const kb_map_letters[] = {
-    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
-    " ", "a", "s", "d", "f", "g", "h", "j", "k", "l", " ", "\n",
-    " ", "z", "x", "c", "v", "b", "n", "m", " ", "\n",
-    KB_MODE_SYMBOLS, " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""};
-static const lv_buttonmatrix_ctrl_t kb_ctrl_letters[] = {
-    KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2,
-    KB_GAP(1), KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_GAP(1),
-    KB_GAP(3), KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_W2, KB_GAP(3),
-    KB_MODE(3), 11, LV_BUTTONMATRIX_CTRL_CHECKED | 3, KB_MODE(3)};
-static const char *const kb_map_symbols[] = {
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "\n",
-    "0", ".", ",", "-", ":", ";", "/", "(", ")", "\n",
-    "!", "?", "+", "=", "%", "@", "&", "'", "\n",
-    KB_MODE_LETTERS, " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""};
-static const lv_buttonmatrix_ctrl_t kb_ctrl_symbols[] = {
-    KB_NINE,
-    KB_NINE,
-    KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1), KB_KEY(1),
-    KB_MODE(2), 5, LV_BUTTONMATRIX_CTRL_CHECKED | 2, KB_MODE(2)};
-
-static lv_font_t s_kb_font;   /* Inter 26 bold with Montserrat as the fallback for the keyboard's symbol keys */
 
 /* Cuts s to at most max bytes on a UTF-8 boundary */
 static void truncate_utf8(char *s, size_t max)
@@ -116,38 +78,6 @@ static void cancel_cb(lv_event_t *e)
     ui_nav_pop();
 }
 
-/* The keyboard's enter and OK keys must not auto-repeat: a held key would send READY again and the repeat
- * counts as the confirming second request of the R29 too-soon warning. Every mode switch reloads the stock control
- * map, so the flag is set again on each press. One press, one READY. */
-static void kb_no_repeat(void)
-{
-    for (uint32_t i = 0; i < 64; i++) {
-        const char *t = lv_buttonmatrix_get_button_text(s_kb, i);
-        if (!t) {
-            break;
-        }
-        if (strcmp(t, LV_SYMBOL_NEW_LINE) == 0 || strcmp(t, LV_SYMBOL_OK) == 0) {
-            lv_buttonmatrix_set_button_ctrl(s_kb, i, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
-        }
-    }
-}
-
-/* The text before the press, so a stroke that only woke the screen can be taken back after the keyboard typed it */
-static void kb_press_cb(lv_event_t *e)
-{
-    kb_no_repeat();
-    snprintf(s_prev, sizeof s_prev, "%s", lv_textarea_get_text(s_ta));
-    consume_cb(e);
-}
-
-static void kb_value_cb(lv_event_t *e)
-{
-    (void)e;
-    if (ui_input_waking()) {
-        lv_textarea_set_text(s_ta, s_prev);
-    }
-}
-
 void note_submit(void)
 {
     if (ui_current_view() != HY_V_NOTE) {
@@ -196,7 +126,9 @@ void note_show(uint32_t med_id)
     const hy_med_t *m = ui_find_med(med_id);
     lv_label_set_text(s_name, m ? m->name : "");
     lv_textarea_set_text(s_ta, "");
-    s_prev[0] = 0;
+    if (lv_keyboard_get_mode(s_kb) == LV_KEYBOARD_MODE_TEXT_UPPER) {
+        lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER);   /* shift armed on leaving does not carry over */
+    }
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -217,8 +149,6 @@ void note_create(void)
     s_root = ui_view_box();
     ui_register_view(HY_V_NOTE, s_root);
 
-    s_kb_font = *hy_type.title;
-    s_kb_font.fallback = &lv_font_montserrat_14;
     s_name = ui_label(s_root, hy_type.title, HY_C_TEXT, "");
     lv_obj_set_pos(s_name, 24, 2);
 
@@ -261,32 +191,6 @@ void note_create(void)
     lv_obj_add_event_cb(log, log_click_cb, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_center(ui_label(log, hy_type.body_bold, HY_C_TEXT, HY_S_NOTE_LOG));
 
-    s_kb = lv_keyboard_create(s_root);
-    lv_obj_set_size(s_kb, HY_SCREEN, KB_H);
-    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_keyboard_set_map(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_letters, kb_ctrl_letters);
-    lv_keyboard_set_map(s_kb, LV_KEYBOARD_MODE_SPECIAL, kb_map_symbols, kb_ctrl_symbols);
-    lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER);
-    lv_keyboard_set_textarea(s_kb, s_ta);
-    lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_BG), 0);
-    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(s_kb, 0, 0);
-    lv_obj_set_style_radius(s_kb, 0, 0);
-    lv_obj_set_style_pad_all(s_kb, 6, 0);
-    lv_obj_set_style_pad_gap(s_kb, 6, 0);
-    lv_obj_set_style_text_font(s_kb, &s_kb_font, LV_PART_ITEMS);
-    lv_obj_set_style_text_color(s_kb, lv_color_hex(HY_C_TEXT), LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_SURFACE2), LV_PART_ITEMS);
-    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
-    lv_obj_set_style_radius(s_kb, 12, LV_PART_ITEMS);
-    lv_obj_set_style_border_width(s_kb, 0, LV_PART_ITEMS);
-    lv_obj_set_style_shadow_width(s_kb, 0, LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_FILL), LV_PART_ITEMS | LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(s_kb, lv_color_hex(HY_C_FILL), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_text_color(s_kb, lv_color_hex(HY_C_TEXT), LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_add_event_cb(s_kb, kb_press_cb, LV_EVENT_PRESSED | LV_EVENT_PREPROCESS, NULL);   /* before the key's own handler */
-    lv_obj_add_event_cb(s_kb, consume_cb, LV_EVENT_PRESSING, NULL);
-    lv_obj_add_event_cb(s_kb, kb_value_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    kb_no_repeat();
+    s_kb = ui_kbd_create(s_root, s_ta);
     /* READY and CANCEL go to the keyboard and then to its textarea: handle them on the textarea only */
 }

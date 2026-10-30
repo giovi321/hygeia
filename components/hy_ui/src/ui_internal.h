@@ -184,6 +184,12 @@ void detail_refresh_if_changed(void);            /* generation changed and the d
 #if CONFIG_HY_DEBUG_CONSOLE
 void detail_debug_scroll(void);                  /* scrolls the detail to its end */
 #endif
+/* kbd.c: the QWERTY keyboard of the note view, shared with the medicine form: maps, controls, 220 px height, Inter 26
+   bold with the Montserrat fallback, no auto-repeat on enter and OK, the waking-stroke text restore and stroke
+   consumption, and a one-shot shift key. Bound to `ta`; READY and CANCEL arrive on the text area. State is per keyboard. */
+#define HY_KBD_H 220
+lv_obj_t *ui_kbd_create(lv_obj_t *parent, lv_obj_t *ta);
+
 void note_create(void);
 void note_show(uint32_t med_id);
 void note_submit(void);                          /* the Log button: log taken now with the note, back to detail */
