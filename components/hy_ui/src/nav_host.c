@@ -13,7 +13,7 @@
 
 static const char *TAG = "ui_nav";
 
-#define N_VIEWS (HY_V_STORAGE_DOWN + 1)
+#define N_VIEWS (HY_V_MED_ARCHIVE + 1)
 
 static hy_nav_t s_nav;
 static lv_obj_t *s_pager;
@@ -25,6 +25,7 @@ static volatile bool s_storage_down;
 static const char *const view_names[N_VIEWS] = {
     "HOME", "OVERVIEW", "HISTORY", "DETAIL", "NOTE", "EARLIER", "QS", "SETTINGS", "SET_ZONE", "SET_TIME",
     "SET_SOUND", "SET_DISPLAY", "ABOUT", "CLOCK_INVALID", "STORAGE_DOWN",
+    "MEDFORM", "MED_ARCHIVE",
 };
 
 static bool is_pager(hy_view_t v)
@@ -66,6 +67,7 @@ void ui_register_view(hy_view_t v, lv_obj_t *obj)
 static void fx_wake(void) { idle_wake(); }
 static void fx_snooze(void) { due_snooze(); }
 static void fx_due_next(void) { due_next(); }
+static void fx_due_prev(void) { due_prev(); }
 
 /* ---- showing ---- */
 
@@ -199,6 +201,11 @@ hy_nav_fx_t ui_nav_gesture(hy_gesture_t g)
     case HY_FX_DUE_NEXT:
         fx_due_next();
         break;
+    case HY_FX_DUE_PREV:
+        fx_due_prev();
+        break;
+    case HY_FX_FORM_BACK:
+        break; /* Task 7 calls medform_back() here */
     case HY_FX_NONE:
         break;
     }

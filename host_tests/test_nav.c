@@ -162,8 +162,8 @@ static void test_due_gestures(void)
     TEST_ASSERT_EQUAL(HY_FX_SNOOZE, hy_nav_gesture(&n, HY_G_SWIPE_LEFT));
     TEST_ASSERT_EQUAL(HY_FX_DUE_NEXT, hy_nav_gesture(&n, HY_G_SWIPE_UP));
     TEST_ASSERT_EQUAL(HY_FX_DUE_NEXT, hy_nav_gesture(&n, HY_G_EDGE_UP));
-    static const hy_gesture_t none[] = { HY_G_EDGE_DOWN, HY_G_SWIPE_RIGHT, HY_G_TAP, HY_G_LONG_PRESS,
-                                         HY_G_SWIPE_DOWN, HY_G_EDGE_RIGHT, HY_G_NONE };
+    static const hy_gesture_t none[] = { HY_G_SWIPE_RIGHT, HY_G_TAP, HY_G_LONG_PRESS,
+                                         HY_G_EDGE_RIGHT, HY_G_NONE };
     for (unsigned i = 0; i < sizeof none / sizeof none[0]; i++) {
         TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, none[i]));
         TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
@@ -350,6 +350,98 @@ static void test_poweroff_rule(void)
     TEST_ASSERT_FALSE(n.poweroff);
 }
 
+static void test_due_swipe_down_prev(void)
+{
+    hy_nav_t n; hy_nav_init(&n); n.due = true;
+    TEST_ASSERT_EQUAL(HY_FX_DUE_PREV, hy_nav_gesture(&n, HY_G_SWIPE_DOWN));
+    TEST_ASSERT_EQUAL(HY_FX_DUE_PREV, hy_nav_gesture(&n, HY_G_EDGE_DOWN));
+    TEST_ASSERT_EQUAL(1, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
+    TEST_ASSERT_TRUE(n.due);
+}
+
+static hy_nav_t form_nav(void)
+{
+    hy_nav_t n; hy_nav_init(&n);
+    hy_nav_push(&n, HY_V_MEDFORM);
+    return n;
+}
+
+static void test_form_edge_right_back(void)
+{
+    hy_nav_t n = form_nav();
+    TEST_ASSERT_EQUAL(HY_FX_FORM_BACK, hy_nav_gesture(&n, HY_G_EDGE_RIGHT));
+    TEST_ASSERT_EQUAL(2, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_MEDFORM, hy_nav_view(&n));
+}
+
+static void test_form_edge_up_dirty_ignored(void)
+{
+    hy_nav_t n = form_nav();
+    n.form_dirty = true;
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_UP));
+    TEST_ASSERT_EQUAL(2, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_MEDFORM, hy_nav_view(&n));
+}
+
+static void test_form_edge_up_clean_home(void)
+{
+    hy_nav_t n = form_nav();
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_UP));
+    TEST_ASSERT_EQUAL(1, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
+}
+
+static void test_form_qs_opens(void)
+{
+    hy_nav_t n = form_nav();
+    n.form_dirty = true;
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_DOWN));
+    TEST_ASSERT_EQUAL(3, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_QS, hy_nav_view(&n));
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_SWIPE_UP));
+    TEST_ASSERT_EQUAL(2, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_MEDFORM, hy_nav_view(&n));
+}
+
+static void test_form_under_due_and_idle(void)
+{
+    hy_nav_t n = form_nav();
+    n.due = true;
+    TEST_ASSERT_EQUAL(HY_FX_SNOOZE, hy_nav_gesture(&n, HY_G_SWIPE_LEFT));
+    TEST_ASSERT_EQUAL(HY_FX_DUE_PREV, hy_nav_gesture(&n, HY_G_SWIPE_DOWN));
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_RIGHT));
+    TEST_ASSERT_EQUAL(2, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_MEDFORM, hy_nav_view(&n));
+    n.due = false; n.idle = true;
+    TEST_ASSERT_EQUAL(HY_FX_WAKE, hy_nav_gesture(&n, HY_G_EDGE_RIGHT));
+    TEST_ASSERT_FALSE(n.idle);
+    TEST_ASSERT_EQUAL(2, n.depth);
+    n.poweroff = true;
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_RIGHT));
+    TEST_ASSERT_EQUAL(2, n.depth);
+}
+
+static void test_archive_view_edge_right_pops(void)
+{
+    hy_nav_t n; hy_nav_init(&n);
+    hy_nav_open_detail(&n, 7);
+    hy_nav_push(&n, HY_V_MED_ARCHIVE);
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_RIGHT));
+    TEST_ASSERT_EQUAL(2, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_DETAIL, hy_nav_view(&n));
+}
+
+static void test_form_from_detail(void)
+{
+    hy_nav_t n; hy_nav_init(&n);
+    hy_nav_open_detail(&n, 7);
+    hy_nav_push(&n, HY_V_MEDFORM);
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_UP));
+    TEST_ASSERT_EQUAL(1, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
+}
+
 static void test_off_counts_as_idle(void)
 {
     hy_gesture_t gs[] = { HY_G_SWIPE_LEFT, HY_G_TAP };
@@ -392,5 +484,13 @@ int main(void)
     RUN_TEST(test_double_tap_exact_and_wrap);
     RUN_TEST(test_poweroff_rule);
     RUN_TEST(test_off_counts_as_idle);
+    RUN_TEST(test_due_swipe_down_prev);
+    RUN_TEST(test_form_edge_right_back);
+    RUN_TEST(test_form_edge_up_dirty_ignored);
+    RUN_TEST(test_form_edge_up_clean_home);
+    RUN_TEST(test_form_qs_opens);
+    RUN_TEST(test_form_under_due_and_idle);
+    RUN_TEST(test_archive_view_edge_right_pops);
+    RUN_TEST(test_form_from_detail);
     return UNITY_END();
 }

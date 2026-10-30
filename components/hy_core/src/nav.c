@@ -45,7 +45,7 @@ void hy_nav_init(hy_nav_t *n)
     n->stack[0] = HY_V_HOME;
     n->depth = 1;
     n->med_id = 0;
-    n->due = n->idle = n->clock_invalid = n->storage_down = n->poweroff = false;
+    n->due = n->idle = n->clock_invalid = n->storage_down = n->poweroff = n->form_dirty = false;
 }
 
 hy_view_t hy_nav_view(const hy_nav_t *n) { return n->stack[n->depth - 1]; }
@@ -100,6 +100,7 @@ hy_nav_fx_t hy_nav_gesture(hy_nav_t *n, hy_gesture_t g)
     if (n->due) {
         if (g == HY_G_SWIPE_LEFT) return HY_FX_SNOOZE;
         if (g == HY_G_SWIPE_UP || g == HY_G_EDGE_UP) return HY_FX_DUE_NEXT;
+        if (g == HY_G_SWIPE_DOWN || g == HY_G_EDGE_DOWN) return HY_FX_DUE_PREV;
         return HY_FX_NONE;
     }
     hy_view_t v = hy_nav_view(n);
@@ -113,6 +114,11 @@ hy_nav_fx_t hy_nav_gesture(hy_nav_t *n, hy_gesture_t g)
         if (n->depth >= HY_NAV_DEPTH) n->stack[HY_NAV_DEPTH - 1] = HY_V_QS; /* QS always opens */
         else hy_nav_push(n, HY_V_QS);
         return HY_FX_NONE;
+    }
+    /* 4b. medicine form: EDGE_RIGHT is one step back (the UI decides), a dirty form ignores EDGE_UP */
+    if (v == HY_V_MEDFORM) {
+        if (g == HY_G_EDGE_RIGHT) return HY_FX_FORM_BACK;
+        if (g == HY_G_EDGE_UP && n->form_dirty) return HY_FX_NONE;
     }
     /* 5. EDGE_UP elsewhere: back to the root, pager root becomes HOME */
     if (g == HY_G_EDGE_UP) {

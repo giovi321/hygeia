@@ -262,6 +262,7 @@ void splash_finish(lv_obj_t *next);              /* LVGL lock held: loads next w
 void due_create(void);
 void due_refresh(void);                  /* from the snapshot, when its generation changed; flash request too */
 bool due_visible(void);                  /* on USB the screen is held on while true (R1) */
+void due_prev(void);                     /* swipe down: previous showing entry, wrapping */
 void due_next(void);                     /* swipe up: next showing entry, wrapping */
 void due_snooze(void);                   /* swipe left: snooze the shown entry by settings snooze_min */
 void due_slide_complete(void);           /* the knob reached 90%: log taken */
