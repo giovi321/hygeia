@@ -46,8 +46,10 @@ esp_err_t hy_board_pmu_charger_setup(void);
 uint32_t  hy_board_pmu_irq(void);
 esp_err_t hy_board_pmu_read(hy_batt_raw_t *out);    /* STATUS1, STATUS2, 0xA4, 0x34/0x35 */
 void      hy_board_pmu_power_off(void);              /* the boot gate's AXP2101 power-off, public */
-/* Panel sleep in/out and display on/off; brightness unchanged. While the panel is off the LVGL flushes are
-   dropped (completed at once); the caller invalidates the screen after turning it back on. */
+/* Screen off: brightness 0, Display Off, Sleep In (GRAM and registers kept; not Deep Standby). Screen on: Sleep
+   Out, Display On, a full invalidate; the brightness stays 0 until the first frame after the wake has been sent,
+   then takes the last hy_board_set_brightness value. Blocks about 120 ms on, 10 ms off. While the panel is off the
+   LVGL flushes are dropped (completed at once) and hy_board_set_brightness only records the value. */
 void      hy_board_display_power(bool on);
 /* Called from the touch interrupt (ISR context) on every touch INT edge, beside the LVGL adapter's own
    handling; NULL clears. fn must be ISR safe. */
