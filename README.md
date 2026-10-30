@@ -19,7 +19,7 @@
 
 Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16 that reminds you about medicine doses and logs them. Logging a dose is one tap on a tile. At scheduled times the screen shows a full-screen card and plays a chime. It works with no network, no account and no cloud.
 
-This is firmware version 1.0.0. The documentation is at [giovi321.github.io/hygeia](https://giovi321.github.io/hygeia/); the sources of the pages are in [`docs/src/content/docs`](docs/src/content/docs).
+This is firmware version 0.3.0, a pre-release: Wi-Fi and the web UI come in a later version. The documentation is at [giovi321.github.io/hygeia](https://giovi321.github.io/hygeia/); the sources of the pages are in [`docs/src/content/docs`](docs/src/content/docs).
 
 <p align="center">
   <img src="docs/public/assets/mockups/01-home.png" alt="Design mockup of the Home screen" width="280" />

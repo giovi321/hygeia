@@ -13,7 +13,7 @@ Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16. It tur
 Hygeia is a personal reminder tool. It is not a medical device and must not be the only safeguard for medication that must not be missed. A reminder can fail: the battery can be flat, the device can be off, the clock can be wrong or the speaker can be muted. Check the reminders against another source before relying on them.
 :::
 
-:::note[Version 1.0.0]
+:::note[Version 0.3.0, pre-release]
 These pages describe what the firmware does today. Wi-Fi, the web UI, MQTT, Home Assistant, webhooks, auto-rotate and shake to undo are not built; they are listed on the [Roadmap](roadmap/) page only.
 :::
 
