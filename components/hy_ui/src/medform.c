@@ -255,7 +255,7 @@ static void text_load(void)
 static void ta_changed_cb(lv_event_t *e)
 {
     (void)e;
-    if (s_loading || !on_text_page() || ui_input_waking()) {   /* a waking keystroke is restored by the keyboard */
+    if (!s_root || s_loading || !on_text_page() || ui_input_waking()) {   /* a waking keystroke is restored by the keyboard */
         return;
     }
     const char *t = lv_textarea_get_text(s_ta);
@@ -530,6 +530,9 @@ static void add_label_update(void)
 static void roller_changed_cb(lv_event_t *e)
 {
     (void)e;
+    if (!s_root) {
+        return;
+    }
     add_label_update();
 }
 
