@@ -215,7 +215,7 @@ Gestures:
 | Gesture | Effect |
 |---|---|
 | Swipe left / right | pager: Home ⇄ Overview ⇄ History |
-| Pull down from top edge | Quick settings, from any screen |
+| Pull down from top edge | Quick settings, from any screen except the due card |
 | Swipe up from bottom edge | back to Home, from any screen, except on a medicine form with unsaved changes |
 | Swipe right from left edge | close a detail page |
 | Vertical swipe in the grid | scroll medicines |
@@ -224,17 +224,18 @@ Gestures:
 | Tap the "+" tile | add a medicine |
 | Slide the knob right (due card) | log as taken |
 | Swipe left on due card | snooze |
+| Swipe up on due card | next due entry |
 | Swipe down on due card | previous due entry |
 | Tap "Skip" (due card) | log as skipped |
 | Tap while dimmed | wake |
 
 Screens: Home (grid of rings, "+" tile opens the add-medicine form), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart, Edit and Archive at the bottom), Add or edit medicine (name, dose, code, colour, schedule), Archive confirm, Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
 
-Several due at once: the due card shows the first, with "+2 more"; a swipe up steps to the next entry and a swipe down to the previous. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
+Several due at once: the due card shows the first, with "+2 more"; a swipe up steps to the next entry and a swipe down to the previous, wrapping at either end. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
 
 History: a dose taken late gets an amber dot, so it differs from today's partial cell. The device cannot edit log entries, apart from undo within the 5 s toast; edits and deletes happen only in the web UI.
 
-Text entry: the on-screen keyboard is used for notes (log with note) and medicine names. Codes are picked from a grid of letters and digits. Nothing else on the device takes typed input. The keyboard has a one-shot shift key that capitalises the next letter only; the first letter of a medicine name is capitalised automatically.
+Text entry: the on-screen keyboard is used for notes (log with note), medicine names and doses. Codes are picked from a grid of letters and digits. Nothing else on the device takes typed input. The keyboard has a one-shot shift key that capitalises the next letter only. The first letter of a medicine name is capitalised automatically; a dose is not.
 
 Do-not-disturb and quiet hours: the card still appears, the chime is silent. Quiet hours are a web UI setting; the device has only the do-not-disturb toggle.
 
@@ -254,7 +255,7 @@ Design rules:
 - Large targets
 - Errors in plain language, on the screen where they can be fixed
 - "Discard changes?" before unsaved changes are lost
-- Nothing is saved without the Save button
+- Nothing is written without the Save button, or the Archive button on the archive confirmation
 
 A time added or changed so that today's occurrence is already inside its dose window becomes due right away, with the chime. The review screen says so before Save.
 
