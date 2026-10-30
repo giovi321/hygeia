@@ -462,7 +462,7 @@ static void job_gesture(const char *arg)
     ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright> [consumed]");
 }
 
-/* "due slide|skip|snooze|next|flash": the same functions the knob, the Skip tap and the swipes call */
+/* "due slide|skip|snooze|next|prev|flash": the same functions the knob, the Skip tap and the swipes call */
 static void job_due(const char *arg)
 {
     if (strcmp(arg, "slide") == 0) {
@@ -473,12 +473,14 @@ static void job_due(const char *arg)
         due_snooze();
     } else if (strcmp(arg, "next") == 0) {
         due_next();
+    } else if (strcmp(arg, "prev") == 0) {
+        due_prev();
     } else if (strcmp(arg, "drag") == 0 || strcmp(arg, "drop") == 0) {
         due_drag_debug(arg[2] == 'o');
     } else if (strcmp(arg, "flash") == 0) {
         due_flash_debug();
     } else {
-        ESP_LOGE(TAG, "usage: due <slide|skip|snooze|next|flash|drag|drop>");
+        ESP_LOGE(TAG, "usage: due <slide|skip|snooze|next|prev|flash|drag|drop>");
     }
 }
 

@@ -399,6 +399,15 @@ void due_next(void)
     render();
 }
 
+void due_prev(void)
+{
+    if (!s_visible || s_n < 2) {
+        return;
+    }
+    s_idx = (s_idx + s_n - 1) % s_n;
+    render();
+}
+
 void due_snooze(void)
 {
     entry_t *e = cur();
