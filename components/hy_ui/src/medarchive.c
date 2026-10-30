@@ -134,3 +134,13 @@ void medarchive_create(void)
     lv_obj_set_pos(ok, 18, 336);
     lv_obj_set_style_text_color(lv_obj_get_child(ok, 0), lv_color_hex(HY_C_MISS), 0);
 }
+
+/* nav_host, once the confirmation has left the nav stack; deferred because the Cancel or Archive tap is still running */
+void medarchive_destroy(void)
+{
+    if (!s_root) {
+        return;
+    }
+    lv_obj_delete_async(s_root);
+    s_root = s_title = s_due = NULL;
+}
