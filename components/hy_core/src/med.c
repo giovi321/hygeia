@@ -83,6 +83,9 @@ hy_err_t hy_med_validate(const hy_med_t *m, const hy_med_t *others, size_t n_oth
     if (name_len == 0 || name_len == sizeof(m->name)) {
         return HY_E_NAME; /* empty, or unterminated */
     }
+    if (strnlen(m->dose, sizeof(m->dose)) == sizeof(m->dose)) {
+        return HY_E_DOSE; /* unterminated */
+    }
     if (m->color > 9) {
         return HY_E_INVALID;
     }
@@ -91,6 +94,9 @@ hy_err_t hy_med_validate(const hy_med_t *m, const hy_med_t *others, size_t n_oth
     }
     if (!times_ok(m)) {
         return HY_E_TIMES;
+    }
+    if (m->min_interval_min > HY_INTERVAL_MAX_MIN) {
+        return HY_E_INTERVAL;
     }
     if (!m->archived) {
         for (size_t i = 0; i < n_others; i++) {
