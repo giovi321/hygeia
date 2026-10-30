@@ -1,11 +1,12 @@
 /* Power task: polls the AXP2101 interrupt flags, keeps the battery model, writes the heartbeat and the
  * battery log, and forwards PWR key, USB and battery changes to the UI (LVGL task, lv_async_call).
  *
- * Sleep mode: when the UI reports the screen OFF, the task pauses LVGL and, without VBUS, configures automatic
- * light sleep (240 / 40 MHz) with GPIO wakes on touch INT, RTC INT and the user key, and releases its CPU-max
- * lock. It then runs every 1000 ms (PMU poll, heartbeat, battery reading every 60 s) and ends the sleep mode on
- * the first wake cause: PWR key, VBUS change, touch, user key, RTC INT low, now >= next_wake, or a low or critical
- * battery crossing. The UI asks for the sleep mode again after its next tick if the screen stays OFF. */
+ * Sleep mode: when the UI reports the screen OFF (LVGL task), LVGL pauses itself and, without VBUS, automatic
+ * light sleep (240 / 40 MHz) is configured with GPIO wakes on touch INT, RTC INT and the user key, and the CPU-max
+ * lock is released. The task then runs every 1000 ms (PMU poll, heartbeat, battery reading every 60 s) and ends
+ * the sleep mode on the first wake cause: PWR key, VBUS change, touch, user key, RTC INT low, now >= next_wake, or a
+ * low or critical battery crossing. The UI asks for the sleep mode again after its next tick if the screen stays
+ * OFF. */
 #include "hy/power_run.h"
 
 #include <inttypes.h>
@@ -35,7 +36,6 @@
 #define SLEEP_LOOP_MS   1000   /* the loop timeout in the sleep mode: PMU poll */
 #define READ_EVERY_S    10
 #define SLEEP_READ_S    60     /* battery reading interval in the sleep mode */
-#define PAUSE_MS        500
 #define CPU_MIN_MHZ     40
 #define ALIVE_EVERY_S   60
 #define BATLOG_EVERY_S  600
@@ -380,7 +380,14 @@ static bool sleep_requested(void)
     return r;
 }
 
-/* Power task. The UI asked for the sleep mode: pause LVGL; without VBUS, light sleep with the GPIO wakes. */
+/* LVGL task only (hy_power_screen_off). The UI asked for the sleep mode: pause LVGL; without VBUS, light sleep with
+ * the GPIO wakes.
+ * The pause is requested from the LVGL task itself, never from another task. A pause from another task is a
+ * handshake (esp_lv_adapter_pause: set paused, clear pause_done_sem, wait for the worker to give it) that the worker
+ * can answer between the flag and the clear: the clear eats the answer, the pause times out and resets the flag,
+ * and the worker stays blocked in its paused wait (portMAX_DELAY) with nothing left to notify it (resume returns
+ * early when not paused). That froze the UI for good. From the worker the adapter takes the flag at once, and the
+ * worker blocks at the top of its loop after the current lv_timer_handler pass: no wait, no timeout. */
 static void enter_sleep(void)
 {
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
@@ -388,20 +395,16 @@ static void enter_sleep(void)
         xSemaphoreGive(s_sleep_mu);
         return;
     }
-    esp_err_t err = esp_lv_adapter_pause(PAUSE_MS);
+    esp_err_t err = esp_lv_adapter_pause(0);   /* from the worker: returns at once */
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "lvgl pause: %s, retry on the next pass", esp_err_to_name(err));
-        xSemaphoreGive(s_sleep_mu);
-        return;
-    }
-    if (!sleep_requested()) {
-        esp_lv_adapter_resume();   /* the screen left OFF while LVGL was pausing */
+        ESP_LOGW(TAG, "lvgl pause: %s, retry on the next tick", esp_err_to_name(err));
         xSemaphoreGive(s_sleep_mu);
         return;
     }
     int64_t now = mono_ms();
     portENTER_CRITICAL(&s_mux);
     bool vbus = s_vbus_real;
+    s_light = !vbus;   /* before s_asleep: the power task reads both without s_sleep_mu */
     s_asleep = true;
     s_n_entries++;
     if (s_stretch_open && now - s_stretch_t0_ms > s_longest_awake_off_ms) {
@@ -412,20 +415,24 @@ static void enter_sleep(void)
     s_sleep_t0_ms = now;
     ESP_LOGI(TAG, "power: lvgl paused");
     if (vbus) {
-        s_light = false;
         ESP_LOGI(TAG, "light sleep: not enabled (vbus)");
     } else {
-        s_light = true;
         ESP_LOGI(TAG, "light sleep: on");
         hy_board_sleep_wake_arm(true);
         pm_set(true);
         lock_hold(false);
     }
     xSemaphoreGive(s_sleep_mu);
+    if (s_task) {
+        xTaskNotifyGive(s_task);   /* the power task switches to its sleep-mode loop */
+    }
 }
 
-/* Any task but the LVGL task (which cannot run while asleep). Ends the sleep mode: CPU max, no light sleep, LVGL
- * running. The request is cleared: the UI asks again if the screen stays OFF. */
+/* Any task. Ends the sleep mode: CPU max, no light sleep, LVGL running. The request is cleared: the UI asks again if
+ * the screen stays OFF. From the LVGL task only between its own pause and the end of that lv_timer_handler pass
+ * (the screen left OFF in the same pass); the resume does not wait for the worker.
+ * Work for the LVGL task (lv_async_call) is queued before this call, not after: once LVGL runs, a tick can pause it
+ * again, and a call queued after that waits for the next wake. */
 static void exit_sleep(wake_cause_t cause)
 {
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
@@ -457,20 +464,17 @@ static void exit_sleep(wake_cause_t cause)
 void hy_power_screen_off(bool off)
 {
     portENTER_CRITICAL(&s_mux);
-    bool was = s_sleep_req;
     s_sleep_req = off;
     if (!off) {
         s_stretch_open = false;   /* the screen came back: not an awake stretch while OFF */
     }
     portEXIT_CRITICAL(&s_mux);
     if (off) {
-        if (!was && s_task) {
-            xTaskNotifyGive(s_task);
-        }
+        enter_sleep();   /* the UI calls this from the LVGL task: LVGL pauses after this lv_timer_handler pass */
         return;
     }
     if (s_asleep) {
-        exit_sleep(W_DEBUG);   /* only from a task other than LVGL's: the LVGL task does not run while asleep */
+        exit_sleep(W_DEBUG);   /* paused earlier in this same LVGL pass, or a caller in another task */
     }
 }
 
@@ -647,14 +651,13 @@ static void power_task(void *arg)
             if (cause == W_RTC) {
                 hy_clock_alarm_note_int();   /* the masked ISR missed the edge: the next tick takes and clears AF */
             }
-            if (cause != W_N) {
-                exit_sleep(cause);
-            } else {
+            if (cause == W_N) {
                 portENTER_CRITICAL(&s_mux);
                 s_n_wake[W_TIMER]++;
                 portEXIT_CRITICAL(&s_mux);
             }
         }
+        /* The UI work is queued first and the sleep mode ends after it (exit_sleep): LVGL runs it in its first pass */
         if (cause == W_TOUCH) {
             post(async_wake, (void *)(uintptr_t)HY_PWAKE_TOUCH);
         }
@@ -675,6 +678,9 @@ static void power_task(void *arg)
         }
         if (irq & HY_PMU_VBUS_OUT) {
             post(async_usb, NULL);
+        }
+        if (cause != W_N) {
+            exit_sleep(cause);
         }
 
         const uint32_t reread = HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT | HY_PMU_BAT_IN | HY_PMU_BAT_OUT |
@@ -701,11 +707,11 @@ static void power_task(void *arg)
             if (flags & HY_BATT_CRIT_CONFIRMED) {
                 ESP_LOGW(TAG, "battery critical confirmed: %d%%, %u mV", st.batt.pct, (unsigned)st.batt.raw.mv);
             }
-            if ((flags & (HY_BATT_EV_LOW | HY_BATT_EV_CRIT | HY_BATT_CRIT_CONFIRMED)) && s_asleep) {
-                exit_sleep(W_BATT);   /* the UI publishes the event; critical opens the countdown */
-            }
             if (flags) {
                 post(async_battery, (void *)(uintptr_t)flags);
+            }
+            if ((flags & (HY_BATT_EV_LOW | HY_BATT_EV_CRIT | HY_BATT_CRIT_CONFIRMED)) && s_asleep) {
+                exit_sleep(W_BATT);   /* the UI publishes the event; critical opens the countdown */
             }
             if (st.batt.rate_cph != saved_rate) {
                 saved_rate = st.batt.rate_cph;
@@ -720,10 +726,6 @@ static void power_task(void *arg)
         if (mono - last_alive >= ALIVE_EVERY_S) {
             last_alive = mono;
             alive_tick();
-        }
-
-        if (!s_asleep && sleep_requested()) {
-            enter_sleep();
         }
     }
 }

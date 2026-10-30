@@ -31,10 +31,11 @@ void      hy_power_set_ui(const hy_power_ui_t *ui);
  * hy_sched: app_main registers hy_sched_run_next_wake here. */
 void      hy_power_set_next_wake_fn(int64_t (*fn)(void));
 
-/* Sleep mode. The UI calls hy_power_screen_off(true) when the screen state is OFF (again after each tick while it
- * stays OFF): the power task pauses LVGL and, without VBUS, enables light sleep with the touch, RTC and user key
- * GPIO wakes. Each wake cause ends the sleep mode and clears the request. hy_power_screen_off(false) when the state
- * leaves OFF: returns with LVGL running. A CPU-max PM lock is held whenever the sleep mode is not on. */
+/* Sleep mode. The UI calls hy_power_screen_off(true) from the LVGL task, and only from there, when the screen state
+ * is OFF (again after each tick while it stays OFF): LVGL pauses at the end of the current lv_timer_handler pass and,
+ * without VBUS, light sleep is enabled with the touch, RTC and user key GPIO wakes. Each wake cause ends the sleep
+ * mode and clears the request. hy_power_screen_off(false) when the state leaves OFF: returns with LVGL running. A
+ * CPU-max PM lock is held whenever the sleep mode is not on. */
 void      hy_power_screen_off(bool off);
 void      hy_power_screen_state(uint8_t scr);    /* batlog scr column: 0 on, 1 dim, 2 off */
 void      hy_power_chime_on_battery(void);       /* sleepstat: a chime moment while on battery */

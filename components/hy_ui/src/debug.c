@@ -785,7 +785,8 @@ static void post(int kind, const char *arg)
     if (arg) {
         snprintf(j->arg, sizeof j->arg, "%s", arg);
     }
-    hy_power_resume();   /* the LVGL task is paused while the screen sleeps: the job must run now */
+    /* Queued first (the lock is free while LVGL is paused), resumed after: a tick in LVGL's first pass may pause it
+     * again, and a job queued after that would wait for the next wake */
     if (!hy_board_lock(1000)) {
         ESP_LOGE(TAG, "lvgl lock timeout");
         free(j);
@@ -795,6 +796,7 @@ static void post(int kind, const char *arg)
         free(j);
     }
     hy_board_unlock();
+    hy_power_resume();   /* the LVGL task is paused while the screen sleeps: the job must run now */
 }
 
 void hy_ui_debug_tap(const char *code) { post(J_TAP, code); }

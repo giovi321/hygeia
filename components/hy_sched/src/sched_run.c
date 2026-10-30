@@ -417,7 +417,8 @@ static void evaluate(int64_t now, bool pre_jump)
     s_query_us = query_us;
     char wake[40];
     fmt_wake(out.next_wake, wake, sizeof wake);
-    ESP_LOGI(TAG, "open=%u showing=%u new=%u miss=%u chime=%d next_wake=%s in %u ms",
+    /* "eval": how long this evaluation took, not the time to next_wake */
+    ESP_LOGI(TAG, "open=%u showing=%u new=%u miss=%u chime=%d next_wake=%s (eval %u ms)",
              (unsigned)out.n_open, (unsigned)out.n_showing, (unsigned)out.n_newly_due, written,
              out.chime ? 1 : 0, wake, (unsigned)((total_us + 500) / 1000));
 }
