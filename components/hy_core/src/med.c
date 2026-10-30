@@ -69,7 +69,7 @@ static bool times_ok(const hy_med_t *m)
 }
 
 /*
- * Check order: code format, name, color, schedule, then code uniqueness.
+ * Check order as listed in med.h.
  * Uniqueness is only enforced for a non-archived `m`, against non-archived
  * others with a different id. An archived medicine is not active, so it may
  * share a code.

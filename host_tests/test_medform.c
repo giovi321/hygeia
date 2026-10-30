@@ -147,7 +147,7 @@ static void test_suggest_code(void)
     TEST_ASSERT_EQUAL_STRING("C", out);
     hy_mf_suggest_code("Vitamin D", s_meds, s_n, 0, out);
     TEST_ASSERT_EQUAL_STRING("VD", out);
-    add_med(5, "VD", "Other", 4, false);
+    add_med(5, "VD", "Test", 4, false);
     hy_mf_suggest_code("Vitamin D", s_meds, s_n, 0, out);
     TEST_ASSERT_EQUAL_STRING("VI", out);
     hy_mf_suggest_code("Magnesium", s_meds, s_n, 0, out);
@@ -303,7 +303,7 @@ static void test_build_edit_keeps_web_fields(void)
     v->order = 7;
     hy_medform_t f;
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_mf_edit(&f, s_meds, s_n, 2));
-    hy_mf_set_name(&f, "Vitamin K");
+    hy_mf_set_name(&f, "Test");
     hy_mf_set_dose(&f, "2 tab");
     hy_mf_set_code(&f, "K", s_meds, s_n, NULL);
     hy_mf_set_color(&f, 8);
@@ -311,7 +311,7 @@ static void test_build_edit_keeps_web_fields(void)
     hy_med_t out;
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_mf_build(&f, s_meds, s_n, &out, NULL));
     TEST_ASSERT_EQUAL_UINT32(2, out.id);
-    TEST_ASSERT_EQUAL_STRING("Vitamin K", out.name);
+    TEST_ASSERT_EQUAL_STRING("Test", out.name);
     TEST_ASSERT_EQUAL_STRING("K", out.code);
     TEST_ASSERT_EQUAL_UINT8(8, out.color);
     TEST_ASSERT_EQUAL_UINT8(2, out.n_times);
@@ -334,20 +334,28 @@ static void test_build_edit_uses_live_record(void)
     fixture();
     hy_medform_t f;
     hy_mf_edit(&f, s_meds, s_n, 2);
-    hy_mf_set_name(&f, "Vitamin E");
+    hy_mf_set_name(&f, "Calcium");
     s_meds[1].late_after_min = 40;
     s_meds[1].pills_left = 12;
     hy_med_t out;
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_mf_build(&f, s_meds, s_n, &out, NULL));
     TEST_ASSERT_EQUAL_UINT16(40, out.late_after_min);
     TEST_ASSERT_EQUAL_INT16(12, out.pills_left);
-    TEST_ASSERT_EQUAL_STRING("Vitamin E", out.name);
+    TEST_ASSERT_EQUAL_STRING("Calcium", out.name);
 }
 
 static void test_build_type_switch(void)
 {
     fixture();
     hy_medform_t f;
+
+    /* new form: fixed -> as needed -> fixed keeps the times {480} */
+    hy_mf_new(&f, s_meds, s_n);
+    hy_mf_set_type(&f, HY_SCHED_AS_NEEDED);
+    hy_mf_set_type(&f, HY_SCHED_FIXED);
+    TEST_ASSERT_EQUAL_UINT8(1, f.draft.n_times);
+    TEST_ASSERT_EQUAL_UINT16(480, f.draft.times[0]);
+
     hy_mf_edit(&f, s_meds, s_n, 2);
     hy_mf_set_type(&f, HY_SCHED_AS_NEEDED);
     hy_mf_set_interval(&f, 240);
@@ -414,6 +422,49 @@ static void test_build_errors_map(void)
     TEST_ASSERT_EQUAL_INT(HY_MF_REVIEW, hy_mf_step_for_err(HY_E_FULL));
 }
 
+/* Errors on web-only fields of the live record send the user to Review, not to a step that cannot fix them. */
+static void test_build_errors_on_web_fields(void)
+{
+    fixture();
+    hy_medform_t f;
+    hy_med_t out;
+    hy_mf_step_t bad = HY_MF_NAME;
+
+    hy_mf_edit(&f, s_meds, s_n, 2);
+    s_meds[1].weekdays = 0;
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_mf_build(&f, s_meds, s_n, &out, &bad));
+    TEST_ASSERT_EQUAL_INT(HY_MF_REVIEW, bad);
+    s_meds[1].weekdays = 0x7F;
+
+    s_meds[1].active_from = 20261345;   /* month 13 */
+    s_meds[1].active_until = 20261201;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_mf_build(&f, s_meds, s_n, &out, &bad));
+    TEST_ASSERT_EQUAL_INT(HY_MF_REVIEW, bad);
+    s_meds[1].active_from = 0;
+    s_meds[1].active_until = 0;
+
+    s_meds[1].min_interval_min = 2000;   /* fixed keeps the live value */
+    TEST_ASSERT_EQUAL_INT(HY_E_INTERVAL, hy_mf_build(&f, s_meds, s_n, &out, &bad));
+    TEST_ASSERT_EQUAL_INT(HY_MF_REVIEW, bad);
+    s_meds[1].min_interval_min = 0;
+
+    /* errors from the draft keep their step */
+    f.draft.color = 12;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_mf_build(&f, s_meds, s_n, &out, &bad));
+    TEST_ASSERT_EQUAL_INT(HY_MF_COLOR, bad);
+    f.draft.color = 1;
+    f.draft.times[1] = f.draft.times[0];   /* duplicate time */
+    f.draft.n_times = 2;
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_mf_build(&f, s_meds, s_n, &out, &bad));
+    TEST_ASSERT_EQUAL_INT(HY_MF_TIMES, bad);
+
+    /* as needed: the interval error stays on the interval step */
+    f.draft.type = HY_SCHED_AS_NEEDED;
+    f.draft.min_interval_min = 1441;
+    TEST_ASSERT_EQUAL_INT(HY_E_INTERVAL, hy_mf_build(&f, s_meds, s_n, &out, &bad));
+    TEST_ASSERT_EQUAL_INT(HY_MF_INTERVAL, bad);
+}
+
 static void test_due_on_save(void)
 {
     fixture();
@@ -438,7 +489,7 @@ static void test_due_on_save(void)
 
     /* edit keeping {08:00} at 08:10 */
     hy_mf_edit(&f, s_meds, s_n, 2);
-    hy_mf_set_name(&f, "Vitamin E");
+    hy_mf_set_name(&f, "Calcium");
     TEST_ASSERT_EQUAL_INT(HY_OK, hy_mf_build(&f, s_meds, s_n, &built, NULL));
     TEST_ASSERT_EQUAL_UINT(0, hy_mf_due_on_save(&built, &s_meds[1], T_NOV02_0810, TZ_ZURICH, out, 8));
 }
@@ -462,6 +513,7 @@ int main(void)
     RUN_TEST(test_build_type_switch);
     RUN_TEST(test_build_edit_gone);
     RUN_TEST(test_build_errors_map);
+    RUN_TEST(test_build_errors_on_web_fields);
     RUN_TEST(test_due_on_save);
     return UNITY_END();
 }
