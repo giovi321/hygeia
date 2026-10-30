@@ -5,8 +5,8 @@
  * light sleep (240 / 40 MHz) is configured with GPIO wakes on touch INT, RTC INT and the user key, and the CPU-max
  * lock is released. With CONFIG_HY_PM_SCREEN_ON_DFS the CPU-max lock is also released while the screen is on without
  * VBUS: the CPU then runs at 240 MHz only while a task runs (FreeRTOS rtos locks) or LVGL refreshes (hy_board's
- * hy_render lock), and at 40 MHz in idle. The task then runs every 1000 ms (PMU poll, heartbeat, battery reading every 60 s) and ends
- * the sleep mode on the first wake cause: PWR key, VBUS change, touch, user key, RTC INT low, now >= next_wake, or a
+ * hy_render lock), and at 40 MHz in idle. The task then runs every 1000 ms (PMU poll, heartbeat, battery reading
+ * every 60 s) and ends the sleep mode on the first wake cause: PWR key, VBUS change, touch, user key, RTC INT low, now >= next_wake, or a
  * low or critical battery crossing. The UI asks for the sleep mode again after its next tick if the screen stays
  * OFF. */
 #include "hy/power_run.h"
