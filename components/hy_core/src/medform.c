@@ -434,3 +434,26 @@ size_t hy_mf_due_on_save(const hy_med_t *built, const hy_med_t *old, int64_t now
     int64_t from = now - (int64_t)built->missed_after_min * 60 + 1;
     return hy_occurrences(&tmp, from, now + 1, posix_tz, out, max);
 }
+
+bool hy_mf_snooze_warn(const hy_medform_t *f, const hy_med_t *meds, size_t n,
+                       const hy_snooze_t *snoozes, size_t n_snoozes)
+{
+    if (!f->edit_id) return false;
+    const hy_med_t *live = NULL;
+    for (size_t i = 0; i < n; i++) {
+        if (meds[i].id == f->edit_id && !meds[i].archived) live = &meds[i];
+    }
+    if (!live) return false;
+    bool changed = live->type != f->draft.type;
+    if (!changed && f->draft.type == HY_SCHED_FIXED) {
+        changed = live->n_times != f->draft.n_times;
+        for (size_t i = 0; !changed && i < live->n_times && i < HY_MAX_TIMES; i++) {
+            changed = live->times[i] != f->draft.times[i];
+        }
+    }
+    if (!changed) return false;
+    for (size_t i = 0; i < n_snoozes; i++) {
+        if (snoozes[i].med_id == f->edit_id) return true;
+    }
+    return false;
+}

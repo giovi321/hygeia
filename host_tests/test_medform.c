@@ -498,6 +498,29 @@ static void test_due_on_save(void)
     TEST_ASSERT_EQUAL_UINT(0, hy_mf_due_on_save(&built, &s_meds[1], T_NOV02_0810, TZ_ZURICH, out, 8));
 }
 
+static void test_snooze_warn(void)
+{
+    fixture();
+    hy_medform_t f;
+    hy_snooze_t sn[1] = {{2, T_NOV02_0810 - 600, T_NOV02_0810 + 600}};
+    hy_snooze_t other[1] = {{1, T_NOV02_0810 - 600, T_NOV02_0810 + 600}};
+
+    hy_mf_edit(&f, s_meds, s_n, 2);
+    TEST_ASSERT_FALSE(hy_mf_snooze_warn(&f, s_meds, s_n, sn, 1));      /* unchanged + snoozed */
+    hy_mf_set_name(&f, "Calcium");
+    TEST_ASSERT_FALSE(hy_mf_snooze_warn(&f, s_meds, s_n, sn, 1));      /* name only */
+    hy_mf_add_time(&f, 720);
+    TEST_ASSERT_TRUE(hy_mf_snooze_warn(&f, s_meds, s_n, sn, 1));       /* changed + snoozed */
+    TEST_ASSERT_FALSE(hy_mf_snooze_warn(&f, s_meds, s_n, NULL, 0));    /* changed + not snoozed */
+    TEST_ASSERT_FALSE(hy_mf_snooze_warn(&f, s_meds, s_n, other, 1));   /* another medicine snoozed */
+    hy_mf_remove_time(&f, 1);
+    TEST_ASSERT_FALSE(hy_mf_snooze_warn(&f, s_meds, s_n, sn, 1));      /* back to the live times */
+
+    hy_mf_new(&f, s_meds, s_n);
+    hy_mf_add_time(&f, 720);
+    TEST_ASSERT_FALSE(hy_mf_snooze_warn(&f, s_meds, s_n, sn, 1));      /* add: never */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -519,5 +542,6 @@ int main(void)
     RUN_TEST(test_build_errors_map);
     RUN_TEST(test_build_errors_on_web_fields);
     RUN_TEST(test_due_on_save);
+    RUN_TEST(test_snooze_warn);
     return UNITY_END();
 }

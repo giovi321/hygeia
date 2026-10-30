@@ -606,6 +606,12 @@ static void due_note(void)
 {
     const hy_med_t *ms;
     size_t n = hy_meds(&ms);
+    const hy_snooze_t *sn;
+    size_t ns = hy_snoozes(&sn);
+    if (hy_mf_snooze_warn(&s_f, ms, n, sn, ns)) {
+        set_err(HY_S_MF_SNOOZE_WARN);   /* covers the due line: the snoozed dose shows now anyway */
+        return;
+    }
     hy_med_t built;
     hy_mf_step_t bad;
     const hy_clock_port_t *ck = hy_clock_port();
