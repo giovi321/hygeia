@@ -21,11 +21,11 @@ Source: the Waveshare documentation and the Waveshare example repository, read 2
 | Buttons | BOOT on GPIO 0, user key on GPIO 18, PWR through the AXP2101 |
 | Other | QMI8658 IMU, ES7210 dual microphone ADC, microSD slot (SPI) |
 
-The firmware uses the display, touch, the PMU (power-on gate only), the RTC and the audio codec. The IMU, microphones, microSD slot and user key are not used.
+The firmware uses the display, touch, the PMU (power-on gate, battery readings, PWR key and power off), the RTC, the audio codec and the user key as a wake source. The IMU, microphones and microSD slot are not used.
 
 ## Verified on the board
 
-Observed from the serial log and by hand, 2026-10-28 and 2026-10-29. Full notes are in `design/hardware-notes.md` in the repository.
+Observed from the serial log and on the board, 2026-10-28 and 2026-10-29. Full notes are in `design/hardware-notes.md` in the repository.
 
 - Display: full 480x480 flushes, all four corners visible, no offset or tearing
 - Touch: no axis swap or mirror needed; corner touches report the expected coordinates

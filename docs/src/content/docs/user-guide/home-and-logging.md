@@ -9,7 +9,7 @@ The images on the user guide pages are design mockups rendered from the reposito
 
 ## Top bar
 
-The top bar shows the local time on the left. It shows `--:--` until the clock is valid. On the right, the battery field shows a placeholder dash and a percent sign: the battery percentage is not built (see [Roadmap](../../roadmap/)).
+The top bar shows the local time on the left. It shows `--:--` until the clock is valid. On the right, the battery percentage shows next to the Wi-Fi mark, which is crossed out because Wi-Fi is not built. The percentage turns red below 15%. A small bolt next to it shows that USB power is present. If no battery is detected or the reading fails, the field shows a dash and a percent sign. See [Idle clock and power](../idle-power/).
 
 The Home, Overview and History screens form a horizontal pager. Page dots show the position.
 
@@ -34,7 +34,7 @@ The status line reads:
 | Missed | the dose is past its missed limit |
 | clock not set | the clock is invalid |
 
-A due tile shows a full ring and an outline in the medicine colour. A "+" tile at the end shows a toast: "Add medicines in the web UI". The web UI is not built, so the tile does nothing useful yet.
+A due tile shows a full ring and an outline in the medicine colour. A "+" tile at the end opens the form that adds a medicine; see [Add, edit and archive medicines](../medicines/).
 
 ## Logging a dose
 

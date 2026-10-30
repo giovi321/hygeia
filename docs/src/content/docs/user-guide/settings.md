@@ -16,7 +16,7 @@ Pull down from the top edge on any screen to open quick settings. Swipe up to cl
 | Sound tile | toggles the chime; the tile reads "Chime on" or "Chime off" |
 | Do not disturb tile | toggles do not disturb; the tile reads On or Off |
 | Brightness slider | sets the panel brightness, 10 to 100 percent |
-| Battery line | shows the estimate, for example "~2 d left"; hidden until an estimate exists |
+| Battery line | shows only the estimate, for example "~2 d left", not the percentage; hidden on USB power and until enough discharge data exists |
 | Settings button | opens Settings |
 | Web UI QR button | shows "Not available yet" |
 

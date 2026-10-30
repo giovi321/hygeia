@@ -15,10 +15,11 @@ The page scrolls vertically and contains:
 - The three newest log entries, including skipped and missed ones, or "No doses logged yet"
 - The buttons "Log with note" and "Log earlier..."
 - A 30-day grid and the adherence over it
+- The buttons Edit and Archive at the bottom; see [Add, edit and archive medicines](../medicines/)
 
 ## Log with note
 
-"Log with note" opens an on-screen keyboard with the hint "Note (optional)" and a Log button. The note is stored with a taken entry. This is the only place on the device that takes typed input.
+"Log with note" opens an on-screen keyboard with the hint "Note (optional)" and a Log button. The note is stored with a taken entry. The on-screen keyboard is also used for medicine names and doses.
 
 ## Log earlier
 
