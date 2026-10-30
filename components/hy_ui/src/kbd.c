@@ -33,8 +33,10 @@ LV_FONT_DECLARE(lv_font_montserrat_14);
 #define KB_W2           KB_KEY(2)
 #define KB_SHIFT_UP     (LV_BUTTONMATRIX_CTRL_NO_REPEAT | LV_BUTTONMATRIX_CTRL_CLICK_TRIG | 3)
 #define KB_SHIFT_ARMED  (KB_SHIFT_UP | LV_BUTTONMATRIX_CTRL_CHECKED)
-#define KB_SHIFT_IDX    21   /* button index of the shift key: the 10 + 11 buttons of rows 1 and 2, spacers included */
 
+/* LVGL keeps the maps per mode in process-wide tables: lv_keyboard_set_map replaces them for every keyboard, existing
+ * and future. All keyboards here are created with the same three maps, so they agree; a keyboard that needs a
+ * different map would change the others. */
 static const char *const kb_map_letters[] = {
     "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
     " ", "a", "s", "d", "f", "g", "h", "j", "k", "l", " ", "\n",
@@ -73,6 +75,7 @@ static bool s_font_ready;
 typedef struct {
     lv_obj_t *ta;
     char *prev;
+    uint32_t shift_idx;   /* button index of the shift key, found by its text at create; same in both letter maps */
 } kbd_t;
 
 static kbd_t *kbd_of(lv_obj_t *kb)
@@ -122,7 +125,8 @@ static void kb_press_cb(lv_event_t *e)
 }
 
 /* Replaces the stock handler: the shift key is handled here, every other key goes to the stock handler and a typed
- * letter then drops shift */
+ * letter then drops shift. OK and close keys send READY or CANCEL, whose handlers may delete the keyboard and its
+ * view: nothing touches the keyboard or its user data after the stock handler for those keys. */
 static void kb_value_cb(lv_event_t *e)
 {
     lv_obj_t *kb = lv_event_get_current_target_obj(e);
@@ -139,7 +143,12 @@ static void kb_value_cb(lv_event_t *e)
         return;
     }
     bool letter = txt && txt[0] && !txt[1] && ((txt[0] >= 'A' && txt[0] <= 'Z') || (txt[0] >= 'a' && txt[0] <= 'z'));
+    bool leaves = txt && (strcmp(txt, LV_SYMBOL_OK) == 0 || strcmp(txt, LV_SYMBOL_NEW_LINE) == 0 ||
+                          strcmp(txt, LV_SYMBOL_CLOSE) == 0 || strcmp(txt, LV_SYMBOL_KEYBOARD) == 0);
     lv_keyboard_def_event_cb(e);
+    if (leaves) {
+        return;   /* these keys type nothing and need no follow-up; the object may be gone */
+    }
     if (waking) {
         if (k && k->ta && k->prev) {
             lv_textarea_set_text(k->ta, k->prev);
@@ -162,7 +171,8 @@ static void kb_draw_cb(lv_event_t *e)
     }
     lv_draw_task_t *t = lv_event_get_draw_task(e);
     lv_draw_dsc_base_t *base = (lv_draw_dsc_base_t *)lv_draw_task_get_draw_dsc(t);
-    if (!base || base->part != LV_PART_ITEMS || base->id1 != KB_SHIFT_IDX) {
+    kbd_t *k = kbd_of(kb);
+    if (!k || !base || base->part != LV_PART_ITEMS || base->id1 != k->shift_idx) {
         return;
     }
     if (lv_draw_task_get_type(t) == LV_DRAW_TASK_TYPE_FILL) {
@@ -227,5 +237,16 @@ lv_obj_t *ui_kbd_create(lv_obj_t *parent, lv_obj_t *ta)
     lv_obj_add_event_cb(kb, kb_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
     lv_obj_add_event_cb(kb, kb_delete_cb, LV_EVENT_DELETE, NULL);
     kb_no_repeat(kb);
+    k->shift_idx = LV_BUTTONMATRIX_BUTTON_NONE;   /* never matches a drawn button if the text is missing */
+    for (uint32_t i = 0; i < 64; i++) {
+        const char *t = lv_buttonmatrix_get_button_text(kb, i);
+        if (!t) {
+            break;
+        }
+        if (strcmp(t, KB_SHIFT) == 0) {
+            k->shift_idx = i;
+            break;
+        }
+    }
     return kb;
 }
