@@ -4,7 +4,7 @@ Status: draft for approval, 2026-10-28
 
 ## Intent
 
-Hygeia is firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16 that turns the board into a medicine reminder and dose log for one person. It sits on a desk on USB power and travels on its own battery. Logging a dose is one tap on a big letter tile. At scheduled times the screen shows a full-screen card and plays a chime. History is visible on the device and in a web UI served by the device, where the medicines and the log can also be edited.
+Hygeia is firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16 that turns the board into a medicine reminder and dose log for one person. It sits on a desk on USB power and travels on its own battery. Logging a dose is one tap on a big letter tile. At scheduled times the screen shows a full-screen card and plays a chime. History is visible on the device and in a web UI served by the device. Medicines can be added, edited and archived on the device itself; the web UI edits every detail of the medicines and the log.
 
 The device must work with no network at all. Wi-Fi, MQTT, Home Assistant and webhooks are add-ons that make it reachable, never dependencies for reminding or logging.
 
@@ -12,7 +12,7 @@ What makes it worth building instead of using a phone app: a dedicated object wi
 
 ## Goals
 
-1. One-tap logging from a scrollable grid of medicine tiles, each identified by a 1–2 character code and a colour
+1. One-tap logging from a scrollable grid of medicine tiles, each identified by a 1–2 character code and a colour; adding, editing and archiving a medicine on the device with no phone or network
 2. Scheduled reminders on screen with chime, snooze and skip, while on USB or battery, with the screen asleep
 3. Graphical history on the device: today overview, 7-day grid, per-medicine detail
 4. A web UI that can do everything the screen can do, plus full editing of medicines and log entries, export and import
@@ -124,7 +124,7 @@ Feature parity rule: every action available on the screen has a REST endpoint an
 | `id` | stable integer, never reused |
 | `code` | 1–2 characters A–Z or 0–9, shown on the tile, unique among active medicines. Display only: MQTT topics, HA ids and the API use `id` |
 | `name` | free text, up to 32 characters |
-| `dose` | free text, e.g. "1 tab", "5 ml" |
+| `dose` | free text, at most 16 bytes, may be empty, e.g. "1 tab", "5 ml" |
 | `color` | one of a fixed palette of 10 colours that read well on black and are distinct for common colour-vision deficiencies |
 | `schedule.type` | `fixed` or `as_needed` |
 | `schedule.times` | list of local times (HH:MM) for `fixed` |
@@ -137,7 +137,7 @@ Feature parity rule: every action available on the screen has a REST endpoint an
 | `archived` | hidden from the device, kept for history |
 | `order` | tile position |
 
-There is no hard limit on the number of medicines. The grid scrolls; the web UI handles ordering. A soft limit of 50 active medicines is enforced to bound memory and screen build time (builder may raise it after measuring).
+The grid scrolls; the web UI handles ordering. A soft limit of 50 active medicines is enforced to bound memory and screen build time; archived medicines do not count toward it. The store holds at most 100 medicines including archived ones. Builder may raise both after measuring.
 
 ### Log entry
 
@@ -216,25 +216,47 @@ Gestures:
 |---|---|
 | Swipe left / right | pager: Home ⇄ Overview ⇄ History |
 | Pull down from top edge | Quick settings, from any screen |
-| Swipe up from bottom edge | back to Home, from any screen |
+| Swipe up from bottom edge | back to Home, from any screen, except on a medicine form with unsaved changes |
 | Swipe right from left edge | close a detail page |
 | Vertical swipe in the grid | scroll medicines |
 | Tap tile | log as taken, show undo toast (5 s countdown) |
 | Long press tile | medicine detail |
+| Tap the "+" tile | add a medicine |
 | Slide the knob right (due card) | log as taken |
 | Swipe left on due card | snooze |
+| Swipe down on due card | previous due entry |
 | Tap "Skip" (due card) | log as skipped |
 | Tap while dimmed | wake |
 
-Screens: Home (grid of rings, "+" tile shows a QR to the web UI's add page), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart), Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
+Screens: Home (grid of rings, "+" tile opens the add-medicine form), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart, Edit and Archive at the bottom), Add or edit medicine (name, dose, code, colour, schedule), Archive confirm, Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
 
-Several due at once: the due card shows the first, with "+2 more" and a swipe up to step through them. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
+Several due at once: the due card shows the first, with "+2 more"; a swipe up steps to the next entry and a swipe down to the previous. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
 
 History: a dose taken late gets an amber dot, so it differs from today's partial cell. The device cannot edit log entries, apart from undo within the 5 s toast; edits and deletes happen only in the web UI.
 
-Text entry: the on-screen keyboard is used for notes only (log with note). Nothing else on the device takes typed input.
+Text entry: the on-screen keyboard is used for notes (log with note) and medicine names. Codes are picked from a grid of letters and digits. Nothing else on the device takes typed input. The keyboard has a one-shot shift key that capitalises the next letter only; the first letter of a medicine name is capitalised automatically.
 
 Do-not-disturb and quiet hours: the card still appears, the chime is silent. Quiet hours are a web UI setting; the device has only the do-not-disturb toggle.
+
+## On-device medicine management
+
+The owner's intent, in their words:
+
+> the logic of adding this on-device is that a person not super tech friendly does not want to connect the phone via wifi but can still do the basic stuff on device. In case he needs to do more advanced stuff he can ask for help to someone but at least for the basic stuff he must be autonomous to do on device
+
+What the device edits: code, name, dose, colour, schedule type, and the daily times (`fixed`) or the minimum interval (`as_needed`). Dose is optional free text of at most 16 bytes. Weekdays, the early, late and missed windows, active dates, pill count and order are set in the web UI. When the device edits a medicine it keeps their current values. A new medicine gets the defaults: every day, windows of 60 / 30 / 120 min, no pill count, no active dates, placed after the last tile.
+
+Archiving: the device archives a medicine; unarchiving is in the web UI. Archiving asks for confirmation, writes no log entry, removes any due card for that medicine and stops its reminders. Its history stays.
+
+Design rules:
+
+- One decision per screen
+- Large targets
+- Errors in plain language, on the screen where they can be fixed
+- "Discard changes?" before unsaved changes are lost
+- Nothing is saved without the Save button
+
+A time added or changed so that today's occurrence is already inside its dose window becomes due right away, with the chime. The review screen says so before Save.
 
 ## Notifications
 
@@ -328,7 +350,7 @@ Release artefacts:
 
 - Host unit tests (plain C, built with CMake on the host or the ESP-IDF linux target) for `scheduler`, `store`, `clock` time-zone handling, `outbox`, import/export round trip. The scheduler tests cover DST changes, time-zone changes, as-needed intervals, missed detection, multiple doses due at once
 - UI layout checks by rendering screens to PNG off-device; the community `lvgl-preview-skill` may be used after its code has been reviewed
-- Hardware checklist for each release: boot splash, touch in all corners, logging and undo, due card and chime, sleep and RTC wake on battery, PWR short/long press, power off and on, AP join by QR, web UI parity, MQTT and HA discovery, webhook with signature, OTA and rollback, clock invalid flow
+- Hardware checklist for each release: boot splash, touch in all corners, logging and undo, due card and chime, sleep and RTC wake on battery, PWR short/long press, power off and on, AP join by QR, web UI parity, MQTT and HA discovery, webhook with signature, OTA and rollback, clock invalid flow, add, edit and archive a medicine on the device
 
 ## Left to the builder
 
@@ -350,7 +372,7 @@ These are my calls; flag any you disagree with.
 5. Client mode never falls back to AP on its own; it shows a hint instead
 6. Home Assistant discovery is off by default
 7. Retention: keep everything until storage is 80% full, minimum 1 year
-8. Soft limit of 50 active medicines
+8. Soft limit of 50 active medicines; archived medicines do not count toward it, and the store holds at most 100 medicines including archived ones
 9. Secrets excluded from exports unless asked for
 10. Font Inter, converted for LVGL
 11. Spec lives in `design/spec.md` rather than under `docs/`, so the published docs site stays user-facing
