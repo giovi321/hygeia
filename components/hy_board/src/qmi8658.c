@@ -1,18 +1,17 @@
 /* QMI8658 accelerometer at 0x6b on the shared bus. Accel only, +-8 g, about 125 Hz, left powered down.
  *
- * Register facts and where each was confirmed (QMI8658A datasheet register map; SensorLib, MIT, src/SensorQMI8658.hpp
- * driver constants and its reset(), setAccelerometer ODR/range and enable code):
- *   WHO_AM_I 0x00 = 0x05                       SensorLib QMI8658_REG_WHOAMI(_DEFAULT)
- *   CTRL1 0x02 bit 6 address auto-increment    SensorLib reset(): setRegisterBit(CTRL1, 6)
- *   CTRL1 bit 5 data endianness                SensorLib comments: 0x60 = auto-increment + big endian, 0x40 = auto-increment +
- *                                              little endian; bit 5 is therefore the endianness bit (1 = big)
- *   CTRL1 bit 0 sensor disable                 datasheet register map only (not used by SensorLib)
- *   CTRL2 0x03 bits 6..4 range (2 = +-8 g)     SensorLib AccelRange enum 2G,4G,8G,16G = 0..3 shifted by 4
- *   CTRL2 bits 3..0 ODR (6 = 125 Hz)           SensorLib AccelODR enum: 1000 Hz = 3, 500 = 4, 250 = 5, 125 = 6
- *   CTRL7 0x08 bit 0 accel enable              SensorLib enableAccelerometer: setRegisterBit(CTRL7, 0)
- *   RESET 0x60 <- 0xB0, RST_RESULT 0x4D = 0x80 SensorLib QMI8658_REG_RESET(_DEFAULT), QMI8658_REG_RST_RESULT(_VAL)
- *   AX_L..AZ_H 0x35..0x3A                      SensorLib QMI8658_REG_AX_L..AZ_H, 6-byte burst in its accel read
- * +-8 g sensitivity 4096 LSB/g: datasheet accelerometer specification (SensorLib scales by the range in the same way). */
+ * Register facts, cross-checked against two public references: SensorLib (MIT, lewisxhe/SensorLib, QMI8658 register
+ * and driver sources) and the Waveshare qmi8658 component (Apache 2.0). No code is copied.
+ *   WHO_AM_I 0x00 = 0x05                       both
+ *   CTRL1 0x02 bit 6 address auto-increment    both (Waveshare writes 0x60, which includes it)
+ *   CTRL1 bit 5 data endianness (1 = big)      SensorLib; this driver keeps it 0 and decodes little endian
+ *   CTRL1 bit 0 sensor disable                 SensorLib; internal oscillator off
+ *   CTRL2 0x03 bits 6..4 range (2 = +-8 g)     both
+ *   CTRL2 bits 3..0 ODR (6 = about 125 Hz accel only) both
+ *   CTRL7 0x08 bit 0 accel enable              both
+ *   RESET 0x60 <- 0xB0, RST_RESULT 0x4D = 0x80 SensorLib
+ *   AX_L..AZ_H 0x35..0x3A, 6-byte burst       both
+ *   +-8 g scale 4096 LSB/g                     both */
 #include "hy/board.h"
 
 #include "bsp/esp-bsp.h"
@@ -57,6 +56,13 @@ static esp_err_t reg_write(uint8_t reg, uint8_t v)
 static esp_err_t reg_read(uint8_t reg, uint8_t *out, size_t n)
 {
     return i2c_master_transmit_receive(s_dev, &reg, 1, out, n, QMI_IO_TIMEOUT_MS);
+}
+
+/* Oscillator off again after a failed power-on or configuration; errors are ignored, the bus is already faulty */
+static void power_down_best_effort(void)
+{
+    reg_write(QMI_REG_CTRL7, 0x00);
+    reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE);
 }
 
 esp_err_t hy_board_imu_init(void)
@@ -109,6 +115,7 @@ esp_err_t hy_board_imu_init(void)
         return ESP_OK;
     }
     ESP_LOGE(TAG, "configure: %s", esp_err_to_name(err));
+    power_down_best_effort();
     s_state = ESP_ERR_INVALID_STATE;
     return err;
 }
@@ -123,7 +130,11 @@ esp_err_t hy_board_imu_power(bool on)
         if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) != ESP_OK) {
             return err;
         }
-        return reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACCEL);
+        if ((err = reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACCEL)) != ESP_OK) {
+            power_down_best_effort();
+            return err;
+        }
+        return ESP_OK;
     }
     if ((err = reg_write(QMI_REG_CTRL7, 0x00)) != ESP_OK) {
         return err;
@@ -171,7 +182,7 @@ esp_err_t hy_board_imu_sample_once(int16_t mg[3])
     }
     vTaskDelay(pdMS_TO_TICKS(30));
     esp_err_t err = hy_board_imu_read(mg);
-    hy_board_imu_power(false);
+    hy_board_imu_power(false); /* on every path after a successful power-on */
     return err == ESP_OK ? ESP_OK : ESP_FAIL;
 }
 

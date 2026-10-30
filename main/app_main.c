@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "hy/audio.h"
 #include "hy/board.h"
 #include "hy/actions.h"
@@ -189,7 +190,7 @@ static void cmd_imu(const char *args)
             break;
         }
         if (rec) {
-            printf("imu,%lu,%d,%d,%d\n", (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS), mg[0], mg[1], mg[2]);
+            printf("imu,%lu,%d,%d,%d\n", (unsigned long)(esp_timer_get_time() / 1000), mg[0], mg[1], mg[2]);
         } else {
             float a = sqrtf((float)mg[0] * mg[0] + (float)mg[1] * mg[1] + (float)mg[2] * mg[2]);
             printf("imu: x=%d y=%d z=%d mg |a|=%d\n", mg[0], mg[1], mg[2], (int)(a + 0.5f));
