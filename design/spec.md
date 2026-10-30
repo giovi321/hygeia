@@ -61,6 +61,7 @@ To verify on the first hardware session (unconfirmed in the sources):
 - touch orientation relative to the panel
 - which PWR key events the AXP2101 reports (short press, long press) and their timings
 - battery life on light sleep with the screen off and Wi-Fi off
+- panel rotation through MADCTL and the matching touch transform in all four orientations
 
 ## Stack
 
@@ -189,6 +190,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 
 - On USB: screen dims to the idle clock after 30 s, never turns off unless the user sets it
 - On battery: dims after 30 s, screen off after 2 min, CPU in light sleep. Wake sources: touch interrupt, RTC alarm (next due occurrence), AXP2101 interrupt (PWR key, USB plugged), user key
+- The motion sensor (QMI8658) is read only while the screen is on or dimmed and powered down while the screen is off; it is not a wake source
 - Wi-Fi defaults to off on battery; toggle on the screen and in the web UI. Events produced while offline go to the outbox
 - PWR key: short press toggles the screen; long press (about 2 s) opens a power-off confirmation slider that warns "Reminders will not fire while off" if any occurrence is due in the next 24 h; confirming powers off through the AXP2101. Pressing PWR while off turns the device on (AXP2101 hardware behaviour)
 - The device turns on only with the PWR key (owner requirement, 2026-10-28). Plugging in USB or connecting the battery must not leave it running. Early in boot, before the display is initialised, firmware reads the AXP2101 power-on source; if the source is USB insertion or battery insertion rather than the PWR key, it powers off through the AXP2101 at once. The battery still charges while off. A software restart (OTA, crash, watchdog) is not a power-on event and keeps running. The exact register and whether the cold-boot source is reported reliably are verified on the board
@@ -228,8 +230,12 @@ Gestures:
 | Swipe down on due card | previous due entry |
 | Tap "Skip" (due card) | log as skipped |
 | Tap while dimmed | wake |
+| Turn the device | the screen follows in all four orientations after about 1 s in the new position, unless Rotation lock is on |
+| Shake the device while the Undo toast shows | undo, the same as tapping Undo |
 
-Screens: Home (grid of rings, "+" tile opens the add-medicine form), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart, Edit and Archive at the bottom), Add or edit medicine (name, dose, code, colour, schedule), Archive confirm, Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
+Swipe directions and edges are those of the screen as the person sees it: they turn with the screen.
+
+Screens: Home (grid of rings, "+" tile opens the add-medicine form), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart, Edit and Archive at the bottom), Add or edit medicine (name, dose, code, colour, schedule), Archive confirm, Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display with rotation lock, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
 
 Several due at once: the due card shows the first, with "+2 more"; a swipe up steps to the next entry and a swipe down to the previous, wrapping at either end. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
 
@@ -351,7 +357,7 @@ Release artefacts:
 
 - Host unit tests (plain C, built with CMake on the host or the ESP-IDF linux target) for `scheduler`, `store`, `clock` time-zone handling, `outbox`, import/export round trip. The scheduler tests cover DST changes, time-zone changes, as-needed intervals, missed detection, multiple doses due at once
 - UI layout checks by rendering screens to PNG off-device; the community `lvgl-preview-skill` may be used after its code has been reviewed
-- Hardware checklist for each release: boot splash, touch in all corners, logging and undo, due card and chime, sleep and RTC wake on battery, PWR short/long press, power off and on, AP join by QR, web UI parity, MQTT and HA discovery, webhook with signature, OTA and rollback, clock invalid flow, add, edit and archive a medicine on the device
+- Hardware checklist for each release: boot splash, touch in all corners, logging and undo, due card and chime, sleep and RTC wake on battery, PWR short/long press, power off and on, AP join by QR, web UI parity, MQTT and HA discovery, webhook with signature, OTA and rollback, clock invalid flow, add, edit and archive a medicine on the device, auto-rotate in all four orientations, rotation lock, shake to undo
 
 ## Left to the builder
 
