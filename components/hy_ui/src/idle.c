@@ -365,7 +365,7 @@ void screen_usb(bool in)
 }
 
 /* A touch woke the CPU from the sleep mode: LVGL reads the stroke after this runs, so the stroke that starts within
- * GUARD_MS still counts as waking (Review Focus 4) */
+ * GUARD_MS still counts as waking */
 void screen_touch_wake(void)
 {
     s_guard = true;

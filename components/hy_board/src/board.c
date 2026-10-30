@@ -24,6 +24,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lv_adapter.h"
+#include "esp_pm.h"
 #include "esp_sleep.h"
 #include "hal/gpio_ll.h"
 #include "soc/gpio_struct.h"
@@ -61,7 +62,7 @@ static int64_t s_slpin_us;
  * s_bri_want and applied by refr_ready_cb. */
 static volatile bool s_bri_hold;
 static volatile bool s_wake_flushed;
-static volatile uint8_t s_bri_want = 80;
+static volatile uint8_t s_bri_want = 50;
 
 #define USER_KEY_GPIO 18   /* spec Hardware table: user key GPIO 18 */
 #define RTC_INT_GPIO  13   /* PCF85063 INT, owned by hy_clock (falling-edge interrupt) */
@@ -112,11 +113,44 @@ static esp_err_t panel_cmd(uint8_t cmd, const void *param, size_t len)
     return esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | ((int)cmd << 8), param, len);
 }
 
+#if CONFIG_HY_PM_SCREEN_ON_DFS
+/* CPU max for one LVGL refresh (render and the waits on the flushes inside it), LVGL task only. Without it the
+ * frequency would switch on every flush wait inside a frame. Paired by LVGL: REFR_START and REFR_READY in
+ * lv_display_refr_timer, the only gap being a display deleted in REFR_START. */
+static esp_pm_lock_handle_t s_render_lock;
+static bool s_render_held;
+
+static void render_hold(bool on)
+{
+    if (!s_render_lock || s_render_held == on) {
+        return;
+    }
+    if (on) {
+        esp_pm_lock_acquire(s_render_lock);
+    } else {
+        esp_pm_lock_release(s_render_lock);
+    }
+    s_render_held = on;
+}
+
+static void refr_start_cb(lv_event_t *e)
+{
+    (void)e;
+    render_hold(true);
+}
+#else
+static void render_hold(bool on)
+{
+    (void)on;
+}
+#endif
+
 /* End of an LVGL refresh, LVGL task. The first one after a wake that sent pixels releases the held brightness. The
  * panel IO queue keeps the order: the brightness command goes out after the frame's colour data. */
 static void refr_ready_cb(lv_event_t *e)
 {
     (void)e;
+    render_hold(false);
     if (!s_bri_hold || !s_wake_flushed || s_panel_off) {
         return;
     }
@@ -533,6 +567,14 @@ static esp_err_t board_init_once(void)
              (unsigned)(free_before - free_after));
     lv_display_add_event_cb(s_disp, rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
     lv_display_add_event_cb(s_disp, refr_ready_cb, LV_EVENT_REFR_READY, NULL);
+#if CONFIG_HY_PM_SCREEN_ON_DFS
+    if (esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "hy_render", &s_render_lock) == ESP_OK) {
+        lv_display_add_event_cb(s_disp, refr_start_cb, LV_EVENT_REFR_START, NULL);
+    } else {
+        s_render_lock = NULL;
+        ESP_LOGE(TAG, "render pm lock: create failed, LVGL relies on the rtos locks");
+    }
+#endif
     s_orig_flush = lv_display_get_flush_cb(s_disp);
     lv_display_set_flush_cb(s_disp, flush_wrap);
 
@@ -561,13 +603,13 @@ static esp_err_t board_init_once(void)
         ESP_LOGE(TAG, "lvgl adapter start: %s", esp_err_to_name(err));
         return err;
     }
-    bsp_display_brightness_set(80);
+    bsp_display_brightness_set(50);
 
     ESP_LOGI(TAG, "heap free: internal %u, dma %u, psram %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    ESP_LOGI(TAG, "board ready, brightness 80%%");
+    ESP_LOGI(TAG, "board ready, brightness 50%%");
     return ESP_OK;
 }
 
@@ -705,6 +747,7 @@ void hy_board_sleep_wake_arm(bool on)
 {
     static const uint32_t pins[] = {BSP_LCD_TOUCH_INT, RTC_INT_GPIO, USER_KEY_GPIO};
     if (on) {
+        render_hold(false);   /* LVGL task (enter_sleep): never carry hy_render into light sleep; it blocks it */
         if (s_wake_armed) {
             return;
         }

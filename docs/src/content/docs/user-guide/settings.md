@@ -22,7 +22,7 @@ Pull down from the top edge on any screen to open quick settings. Swipe up to cl
 
 Do not disturb keeps the due card but silences the chime.
 
-Changes are saved to NVS and survive a restart. Defaults: sound on, do not disturb off, volume 60, brightness 80, snooze 15 minutes.
+Changes are saved to NVS and survive a restart. Defaults: sound on, do not disturb off, volume 60, brightness 50, snooze 15 minutes.
 
 ## Settings
 

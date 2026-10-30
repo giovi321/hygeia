@@ -521,8 +521,7 @@ void detail_create(void)
     lv_obj_set_style_pad_bottom(s_scroll, HY_MARGIN, 0);
     lv_obj_set_scroll_dir(s_scroll, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_scroll, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_scroll_elastic(s_scroll, false);
-    lv_obj_set_scroll_momentum(s_scroll, false);
+    ui_scroller(s_scroll);
     lv_obj_add_event_cb(s_scroll, scroll_cb, LV_EVENT_SCROLL_BEGIN, NULL);
 
     /* header: ring (outer 96, inner 80) with the code, then name, schedule and pills */

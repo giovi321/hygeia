@@ -11,7 +11,7 @@ static void test_settings_defaults_and_clamp(void)
     TEST_ASSERT_TRUE(s.sound);
     TEST_ASSERT_FALSE(s.dnd);
     TEST_ASSERT_EQUAL_UINT8(60, s.volume);
-    TEST_ASSERT_EQUAL_UINT8(80, s.brightness);
+    TEST_ASSERT_EQUAL_UINT8(50, s.brightness);
     TEST_ASSERT_EQUAL_UINT16(15, s.snooze_min);
 
     s.volume = 150; s.brightness = 0; s.snooze_min = 0;
