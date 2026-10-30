@@ -214,8 +214,7 @@ static void kb_delete_cb(lv_event_t *e)
 lv_obj_t *ui_kbd_create(lv_obj_t *parent, lv_obj_t *ta)
 {
     if (!s_font_ready) {   /* one font for every keyboard */
-        s_kb_font = *hy_type.title;
-        s_kb_font.fallback = &lv_font_montserrat_14;
+        hy_key_font_init(&s_kb_font);
         s_font_ready = true;
     }
     lv_obj_t *kb = lv_keyboard_create(parent);

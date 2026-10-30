@@ -51,6 +51,9 @@ extern const hy_type_scale_t hy_type;
 /* medicine palette, index 0..9 */
 lv_color_t hy_med_color(uint8_t idx);
 
+/* Key font for button matrices: Inter 26 bold whose symbol fallback glyphs are centred on the line (theme.c) */
+void hy_key_font_init(lv_font_t *out);
+
 /* geometry (px) */
 #define HY_SCREEN       480
 #define HY_BAR_H        56

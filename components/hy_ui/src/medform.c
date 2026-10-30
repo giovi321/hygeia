@@ -1232,8 +1232,7 @@ static void create_pick(void)
     lv_obj_t *done = ui_button(c, 140, 56, hy_type.body_bold, HY_S_DONE, pick_done_cb, NULL);
     lv_obj_set_pos(done, 322, 4);
 
-    s_pick_font = *hy_type.title;
-    s_pick_font.fallback = &lv_font_montserrat_14;
+    hy_key_font_init(&s_pick_font);
     s_pick_grid = lv_buttonmatrix_create(c);
     lv_buttonmatrix_set_map(s_pick_grid, k_pick_map);
     lv_buttonmatrix_set_ctrl_map(s_pick_grid, k_pick_ctrl);
