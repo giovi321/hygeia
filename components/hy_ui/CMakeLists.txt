@@ -17,6 +17,7 @@ idf_component_register(
         "src/overview.c"
         "src/history.c"
         "src/detail.c"
+        "src/kbd.c"
         "src/note.c"
         "src/earlier.c"
         "src/qs.c"
