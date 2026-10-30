@@ -587,6 +587,164 @@ static void test_archived_take_no_active_slot(void)
     TEST_ASSERT_TRUE(in_list(out.to_miss, out.n_to_miss, HY_MAX_STORED, L(8, 0)));
 }
 
+/* Review Focus 2: archiving A while its 08:00 dose is open removes the card and the chime, logs nothing. */
+static void test_archive_open_slot_disappears(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    eval(L(8, 5));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_TRUE(out.chime);
+
+    a->archived = true;
+    eval(L(8, 6));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_showing);
+    TEST_ASSERT_FALSE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(0, s.chime_plays);
+    TEST_ASSERT_EQUAL_UINT(0, n_logs);
+
+    eval(L(10, 5));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+    TEST_ASSERT_EQUAL_INT64(0, out.next_wake);   /* no A deadline left */
+}
+
+/* Archive removes the snooze entries too (hy_act_snoozes gives an empty list afterwards). */
+static void test_archive_snoozed(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    eval(L(8, 5));
+    snoozes[0] = (hy_snooze_t){ 1, L(8, 0), L(8, 20) };
+    n_snoozes = 1;
+    eval(L(8, 6));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_showing);
+
+    a->archived = true;
+    n_snoozes = 0;
+    eval(L(8, 21));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_showing);
+    TEST_ASSERT_FALSE(out.chime);
+    eval(L(10, 5));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+}
+
+/* Review Focus 2: archiving one of two open doses leaves the other with its chime sequence. */
+static void test_archive_one_of_two(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    add_v();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    eval(L(8, 5));
+    TEST_ASSERT_EQUAL_UINT(2, out.n_open);
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(1, s.chime_plays);
+
+    a->archived = true;
+    eval(L(8, 6));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_UINT32(2, out.open[0].med_id);
+    TEST_ASSERT_EQUAL_UINT(1, out.n_showing);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+    TEST_ASSERT_FALSE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(1, s.chime_plays);
+
+    eval(L(8, 7));
+    TEST_ASSERT_TRUE(out.chime);
+    TEST_ASSERT_EQUAL_UINT8(2, s.chime_plays);
+}
+
+/* An edit of name, code and colour leaves the schedule signature alone: the open dose stays. */
+static void test_edit_name_keeps_open(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    eval(L(8, 5));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    int64_t slot = out.open[0].slot;
+
+    strcpy(a->name, "Calcium");
+    strcpy(a->code, "C");
+    a->color = 3;
+    eval(L(8, 6));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_INT64(slot, out.open[0].slot);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
+    TEST_ASSERT_FALSE(out.chime);
+}
+
+/* Changed times restart tracking: the open 08:00 dose goes, is never missed, the new 09:00 time is due. */
+static void test_edit_times_drops_open(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    eval(L(8, 5));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+
+    a->times[0] = 9 * 60;
+    a->n_times = 1;
+    eval(L(8, 6));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+
+    eval(L(9, 0));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_TRUE(in_list(out.newly_due, out.n_newly_due, 1, L(9, 0)));
+    TEST_ASSERT_TRUE(out.chime);
+
+    eval(L(10, 5));
+    TEST_ASSERT_FALSE(in_list(out.to_miss, out.n_to_miss, 1, L(8, 0)));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+}
+
+/* Q62: a medicine added inside an open dose window is due at once with the chime; after the window nothing. */
+static void test_added_time_inside_window_due(void)
+{
+    reset();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    hy_med_t *m = &meds[n_meds++];
+    hy_med_defaults(m);
+    m->id = 3;
+    strcpy(m->code, "M");
+    strcpy(m->name, "Magnesium");
+    m->type = HY_SCHED_FIXED;
+    m->times[0] = 8 * 60;
+    m->n_times = 1;
+    eval(L(8, 10));
+    TEST_ASSERT_EQUAL_UINT(1, out.n_open);
+    TEST_ASSERT_EQUAL_UINT32(3, out.open[0].med_id);
+    TEST_ASSERT_EQUAL_INT64(L(8, 0), out.open[0].slot);
+    TEST_ASSERT_EQUAL_INT(HY_OCC_DUE, out.open[0].state);
+    TEST_ASSERT_TRUE(in_list(out.newly_due, out.n_newly_due, 3, L(8, 0)));
+    TEST_ASSERT_TRUE(out.chime);
+
+    reset();
+    hy_sched_start_tracking(&s, L(7, 0));
+    eval(L(7, 0));
+    m = &meds[n_meds++];
+    hy_med_defaults(m);
+    m->id = 3;
+    strcpy(m->code, "M");
+    strcpy(m->name, "Magnesium");
+    m->type = HY_SCHED_FIXED;
+    m->times[0] = 8 * 60;
+    m->n_times = 1;
+    eval(L(10, 5));
+    TEST_ASSERT_EQUAL_UINT(0, out.n_open);
+    TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -611,5 +769,11 @@ int main(void)
     RUN_TEST(test_boot_after_window_untracked);
     RUN_TEST(test_boot_inside_window_then_missed);
     RUN_TEST(test_archived_take_no_active_slot);
+    RUN_TEST(test_archive_open_slot_disappears);
+    RUN_TEST(test_archive_snoozed);
+    RUN_TEST(test_archive_one_of_two);
+    RUN_TEST(test_edit_name_keeps_open);
+    RUN_TEST(test_edit_times_drops_open);
+    RUN_TEST(test_added_time_inside_window_due);
     return UNITY_END();
 }
