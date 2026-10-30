@@ -19,7 +19,7 @@
 
 Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16 that reminds you about medicine doses and logs them. Logging a dose is one tap on a tile. At scheduled times the screen shows a full-screen card and plays a chime. It works with no network, no account and no cloud.
 
-The project is under development and has no release yet. The documentation site is published when the repository is made public; until then, read the pages under [`docs/src/content/docs`](docs/src/content/docs).
+This is firmware version 0.3.0, a pre-release: Wi-Fi and the web UI come in a later version. The documentation is at [giovi321.github.io/hygeia](https://giovi321.github.io/hygeia/); the sources of the pages are in [`docs/src/content/docs`](docs/src/content/docs).
 
 <p align="center">
   <img src="docs/public/assets/mockups/01-home.png" alt="Design mockup of the Home screen" width="280" />
@@ -33,13 +33,17 @@ The images are design mockups, not photos of the board.
 - Tiles with a code and a colour per medicine, tap to log, 5 second undo
 - Full-screen due card with chime, slide to log, swipe to snooze, skip
 - Today overview, 7-day and 30-day history, medicine detail with notes and earlier logging
-- Quick settings and settings: sound, do not disturb, brightness, volume, time zone, date and time
-- Idle clock with burn-in drift, and power-on only with the PWR key
+- Add, edit and archive medicines on the device, with an on-screen keyboard that has a Shift key; the dose is optional
+- Quick settings and settings: sound, do not disturb, brightness slider, volume, time zone, date and time, and a battery line that shows only the estimate
+- Battery percentage with a charging bolt in the top bar, low (15%) and critical (5%) warnings, and a countdown to power off at critical
+- PWR key: short press turns the screen on or off, long press opens a power-off confirmation. The device powers on only with the PWR key
+- On battery the screen dims after 30 seconds and turns off after 2 minutes, with the CPU in light sleep; touch, the RTC alarm and the PWR key wake it
+- Idle clock with burn-in drift
 - Clock from the onboard RTC, medicines and log stored on the device flash
 
 ## What does not exist yet
 
-Wi-Fi and access point mode, the web UI, MQTT with Home Assistant discovery, webhooks and the battery percentage are planned and not built. Until the web UI exists, medicines cannot be added or edited: a fresh device holds three example medicines. See the [Roadmap](docs/src/content/docs/roadmap.md).
+Wi-Fi and access point mode, the web UI, MQTT with Home Assistant discovery, webhooks, auto-rotate and shake to undo are planned and not built. Log entries cannot be edited or deleted on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
 
 ## Quick start
 
@@ -90,4 +94,4 @@ The design spec is `design/spec.md` and the board measurements are in `design/ha
 
 ## Licence
 
-Released under [CC BY-NC-SA 4.0](LICENSE). The project is source-available for non-commercial use and is not open source.
+Released under [CC BY-NC-SA 4.0](LICENSE). The project is source-available for non-commercial use and is not open source. Third-party components and their licences are listed on the [Licence](docs/src/content/docs/licence.md) page.

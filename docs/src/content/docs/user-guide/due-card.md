@@ -9,7 +9,7 @@ description: The full-screen card shown when a dose is due, the chime, snooze an
 
 When a scheduled dose becomes due, the screen wakes if it was dimmed and shows a full-screen card with the medicine code, name and dose and the line "Due 14:00". When the dose is past its late limit the line reads "Late · due 14:00". The card stays until the dose is taken, skipped or snoozed.
 
-If several doses are due at once, the card shows the first and adds "+2 more". Swipe up, or swipe up from the bottom edge, to step through them. Stepping only changes which dose is shown.
+If several doses are due at once, the card shows the first and adds "+2 more". Swipe up to show the next dose and swipe down to show the previous one; both wrap around at the ends. Stepping only changes which dose is shown.
 
 ## Actions
 
