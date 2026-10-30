@@ -72,11 +72,35 @@ static void test_power_clamp(void)
     TEST_ASSERT_EQUAL_UINT32(0, s.off_usb_s);
 }
 
+static void test_settings_rot_defaults(void)
+{
+    hy_settings_t s;
+    s.rot_lock = true;
+    s.rot = 2;
+    hy_settings_defaults(&s);
+    TEST_ASSERT_FALSE(s.rot_lock);
+    TEST_ASSERT_EQUAL_UINT8(0, s.rot);
+}
+
+static void test_settings_rot_clamp(void)
+{
+    hy_settings_t s;
+    hy_settings_defaults(&s);
+    s.rot = 7;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(0, s.rot);
+    s.rot = 3;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(3, s.rot);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_settings_defaults_and_clamp);
     RUN_TEST(test_power_defaults);
     RUN_TEST(test_power_clamp);
+    RUN_TEST(test_settings_rot_defaults);
+    RUN_TEST(test_settings_rot_clamp);
     return UNITY_END();
 }
