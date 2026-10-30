@@ -437,6 +437,13 @@ static esp_err_t board_init_once(void)
     esp_lv_adapter_config_t acfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
     /* The LVGL task also runs the actions and the store (line buffers, JSON): more than the 8 KB default */
     acfg.task_stack_size = 12 * 1024;
+    /* At least one FreeRTOS tick (10 ms at CONFIG_FREERTOS_HZ=100): a shorter wait rounds to 0 ticks and the task
+     * spins at priority 6 until the next LVGL timer is due. The refresh period stays 33 ms; a timer may run up to
+     * one tick late. */
+    acfg.task_min_delay_ms = 1000 / CONFIG_FREERTOS_HZ;
+    if (acfg.task_max_delay_ms < acfg.task_min_delay_ms) {
+        acfg.task_max_delay_ms = acfg.task_min_delay_ms;
+    }
     err = esp_lv_adapter_init(&acfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "lvgl adapter init: %s", esp_err_to_name(err));
@@ -695,6 +702,15 @@ void hy_board_set_brightness(uint8_t pct)
         pct = 100;
     }
     bsp_display_brightness_set(pct);
+}
+
+bool hy_board_in_lvgl_task(void)
+{
+    static TaskHandle_t s_lvgl;   /* the adapter names its worker "lvgl"; created once, never deleted */
+    if (!s_lvgl) {
+        s_lvgl = xTaskGetHandle("lvgl");
+    }
+    return s_lvgl && xTaskGetCurrentTaskHandle() == s_lvgl;
 }
 
 bool hy_board_lock(uint32_t timeout_ms)
