@@ -745,10 +745,10 @@ static void do_save(void)
         ui_nav_home();
         home_show_med(m.id);
         snprintf(msg, sizeof msg, HY_S_MF_ADDED, code);
-        toast_show_info(msg);
+        toast_show_ok(msg);
     } else {
         ui_nav_pop();   /* back to the detail */
-        toast_show_info(HY_S_MF_SAVED);
+        toast_show_ok(HY_S_MF_SAVED);
     }
 }
 

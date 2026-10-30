@@ -324,5 +324,6 @@ void toast_show_skipped(const char *code, const char *hhmm, uint32_t log_id); /*
 void ui_battery_toast(int pct);
 void ui_battery_toast_flush(void);
 void toast_show_info(const char *text);  /* warning style, no Undo */
+void toast_show_ok(const char *text);    /* green tick, no Undo: a completed action */
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */
