@@ -210,6 +210,39 @@ static void test_orient_set(void)
     TEST_ASSERT_EQUAL(1, run(&o, &t, 400, A90));
 }
 
+/* The in-plane gravity vector of 1000 mg turned from 0 to 90 degrees at 15 degrees per second, then held. */
+static void test_orient_slow_turn(void)
+{
+    hy_orient_t o;
+    hy_orient_init(&o, HY_ROT_0);
+    uint32_t t = 0;
+    int n = 0;
+    for (uint32_t ms = 0; ms <= 6000; ms += STEP) {
+        int deg = (int)(ms * 15 / 1000);
+        n += hy_orient_feed(&o, t, at_deg(deg > 90 ? 90 : deg)) ? 1 : 0;
+        t += STEP;
+    }
+    n += run(&o, &t, 2000, at_deg(90));
+    TEST_ASSERT_EQUAL(1, n);
+    TEST_ASSERT_EQUAL(HY_ROT_90, hy_orient_current(&o));
+}
+
+/* The in-plane component alternates between 490 and 510 mg along +x every 200 ms, z makes the total 1000 mg:
+   the candidate flips between none and 90, so the dwell keeps restarting. */
+static void test_orient_plane_threshold(void)
+{
+    hy_orient_t o;
+    hy_orient_init(&o, HY_ROT_0);
+    const hy_accel_t lo = {490, 0, 872}, hi = {510, 0, 860};
+    uint32_t t = 0;
+    int n = 0;
+    for (int i = 0; i < 25; i++) {
+        n += run(&o, &t, 180, (i & 1) ? hi : lo);
+    }
+    TEST_ASSERT_EQUAL(0, n);
+    TEST_ASSERT_EQUAL(HY_ROT_0, hy_orient_current(&o));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -226,5 +259,7 @@ int main(void)
     RUN_TEST(test_orient_quick_ends_after_full_dwell);
     RUN_TEST(test_orient_same_as_cur);
     RUN_TEST(test_orient_set);
+    RUN_TEST(test_orient_slow_turn);
+    RUN_TEST(test_orient_plane_threshold);
     return UNITY_END();
 }

@@ -3,10 +3,12 @@
 bool hy_orient_candidate(hy_accel_t a, hy_rot_t *out)
 {
     int32_t x = a.x, y = a.y, z = a.z;
-    int32_t plane2 = x * x + y * y;
-    int32_t mag2 = plane2 + z * z;
-    if (plane2 < HY_OR_PLANE_MIN_MG * HY_OR_PLANE_MIN_MG) return false;
-    if (mag2 < HY_OR_MAG_MIN_MG * HY_OR_MAG_MIN_MG || mag2 > HY_OR_MAG_MAX_MG * HY_OR_MAG_MAX_MG) return false;
+    /* int16 inputs: each square fits 2^30, the sum of three needs int64 */
+    int64_t plane2 = (int64_t)x * x + (int64_t)y * y;
+    int64_t mag2 = plane2 + (int64_t)z * z;
+    if (plane2 < (int64_t)HY_OR_PLANE_MIN_MG * HY_OR_PLANE_MIN_MG) return false;
+    if (mag2 < (int64_t)HY_OR_MAG_MIN_MG * HY_OR_MAG_MIN_MG || mag2 > (int64_t)HY_OR_MAG_MAX_MG * HY_OR_MAG_MAX_MG)
+        return false;
 
     int32_t ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
     hy_rot_t r;
