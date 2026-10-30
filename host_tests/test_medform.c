@@ -457,6 +457,10 @@ static void test_build_errors_on_web_fields(void)
     f.draft.n_times = 2;
     TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_mf_build(&f, s_meds, s_n, &out, &bad));
     TEST_ASSERT_EQUAL_INT(HY_MF_TIMES, bad);
+    s_meds[1].weekdays = 0;   /* bad live weekdays too: the draft times take precedence */
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_mf_build(&f, s_meds, s_n, &out, &bad));
+    TEST_ASSERT_EQUAL_INT(HY_MF_TIMES, bad);
+    s_meds[1].weekdays = 0x7F;
 
     /* as needed: the interval error stays on the interval step */
     f.draft.type = HY_SCHED_AS_NEEDED;

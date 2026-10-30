@@ -15,6 +15,9 @@
  */
 #define HY_INTERVAL_MAX_MIN 1440
 
+/* The schedule rule of hy_med_validate: no weekday bit above Sunday; for fixed, 1 to 8 distinct times below
+   1440 and at least one weekday. As needed passes. */
+bool hy_med_times_valid(const hy_med_t *m);
 hy_err_t hy_med_validate(const hy_med_t *m, const hy_med_t *others, size_t n_others);
 
 #endif

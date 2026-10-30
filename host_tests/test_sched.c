@@ -77,6 +77,21 @@ static hy_med_t *add_v(void)
     return m;
 }
 
+/* M: Magnesium, fixed 08:00, order 2. */
+static hy_med_t *add_m(void)
+{
+    hy_med_t *m = &meds[n_meds++];
+    hy_med_defaults(m);
+    m->id = 3;
+    strcpy(m->code, "M");
+    strcpy(m->name, "Magnesium");
+    m->type = HY_SCHED_FIXED;
+    m->times[0] = 8 * 60;
+    m->n_times = 1;
+    m->order = 2;
+    return m;
+}
+
 static void add_log(uint32_t med_id, int64_t ts, hy_status_t st, int64_t slot)
 {
     hy_log_t *l = &logs[n_logs];
@@ -604,11 +619,12 @@ static void test_archive_open_slot_disappears(void)
     TEST_ASSERT_EQUAL_UINT(0, out.n_showing);
     TEST_ASSERT_FALSE(out.chime);
     TEST_ASSERT_EQUAL_UINT8(0, s.chime_plays);
-    TEST_ASSERT_EQUAL_UINT(0, n_logs);
+    TEST_ASSERT_EQUAL_INT64(0, out.next_wake);   /* no A deadline left */
+    /* the no-log rule belongs to the archive action */
 
     eval(L(10, 5));
     TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
-    TEST_ASSERT_EQUAL_INT64(0, out.next_wake);   /* no A deadline left */
+    TEST_ASSERT_EQUAL_INT64(0, out.next_wake);
 }
 
 /* Archive removes the snooze entries too (hy_act_snoozes gives an empty list afterwards). */
@@ -655,6 +671,7 @@ static void test_archive_one_of_two(void)
     TEST_ASSERT_EQUAL_UINT(0, out.n_newly_due);
     TEST_ASSERT_FALSE(out.chime);
     TEST_ASSERT_EQUAL_UINT8(1, s.chime_plays);
+    TEST_ASSERT_EQUAL_INT64(L(8, 7), s.chime_next);
 
     eval(L(8, 7));
     TEST_ASSERT_TRUE(out.chime);
@@ -713,14 +730,7 @@ static void test_added_time_inside_window_due(void)
     reset();
     hy_sched_start_tracking(&s, L(7, 0));
     eval(L(7, 0));
-    hy_med_t *m = &meds[n_meds++];
-    hy_med_defaults(m);
-    m->id = 3;
-    strcpy(m->code, "M");
-    strcpy(m->name, "Magnesium");
-    m->type = HY_SCHED_FIXED;
-    m->times[0] = 8 * 60;
-    m->n_times = 1;
+    add_m();
     eval(L(8, 10));
     TEST_ASSERT_EQUAL_UINT(1, out.n_open);
     TEST_ASSERT_EQUAL_UINT32(3, out.open[0].med_id);
@@ -732,14 +742,7 @@ static void test_added_time_inside_window_due(void)
     reset();
     hy_sched_start_tracking(&s, L(7, 0));
     eval(L(7, 0));
-    m = &meds[n_meds++];
-    hy_med_defaults(m);
-    m->id = 3;
-    strcpy(m->code, "M");
-    strcpy(m->name, "Magnesium");
-    m->type = HY_SCHED_FIXED;
-    m->times[0] = 8 * 60;
-    m->n_times = 1;
+    add_m();
     eval(L(10, 5));
     TEST_ASSERT_EQUAL_UINT(0, out.n_open);
     TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
