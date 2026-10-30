@@ -17,6 +17,15 @@ Observed on the Waveshare ESP32-S3-Touch-AMOLED-2.16 with the registry BSP (wave
 - Partial flushes narrower than the screen can be taller than 48 rows (210 px wide: 108 rows), because LVGL fits rows into the same 46080-byte buffer; the flush log flags only misalignment or more than 480 x 48 pixels
 - Display, owner-verified on firmware a319c4e: all four 40 px corner squares fully visible, no offset or tearing
 
+## Rounded glass corners
+
+The glass hides a rounded area in each corner of the 480 x 480 panel. The radius is not documented and was not measured.
+
+- Design estimate: 70 px, the constant `HY_CORNER_R` in `components/hy_ui/src/ui_internal.h`. Layouts keep everything that must be read or touched inside a circle of that radius centred 70 px in from each corner
+- Basis (to be confirmed by the owner): on c1f8102 the outer bottom keys of the text keyboard (key edge 6 px from the side, bottom 8 px above the screen edge, 12 px rounding) were reported half cut. Geometry says those keys start losing pixels at a radius of about 35 px and lose 4 to 8 % of their area at 50 to 60 px, so the reported cut points to the upper end of the 40 to 60 px first guess or above. Nothing else was reported clipped; the top bar clock and the Set buttons of Time zone and Set the time would start to lose pixels at about 70 to 72 px
+- The corner-square check above ("all four 40 px corner squares fully visible") does not fit these figures: a rounded corner of 50 px would hide about a third of such a square, its outer corner first. That check was looser than its wording
+- To confirm: `boardtest` draws, in every corner, quarter circles of radius 50, 60, 70, 80, 90 and 100 px (colours listed in the centre label). The glass radius is the smallest one whose arc shows whole, its middle included. Set `HY_CORNER_R` to that value or above
+
 ## Buffers
 
 - 2 draw buffers of 48 lines x 480 px x 2 bytes = 46080 bytes each, internal DMA-capable RAM, no PSRAM

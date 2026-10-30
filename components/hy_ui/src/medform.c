@@ -280,14 +280,17 @@ static void ta_ready_cb(lv_event_t *e)
     }
 }
 
+/* The text field (y 40..92), the error line (94..116) and Back and Next (120..176) sit above the keyboard
+ * (HY_KBD_TOP 180) */
+#define TEXT_BTN_Y 120
 static void render_text(void)
 {
     text_load();
     lv_obj_set_size(s_back, BACK_W, 56);
-    lv_obj_set_pos(s_back, PAD_X, 116);
+    lv_obj_set_pos(s_back, PAD_X, TEXT_BTN_Y);
     lv_obj_set_size(s_next, NEXT_W, 56);
-    lv_obj_set_pos(s_next, NEXT_X, 116);
-    lv_obj_set_pos(s_err, PAD_X, 178);
+    lv_obj_set_pos(s_next, NEXT_X, TEXT_BTN_Y);
+    lv_obj_set_pos(s_err, PAD_X, 94);
 }
 
 /* ---- Code page and picker ---- */
@@ -922,9 +925,11 @@ static void show_page(page_t pg)
     }
     set_err(NULL);
     lv_obj_set_pos(s_err, PAD_X, 300);
-    /* the Code page error (a long other name) is cut with dots inside 444 x 34 and never reaches the button row */
-    lv_label_set_long_mode(s_err, pg == PG_CODE ? LV_LABEL_LONG_MODE_DOTS : LV_LABEL_LONG_MODE_WRAP);
-    lv_obj_set_size(s_err, FULL_W, pg == PG_CODE ? 34 : LV_SIZE_CONTENT);
+    /* the Code page error (a long other name) is cut with dots inside 444 x 34 and never reaches the button row; on the
+     * text pages the error has one line between the field and Back and Next */
+    bool text = pg == PG_NAME || pg == PG_DOSE;
+    lv_label_set_long_mode(s_err, pg == PG_CODE || text ? LV_LABEL_LONG_MODE_DOTS : LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_size(s_err, FULL_W, pg == PG_CODE ? 34 : text ? lv_font_get_line_height(hy_type.status) : LV_SIZE_CONTENT);
 
     switch (pg) {
     case PG_NAME:
@@ -1171,10 +1176,11 @@ static void create_text(void)
 {
     lv_obj_t *c = s_c[PG_NAME] = s_c[PG_DOSE] = new_page();
     s_ta = lv_textarea_create(c);
-    lv_obj_set_size(s_ta, FULL_W, 56);
-    lv_obj_set_pos(s_ta, PAD_X, 48);
+    lv_obj_set_size(s_ta, FULL_W, 52);
+    lv_obj_set_pos(s_ta, PAD_X, 40);
     lv_textarea_set_one_line(s_ta, true);
     style_ta(s_ta);
+    lv_obj_set_style_pad_ver(s_ta, 12, 0);   /* 52 px: 12 + the 28 px line + 12 */
     lv_obj_add_event_cb(s_ta, ta_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_ta, consume_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_ta, consume_cb, LV_EVENT_PRESSING, NULL);
