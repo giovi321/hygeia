@@ -1068,6 +1068,32 @@ static void test_archive_and_schedule_change_drop_snooze(void)
     TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
 }
 
+static void test_purge_removes_med_logs_and_snooze(void)
+{
+    const hy_snooze_t *sn;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_snooze(3, 15, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(3, 0, "", HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, "", HY_SRC_SCREEN, NULL));
+    size_t meds_before;
+    { const hy_med_t *ms; meds_before = hy_meds(&ms); }
+    uint32_t ids[] = {3, 99};
+    size_t removed = 7, logs = 7;
+    n_evs = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_purge(ids, 2, &removed, &logs));
+    TEST_ASSERT_EQUAL_size_t(1, removed);
+    TEST_ASSERT_EQUAL_size_t(1, logs);
+    TEST_ASSERT_NULL(med_by_id(3));
+    TEST_ASSERT_NOT_NULL(med_by_id(1));
+    { const hy_med_t *ms; TEST_ASSERT_EQUAL_size_t(meds_before - 1, hy_meds(&ms)); }
+    TEST_ASSERT_EQUAL_size_t(meds_before - 1, st.n_meds);
+    TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
+    TEST_ASSERT_EQUAL_size_t(1, st.n_logs);
+    TEST_ASSERT_EQUAL_UINT32(1, st.logs[0].med_id);
+    TEST_ASSERT_TRUE(n_evs >= 1);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_purge(ids, 2, &removed, &logs));
+    TEST_ASSERT_EQUAL_size_t(0, removed);
+}
+
 /* ---- untracked gaps ---- */
 static void test_record_gap_publishes_once(void)
 {
@@ -1175,6 +1201,7 @@ int main(void)
     RUN_TEST(test_undo_restores_snooze);
     RUN_TEST(test_undo_does_not_restore_expired_snooze);
     RUN_TEST(test_archive_and_schedule_change_drop_snooze);
+    RUN_TEST(test_purge_removes_med_logs_and_snooze);
     RUN_TEST(test_record_gap_publishes_once);
     RUN_TEST(test_record_gap_without_port_member);
     return UNITY_END();

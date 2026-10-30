@@ -79,6 +79,15 @@ static void job_logs(void)
     heap_caps_free(buf);
 }
 
+/* "limits": the active and stored counts against the limits */
+static void job_limits(void)
+{
+    const hy_med_t *ms;
+    size_t stored = hy_meds(&ms);
+    ESP_LOGI(TAG, "limits: active %u of %d, stored %u of %d", (unsigned)hy_meds_active_count(), HY_MAX_MEDS,
+             (unsigned)stored, HY_MAX_STORED);
+}
+
 /* Debug medicine codes: Z (Zinc), C (Calcium), T (Test), U (Test 2) and the bulk codes of "seed4 <n>" */
 static bool is_bulk_code(const char *c)
 {
@@ -271,7 +280,42 @@ static void seed_archived(int count)
 /* "seed4": adds Z (Zinc), the 4th medicine; "seed4 5" also adds C (Calcium) for a 3rd row, which scrolls.
  * "seed4 <n>" (n >= 6) fills up to n active medicines (at most 50) with Z1..Z9, ZA..ZZ, Z0, then Y1.., four
  * daily times 6 h apart each, the first 60 to 107 min from now: no dose is open while measuring.
- * "seed4 off" archives all of them. "seed4 arch <n>" adds n archived Zinc records (see seed_archived). */
+ * "seed4 off" archives all of them; "seed4 purge" deletes them for good (see seed_purge). "seed4 arch <n>" adds n archived Zinc records (see seed_archived). */
+static bool is_seed4_record(const hy_med_t *m)
+{
+    const char *c = m->code;
+    if (strcmp(c, "C") == 0) {
+        return strcmp(m->name, "Calcium") == 0;
+    }
+    if (strcmp(m->name, "Zinc") != 0) {
+        return false;
+    }
+    /* Z (seed4), Z1.. / Y1.. (seed4 <n>), X1.. / W1.. (seed4 arch <n>) */
+    return strcmp(c, "Z") == 0 ||
+           (strlen(c) == 2 && (c[0] == 'Z' || c[0] == 'Y' || c[0] == 'X' || c[0] == 'W') &&
+            strchr("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0", c[1]) != NULL);
+}
+
+/* "seed4 purge": permanently deletes every record seed4 created (code C named Calcium; name Zinc with code
+ * Z, Z?, Y?, X? or W?), active or archived, with their log entries and snoozes. Real medicines never match. */
+static void seed_purge(void)
+{
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    uint32_t ids[HY_MAX_STORED];
+    size_t k = 0;
+    for (size_t i = 0; i < n && k < HY_MAX_STORED; i++) {
+        if (is_seed4_record(&ms[i])) {
+            ids[k++] = ms[i].id;
+        }
+    }
+    size_t removed = 0, logs = 0;
+    hy_err_t err = hy_act_med_purge(ids, k, &removed, &logs);
+    ESP_LOGI(TAG, "seed4 purge: %s, %u of %u medicines deleted, %u log entries deleted", hy_err_str(err),
+             (unsigned)removed, (unsigned)k, (unsigned)logs);
+    job_limits();
+}
+
 static void job_seed4(const char *arg)
 {
     if (strncmp(arg, "arch", 4) == 0 && (arg[4] == 0 || arg[4] == ' ')) {
@@ -281,6 +325,10 @@ static void job_seed4(const char *arg)
             return;
         }
         seed_archived(count);
+        return;
+    }
+    if (strcmp(arg, "purge") == 0) {
+        seed_purge();
         return;
     }
     if (strcmp(arg, "off") == 0) {
@@ -349,15 +397,6 @@ static void job_archive(const char *arg)
     if (strcmp(yes, "yes") == 0) {
         medarchive_confirm();
     }
-}
-
-/* "limits": the active and stored counts against the limits */
-static void job_limits(void)
-{
-    const hy_med_t *ms;
-    size_t stored = hy_meds(&ms);
-    ESP_LOGI(TAG, "limits: active %u of %d, stored %u of %d", (unsigned)hy_meds_active_count(), HY_MAX_MEDS,
-             (unsigned)stored, HY_MAX_STORED);
 }
 
 /* "remindtest <minutes> [count] [miss2]": T "Test" (colour 9), with count 2 also U "Test 2" (colour 8),
