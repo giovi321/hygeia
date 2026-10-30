@@ -3,7 +3,9 @@
  *
  * Sleep mode: when the UI reports the screen OFF (LVGL task), LVGL pauses itself and, without VBUS, automatic
  * light sleep (240 / 40 MHz) is configured with GPIO wakes on touch INT, RTC INT and the user key, and the CPU-max
- * lock is released. The task then runs every 1000 ms (PMU poll, heartbeat, battery reading every 60 s) and ends
+ * lock is released. With CONFIG_HY_PM_SCREEN_ON_DFS the CPU-max lock is also released while the screen is on without
+ * VBUS: the CPU then runs at 240 MHz only while a task runs (FreeRTOS rtos locks) or LVGL refreshes (hy_board's
+ * hy_render lock), and at 40 MHz in idle. The task then runs every 1000 ms (PMU poll, heartbeat, battery reading every 60 s) and ends
  * the sleep mode on the first wake cause: PWR key, VBUS change, touch, user key, RTC INT low, now >= next_wake, or a
  * low or critical battery crossing. The UI asks for the sleep mode again after its next tick if the screen stays
  * OFF. */
@@ -73,7 +75,7 @@ static const char *const k_cause[W_N] = {"pwr", "usb", "touch", "key", "rtc", "n
 static int64_t (*volatile s_next_wake_fn)(void);
 static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
 static StaticSemaphore_t s_sleep_mu_buf;
-static esp_pm_lock_handle_t s_pm_lock;     /* CPU max, held whenever the sleep mode is not on */
+static esp_pm_lock_handle_t s_pm_lock;     /* CPU max: see awake_lock_wanted */
 static bool s_lock_held;                   /* s_sleep_mu */
 static bool s_light;                       /* light sleep enabled in this sleep mode; s_sleep_mu */
 static volatile bool s_asleep;             /* LVGL paused by the sleep mode; written under s_sleep_mu and s_mux */
@@ -373,6 +375,33 @@ static void lock_hold(bool on)
     s_lock_held = on;
 }
 
+/* Whether hy_awake (CPU max) is held. Without CONFIG_HY_PM_SCREEN_ON_DFS: always, except in a light-sleep sleep mode.
+ * With it: only on VBUS. On USB the frequency stays fixed as before (power is free there, and the USB console is never
+ * exposed to frequency switching); on battery the CPU scales between 40 and 240 MHz with the screen on too. */
+static bool awake_lock_wanted(bool asleep, bool vbus)
+{
+#if CONFIG_HY_PM_SCREEN_ON_DFS
+    (void)asleep;
+    return vbus;
+#else
+    return !asleep || vbus;
+#endif
+}
+
+/* Power task, after a VBUS reading: brings hy_awake in line with VBUS while the sleep mode is off. In the sleep mode
+ * enter_sleep and exit_sleep own it, and a VBUS change ends the sleep mode (W_USB). */
+static void awake_lock_sync(void)
+{
+    xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
+    if (!s_asleep) {
+        portENTER_CRITICAL(&s_mux);
+        bool vbus = s_vbus_real;
+        portEXIT_CRITICAL(&s_mux);
+        lock_hold(awake_lock_wanted(false, vbus));
+    }
+    xSemaphoreGive(s_sleep_mu);
+}
+
 static bool sleep_requested(void)
 {
     portENTER_CRITICAL(&s_mux);
@@ -450,7 +479,10 @@ static void exit_sleep(wake_cause_t cause)
         xSemaphoreGive(s_sleep_mu);
         return;
     }
-    lock_hold(true);
+    portENTER_CRITICAL(&s_mux);
+    bool vbus_now = s_vbus_real;
+    portEXIT_CRITICAL(&s_mux);
+    lock_hold(awake_lock_wanted(false, vbus_now));
     if (s_light) {
         pm_set(false);
         hy_board_sleep_wake_arm(false);
@@ -713,6 +745,7 @@ static void power_task(void *arg)
             last_read = mono;
             bool refake = false;
             uint32_t flags = read_battery(mono, &refake);
+            awake_lock_sync();
             if (refake) {
                 flags |= HY_BATT_CHANGED;
             }
@@ -765,8 +798,8 @@ esp_err_t hy_power_init(void)
     s_sleep_mu = xSemaphoreCreateMutexStatic(&s_sleep_mu_buf);
     esp_err_t perr = esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "hy_awake", &s_pm_lock);
     if (perr == ESP_OK) {
-        lock_hold(true);
-        pm_set(false);   /* min 40 MHz: reached only while the sleep mode releases the lock */
+        lock_hold(true);   /* s_vbus_real is true until the first reading: awake_lock_sync releases it on battery */
+        pm_set(false);     /* min 40 MHz: reached only while hy_awake is released */
     } else {
         s_pm_lock = NULL;
         ESP_LOGE(TAG, "pm lock: %s, no light sleep", esp_err_to_name(perr));

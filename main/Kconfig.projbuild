@@ -14,4 +14,16 @@ menu "Hygeia"
             At boot, turn off the TS-pin measurement and set the charge target to 4.2 V and the
             constant charge current to 150 mA (sized for a 320 mAh cell). n leaves the charger as found.
 
+    config HY_PM_SCREEN_ON_DFS
+        bool "Let the CPU scale down while the screen is on, on battery"
+        default y
+        depends on PM_ENABLE
+        help
+            On battery, release the hy_awake CPU-max lock while the screen is on. The CPU runs at
+            240 MHz while any task runs (FreeRTOS rtos locks) and through each LVGL refresh
+            (hy_render lock, from LV_EVENT_REFR_START to LV_EVENT_REFR_READY), and at 40 MHz in idle.
+            The SPI flushes hold their own APB-max lock. On USB, hy_awake stays held as before.
+            n holds hy_awake whenever the sleep mode is off, at the cost of about 10 to 20 mA
+            (estimate) while the screen is on.
+
 endmenu
