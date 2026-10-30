@@ -83,7 +83,7 @@ static int parse_month_name(const char *name)
 
 #define MONTHS_MAX 1200
 
-static int s_months[MONTHS_MAX];
+static HY_EXT_BSS int s_months[MONTHS_MAX];
 static size_t s_n_months;
 
 /* First position whose month index is >= idx. */

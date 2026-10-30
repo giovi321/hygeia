@@ -60,7 +60,7 @@ static hy_log_t *s_hbuf;             /* PSRAM */
 static bool s_full = true;
 static uint32_t s_key;      /* recompute key of the last full run */
 static hy_adherence_t s_ad;
-static hy_mark_t s_marks[HY_MAX_MEDS][MAX_DAYS];
+static HY_EXT_BSS hy_mark_t s_marks[HY_MAX_MEDS][MAX_DAYS];
 static bool s_prog[HY_MAX_MEDS];
 static const hy_med_t *s_meds[HY_MAX_MEDS];
 
