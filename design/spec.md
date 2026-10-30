@@ -216,8 +216,8 @@ Gestures:
 |---|---|
 | Swipe left / right | pager: Home ⇄ Overview ⇄ History |
 | Pull down from top edge | Quick settings, from any screen except the due card |
-| Swipe up from bottom edge | back to Home, from any screen, except on a medicine form with unsaved changes |
-| Swipe right from left edge | close a detail page |
+| Swipe up from bottom edge | back to Home, from any screen; with unsaved changes on a medicine form it stays on the form |
+| Swipe right from left edge | close a detail page; on the medicine form, step back one page or ask "Discard changes?" |
 | Vertical swipe in the grid | scroll medicines |
 | Tap tile | log as taken, show undo toast (5 s countdown) |
 | Long press tile | medicine detail |

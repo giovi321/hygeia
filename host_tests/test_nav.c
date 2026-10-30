@@ -451,6 +451,29 @@ static void test_form_from_detail(void)
     TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
 }
 
+static void test_form_dirty_edge_up_from_settings(void)
+{
+    hy_nav_t n; hy_nav_init(&n);
+    hy_nav_push(&n, HY_V_MEDFORM);
+    n.form_dirty = true;
+    hy_nav_push(&n, HY_V_QS);
+    hy_nav_push(&n, HY_V_SETTINGS);
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_UP));
+    TEST_ASSERT_EQUAL(2, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_MEDFORM, hy_nav_view(&n));
+}
+
+static void test_form_clean_edge_up_from_settings(void)
+{
+    hy_nav_t n; hy_nav_init(&n);
+    hy_nav_push(&n, HY_V_MEDFORM);
+    hy_nav_push(&n, HY_V_QS);
+    hy_nav_push(&n, HY_V_SETTINGS);
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_EDGE_UP));
+    TEST_ASSERT_EQUAL(1, n.depth);
+    TEST_ASSERT_EQUAL(HY_V_HOME, hy_nav_view(&n));
+}
+
 static void test_off_counts_as_idle(void)
 {
     hy_gesture_t gs[] = { HY_G_SWIPE_LEFT, HY_G_TAP };
@@ -502,5 +525,7 @@ int main(void)
     RUN_TEST(test_form_under_due_and_idle);
     RUN_TEST(test_archive_view_edge_right_pops);
     RUN_TEST(test_form_from_detail);
+    RUN_TEST(test_form_dirty_edge_up_from_settings);
+    RUN_TEST(test_form_clean_edge_up_from_settings);
     return UNITY_END();
 }
