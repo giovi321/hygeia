@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-/* I2C bus, display, touch, LVGL port; brightness 80% */
+/* I2C bus, display, touch, LVGL port; brightness 50% */
 esp_err_t hy_board_init(void);
 
 lv_display_t *hy_board_display(void);
