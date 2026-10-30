@@ -962,12 +962,16 @@ void medform_back(void)
 
 void medform_open_new(void)
 {
-    if (hy_meds_active_count() >= HY_MAX_MEDS) {
-        toast_show_info(HY_S_MF_ERR_FULL);
-        return;
-    }
     const hy_med_t *ms;
     size_t n = hy_meds(&ms);
+    if (hy_meds_active_count() >= HY_MAX_MEDS) {
+        toast_show_info(HY_S_MF_FULL_ACTIVE);
+        return;
+    }
+    if (n >= HY_MAX_STORED) {
+        toast_show_info(HY_S_MF_FULL_STORED);
+        return;
+    }
     hy_mf_new(&s_f, ms, n);
     s_page = PG_NAME;
     s_via_code_row = false;

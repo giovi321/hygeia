@@ -100,6 +100,9 @@ static void refresh_view(hy_view_t v)
     case HY_V_MEDFORM:
         medform_show();
         break;
+    case HY_V_MED_ARCHIVE:
+        medarchive_show(s_nav.med_id);
+        break;
     case HY_V_QS:
         qs_show();
         break;
@@ -334,7 +337,7 @@ void hy_ui_set_storage_ok(bool ok)
 /* Views that are not on screen at boot are created after the splash (one every WARM_MS from nav_host_warm_start)
  * or at their first show, whichever comes first. The splash needs steady frames; each create below is one
  * blocking LVGL step. With CONFIG_HY_DEBUG_CONSOLE every create logs its cost. */
-typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_MEDFORM, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_N } lazy_t;
+typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_MEDFORM, LZ_ARCHIVE, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_N } lazy_t;
 
 #define WARM_MS 250
 
@@ -353,6 +356,8 @@ static lazy_t lazy_of(hy_view_t v, bool *is_lazy)
         return LZ_EARLIER;
     case HY_V_MEDFORM:
         return LZ_MEDFORM;
+    case HY_V_MED_ARCHIVE:
+        return LZ_ARCHIVE;
     case HY_V_QS:
         return LZ_QS;
     case HY_V_SETTINGS:
@@ -393,6 +398,9 @@ static void create_lazy(lazy_t k)
     case LZ_MEDFORM:
         medform_create();
         break;
+    case LZ_ARCHIVE:
+        medarchive_create();
+        break;
     case LZ_QS:
         qs_create();
         break;
@@ -412,7 +420,7 @@ static void create_lazy(lazy_t k)
     }
     due_raise();   /* the card stays above every view, as when it was created last */
 #if CONFIG_HY_DEBUG_CONSOLE
-    static const char *const names[LZ_N] = {"detail", "note", "earlier", "medform", "qs", "settings", "time", "clock-invalid"};
+    static const char *const names[LZ_N] = {"detail", "note", "earlier", "medform", "archive", "qs", "settings", "time", "clock-invalid"};
     ESP_LOGI(TAG, "create %s: %lld us", names[k], (long long)(esp_timer_get_time() - t0));
 #endif
 }

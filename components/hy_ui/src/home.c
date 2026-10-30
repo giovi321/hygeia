@@ -237,7 +237,7 @@ static void plus_click_cb(lv_event_t *e)
         return;
     }
     ESP_LOGI(TAG, "plus tile tap");
-    toast_show_info(HY_S_ADD_IN_WEB);
+    medform_open_new();   /* the limit toasts come from there */
 }
 
 /* The "+" tile after the medicine tiles; the QR to the web UI comes with plan 4 */
@@ -439,6 +439,11 @@ void home_show_med(uint32_t med_id)
 {
     s_show_id = med_id;
     scroll_to_pending();   /* the rebuild after a medicines event does it when the tile is not there yet */
+}
+
+void home_scroll_to(uint32_t med_id)
+{
+    home_show_med(med_id);
 }
 
 void home_rebuild(void)
