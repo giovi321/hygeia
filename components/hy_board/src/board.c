@@ -113,8 +113,6 @@ static esp_err_t panel_cmd(uint8_t cmd, const void *param, size_t len)
     return esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | ((int)cmd << 8), param, len);
 }
 
-/* End of an LVGL refresh, LVGL task. The first one after a wake that sent pixels releases the held brightness. The
- * panel IO queue keeps the order: the brightness command goes out after the frame's colour data. */
 #if CONFIG_HY_PM_SCREEN_ON_DFS
 /* CPU max for one LVGL refresh (render and the waits on the flushes inside it), LVGL task only. Without it the
  * frequency would switch on every flush wait inside a frame. Paired by LVGL: REFR_START and REFR_READY in
@@ -147,6 +145,8 @@ static void render_hold(bool on)
 }
 #endif
 
+/* End of an LVGL refresh, LVGL task. The first one after a wake that sent pixels releases the held brightness. The
+ * panel IO queue keeps the order: the brightness command goes out after the frame's colour data. */
 static void refr_ready_cb(lv_event_t *e)
 {
     (void)e;

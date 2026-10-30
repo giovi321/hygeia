@@ -3,13 +3,13 @@
  *
  * Stroke boundaries come from the indev PRESSED and RELEASED events, which LVGL sends before the pressed
  * widget gets its own RELEASED / SHORT_CLICKED, so a tile's click handler can ask ui_input_last_was_tap().
- * LVGL does not forward PRESSING to indev event callbacks, so max_dev (P24) is tracked in a wrapper around
+ * LVGL does not forward PRESSING to indev event callbacks, so max_dev is tracked in a wrapper around
  * the indev read callback, which sees every touch sample.
  *
- * Scroll inertia (Q97): the scrolling lists glide on after a fling and bounce at their ends (ui_scroller). A touch
- * that lands while a list is still moving only stops it, as on a phone: LVGL halts the glide itself, and this
+ * Scroll inertia: the scrolling lists glide on after a fling and bounce at their ends (ui_scroller). A touch
+ * that lands on a list while it is still moving only stops it, as on a phone: LVGL halts the glide itself, and this
  * layer marks the stroke so that, if it stays a tap or a long press, no widget acts on it and it does not
- * navigate. A stroke that moves on from there is an ordinary drag or swipe. */
+ * navigate. A touch outside the moving list (a quick settings tile, a toast, an overlay) is an ordinary stroke. A stroke that moves on from there is an ordinary drag or swipe. */
 
 #include "esp_log.h"
 #include "ui_internal.h"
@@ -26,6 +26,7 @@ static const char *TAG = "ui_input";
  * list: two animation frames */
 #define GLIDE_RECENT_MS    70
 
+static lv_obj_t *s_glide_scroller;  /* read_wrap: the list that is moving under the new touch */
 static lv_obj_t *s_last_scroller;   /* the ui_scroller that moved last */
 static uint32_t s_scroll_ms;        /* lv_tick of that movement */
 static bool s_glide_pending;        /* read_wrap: the new touch landed on a moving list */
@@ -64,8 +65,12 @@ static void read_wrap(lv_indev_t *indev, lv_indev_data_t *data)
     if (down && !s_phys_down) {
         /* a new touch, read before LVGL processes it: LVGL stops a glide in that processing. scroll_obj stays set
          * through the glide, the timestamp covers the bounce animation after it. */
-        s_glide_pending = lv_indev_get_scroll_obj(indev) != NULL ||
-                          (s_last_scroller && lv_tick_elaps(s_scroll_ms) <= GLIDE_RECENT_MS);
+        lv_obj_t *moving = lv_indev_get_scroll_obj(indev);
+        if (!moving && s_last_scroller && lv_tick_elaps(s_scroll_ms) <= GLIDE_RECENT_MS) {
+            moving = s_last_scroller;
+        }
+        s_glide_scroller = moving;
+        s_glide_pending = moving != NULL;
     }
     /* data->point is the raw sample, before LVGL rotates it into display coordinates (lv_display_rotate_point
      * in lv_indev.c), while x0/y0 come from the rotated lv_indev_get_point. They agree only because the
@@ -90,6 +95,21 @@ static bool stroke_waking(void)
     return ui_nav_idle() || guard;
 }
 
+/* The pressed object is inside the list that is moving and the list is on screen */
+static bool glide_target(lv_obj_t *pressed)
+{
+    lv_obj_t *list = s_glide_scroller;
+    if (!list || !pressed || !lv_obj_is_visible(list)) {
+        return false;
+    }
+    for (lv_obj_t *o = pressed; o; o = lv_obj_get_parent(o)) {
+        if (o == list) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void indev_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
@@ -103,7 +123,7 @@ static void indev_cb(lv_event_t *e)
         lv_display_trigger_activity(NULL);
         s_waking = stroke_waking();
         screen_activity();
-        s_glide_stop = s_glide_pending && !s_waking;
+        s_glide_stop = s_glide_pending && !s_waking && glide_target(lv_indev_get_active_obj());
         s_glide_pending = false;
         /* while the logged toast and its scrim are up a swipe does not navigate */
         s_consumed = toast_logged_visible();
@@ -122,7 +142,7 @@ static void indev_cb(lv_event_t *e)
 }
 
 /* Release: classify, log, navigate. A stroke the navigation swallowed as WAKE is not a tap, so the
- * SHORT_CLICKED that LVGL sends next to the pressed tile does nothing (Review Focus 3). */
+ * SHORT_CLICKED that LVGL sends next to the pressed tile does nothing. */
 static void finish(int32_t x, int32_t y, uint32_t t)
 {
     s_active = false;
@@ -139,9 +159,12 @@ static void finish(int32_t x, int32_t y, uint32_t t)
         /* the touch only stopped a moving list: not a tap for any widget, and no gesture */
         s_last_tap = false;
         s_consumed = true;
-        /* LVGL drops the glide at the press without its end step, so a list caught past an end stays there */
-        lv_obj_t *o = s_last_scroller;
-        if (o) {
+    }
+    if (s_glide_stop) {
+        /* LVGL drops the glide at the press without its end step, so a list caught past an end stays there unless
+         * this stroke scrolls it on and LVGL throws it again at the release */
+        lv_obj_t *o = s_glide_scroller;
+        if (o && !lv_indev_get_scroll_obj(s_indev)) {
             int32_t top = lv_obj_get_scroll_top(o), bottom = lv_obj_get_scroll_bottom(o);
             if (top < 0) {
                 lv_obj_scroll_by(o, 0, top, LV_ANIM_ON);
@@ -204,6 +227,9 @@ static void scroller_cb(lv_event_t *e)
     if (lv_event_get_code(e) == LV_EVENT_DELETE) {
         if (s_last_scroller == o) {
             s_last_scroller = NULL;
+        }
+        if (s_glide_scroller == o) {
+            s_glide_scroller = NULL;
         }
         return;
     }
