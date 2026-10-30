@@ -93,18 +93,20 @@ static void test_shake_spike_rebound(void)
 {
     rig_t r;
     start(&r);
-    for (int i = 0; i < 3; i++) {   /* (a) the rebound on the next sample */
+    for (int i = 0; i < 4; i++) {   /* (a) the rebound on the next sample, repetitions 200 ms apart */
         feed_axis(&r, 0, 2500);
         feed_axis(&r, 0, -2000);
-        quiet(&r, 580);
+        quiet(&r, 180);
     }
+    quiet(&r, 1000);
     TEST_ASSERT_EQUAL(0, r.trues);
-    for (int i = 0; i < 3; i++) {   /* (b) one quiet sample, then the rebound 40 ms later */
+    for (int i = 0; i < 4; i++) {   /* (b) one quiet sample, then the rebound 40 ms later */
         feed_axis(&r, 0, 2500);
         feed_axis(&r, 0, 0);
         feed_axis(&r, 0, -2000);
-        quiet(&r, 560);
+        quiet(&r, 160);
     }
+    quiet(&r, 1000);
     TEST_ASSERT_EQUAL(0, r.trues);
 }
 
@@ -113,6 +115,9 @@ static void test_shake_walk_like(void)
     rig_t r;
     start(&r);
     sine(&r, 1, 900, 2, 10000);
+    TEST_ASSERT_EQUAL(0, r.trues);
+    start(&r);
+    sine(&r, 1, 1200, 2, 10000);
     TEST_ASSERT_EQUAL(0, r.trues);
 }
 
@@ -173,6 +178,21 @@ static void test_shake_cooldown(void)
     TEST_ASSERT_EQUAL(2, r.trues);
 }
 
+static void test_shake_cooldown_clock_wrap(void)
+{
+    rig_t r;
+    r.t = 0;
+    r.trues = 0;
+    hy_shake_reset(&r.s, r.t);
+    r.t = 0x80002000u;   /* more than 2^31 ms after reset, no detection yet */
+    quiet(&r, 400);
+    one_shake(&r);
+    quiet(&r, 1500);
+    one_shake(&r);
+    quiet(&r, 1000);
+    TEST_ASSERT_EQUAL(2, r.trues);
+}
+
 static void test_shake_axis_switch(void)
 {
     rig_t r;
@@ -198,5 +218,6 @@ int main(void)
     RUN_TEST(test_shake_settle);
     RUN_TEST(test_shake_cooldown);
     RUN_TEST(test_shake_axis_switch);
+    RUN_TEST(test_shake_cooldown_clock_wrap);
     return UNITY_END();
 }

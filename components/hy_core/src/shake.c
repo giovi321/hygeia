@@ -7,7 +7,7 @@ static int32_t iabs32(int32_t v)
 
 void hy_shake_reset(hy_shake_t *s, uint32_t now_ms)
 {
-    *s = (hy_shake_t){ .start_ms = now_ms, .cool_until_ms = now_ms, .axis = -1, .lat_axis = -1 };
+    *s = (hy_shake_t){ .start_ms = now_ms, .axis = -1, .lat_axis = -1 };
 }
 
 bool hy_shake_feed(hy_shake_t *s, uint32_t t_ms, hy_accel_t a)
@@ -22,9 +22,12 @@ bool hy_shake_feed(hy_shake_t *s, uint32_t t_ms, hy_accel_t a)
     s->primed = true;
 
     if (t_ms - s->start_ms < HY_SHK_SETTLE_MS) return false;
-    if ((int32_t)(t_ms - s->cool_until_ms) < 0) {
-        s->latched = false;
-        return false;
+    if (s->cooling) {
+        if ((int32_t)(t_ms - s->cool_until_ms) < 0) {
+            s->latched = false;
+            return false;
+        }
+        s->cooling = false;
     }
 
     if (s->latched && iabs32(hp[s->lat_axis]) < HY_SHK_REARM_MG) s->latched = false;
@@ -56,6 +59,7 @@ bool hy_shake_feed(hy_shake_t *s, uint32_t t_ms, hy_accel_t a)
     if (s->count >= HY_SHK_PEAKS) {
         s->count = 0;
         s->cool_until_ms = t_ms + HY_SHK_COOLDOWN_MS;
+        s->cooling = true;
         return true;
     }
     return false;

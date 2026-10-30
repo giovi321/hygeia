@@ -3,7 +3,7 @@
 bool hy_orient_candidate(hy_accel_t a, hy_rot_t *out)
 {
     int32_t x = a.x, y = a.y, z = a.z;
-    /* int16 inputs: each square fits 2^30, the sum of three needs int64 */
+    /* int16 inputs: the sum of two squares already exceeds int32 */
     int64_t plane2 = (int64_t)x * x + (int64_t)y * y;
     int64_t mag2 = plane2 + (int64_t)z * z;
     if (plane2 < (int64_t)HY_OR_PLANE_MIN_MG * HY_OR_PLANE_MIN_MG) return false;
