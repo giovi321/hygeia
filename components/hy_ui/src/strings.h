@@ -130,9 +130,7 @@
 #define HY_S_ON            "On"
 #define HY_S_OFF           "Off"
 #define HY_S_QS_BRIGHTNESS "Brightness"
-#define HY_S_QS_BATTERY    "Battery " HY_S_DASH "%"
-#define HY_S_QS_BATTERY_PCT "Battery %s"            /* "78%" */
-#define HY_S_QS_BATTERY_EST "Battery %s" HY_S_DOT "%s" /* "78%", "~2 d" */
+#define HY_S_QS_BATTERY_LEFT "%s left"             /* "~2 d" */
 #define HY_S_QS_SETTINGS   "Settings " HY_S_RSAQ
 #define HY_S_QS_QR         "Web UI QR " HY_S_RSAQ
 
