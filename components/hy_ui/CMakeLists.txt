@@ -21,6 +21,7 @@ idf_component_register(
         "src/note.c"
         "src/earlier.c"
         "src/medform.c"
+        "src/medarchive.c"
         "src/qs.c"
         "src/settings.c"
         "src/timeset.c"

@@ -150,6 +150,8 @@ static void cmd_poweroff(const char *args)
 static void cmd_idle(const char *args) { hy_ui_debug_idle(args); }
 static void cmd_scr(const char *args) { hy_ui_debug_scr(args); }
 static void cmd_mf(const char *args) { hy_ui_debug_mf(args); }
+static void cmd_archive(const char *args) { hy_ui_debug_archive(args); }
+static void cmd_limits(const char *args) { (void)args; hy_ui_debug_limits(); }
 static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
@@ -329,6 +331,8 @@ void app_main(void)
     console_register("gaps", cmd_gaps);
     console_register("scr", cmd_scr);
     console_register("mf", cmd_mf);
+    console_register("archive", cmd_archive);
+    console_register("limits", cmd_limits);
     console_register("sleepstat", cmd_sleepstat);
     console_start();
 #endif

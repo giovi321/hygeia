@@ -38,7 +38,6 @@
 #define HY_S_TILE_MISSED      "Missed"
 #define HY_S_TILE_CLOCK_UNSET "clock not set"
 #define HY_S_PLUS             "+"
-#define HY_S_ADD_IN_WEB       "Add medicines in the web UI"
 
 /* ---- logging from a tile ---- */
 #define HY_S_TOO_SOON      "Last dose %s ago, minimum %s. Tap again to log" /* durations */
@@ -108,6 +107,8 @@
 #define HY_S_DET_MISSED    "missed"
 #define HY_S_DET_NOTE      "Log with note"
 #define HY_S_DET_EARLIER   "Log earlier" HY_S_ELL
+#define HY_S_DET_EDIT      "Edit"
+#define HY_S_DET_ARCHIVE   "Archive"
 #define HY_S_DET_30_DAYS   "Last 30 days"
 #define HY_S_DET_SEP       ", "                     /* between schedule times */
 #define HY_S_NOTE_LOG      "Log"
@@ -240,5 +241,14 @@
 #define HY_S_MF_ERR_WEB    "Could not save. Ask for help in the web UI"
 #define HY_S_MF_ADDED      "%s added"               /* code */
 #define HY_S_MF_SAVED      "Saved"
+#define HY_S_MF_FULL_ACTIVE "50 medicines is the limit. Archive one first"
+#define HY_S_MF_FULL_STORED "No room for more medicines. Ask for help in the web UI"
+
+/* ---- archive confirmation ---- */
+#define HY_S_ARCH_TITLE    "Archive %s?"            /* name */
+#define HY_S_ARCH_BODY     "It leaves the home screen and stops reminding. Its history is kept. Someone can bring it back in the web UI."
+#define HY_S_ARCH_DUE      "A dose is due now. It will not be logged."
+#define HY_S_ARCH_CONFIRM  "Archive"
+#define HY_S_ARCH_DONE     "%s archived"            /* code */
 
 #endif /* HY_UI_STRINGS_H */

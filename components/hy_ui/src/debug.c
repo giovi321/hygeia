@@ -24,7 +24,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS };
 typedef struct {
     int kind;
     char arg[96];
@@ -207,8 +207,63 @@ static void sort_times(uint16_t *t, size_t n)
  * "seed4 <n>" (n >= 6) fills up to n active medicines (at most 50) with Z1..Z9, ZA..ZZ, Z0, then Y1.., four
  * daily times 6 h apart each, the first 60 to 107 min from now: no dose is open while measuring.
  * "seed4 off" archives all of them. */
+static bool code_in_use(const char *code)
+{
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(ms[i].code, code) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* "seed4 arch <n>": adds n new archived example medicines (fresh ids, codes X1.. that no stored record uses), so
+ * "50 active plus 50 archived" can be set up. Stops at the stored limit. */
+static void seed_archived(int count)
+{
+    static const char second[] = "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0";
+    int added = 0;
+    for (const char *p = "XW"; *p && added < count; p++) {
+        for (const char *q = second; *q && added < count; q++) {
+            char code[3] = {*p, *q, 0};
+            if (code_in_use(code)) {
+                continue;
+            }
+            hy_med_t m;
+            memset(&m, 0, sizeof m);
+            hy_med_defaults(&m);
+            m.id = 0;
+            snprintf(m.code, sizeof m.code, "%s", code);
+            snprintf(m.name, sizeof m.name, "Old %s", code);
+            m.color = (uint8_t)(added % 10);
+            m.type = HY_SCHED_FIXED;
+            m.times[0] = 8 * 60;
+            m.n_times = 1;
+            m.active_from = hy_clock_today_ymd();
+            m.archived = true;
+            m.order = (uint16_t)(500 + added);
+            hy_err_t err = hy_act_med_upsert(&m);
+            if (err != HY_OK) {
+                ESP_LOGW(TAG, "seed4 arch: %s: %s", code, hy_err_str(err));
+                added = count;
+                break;
+            }
+            added++;
+        }
+    }
+    const hy_med_t *all;
+    size_t stored = hy_meds(&all);
+    ESP_LOGI(TAG, "seed4 arch: %u active, %u stored", (unsigned)hy_meds_active_count(), (unsigned)stored);
+}
+
 static void job_seed4(const char *arg)
 {
+    if (strncmp(arg, "arch ", 5) == 0) {
+        seed_archived(atoi(arg + 5));
+        return;
+    }
     if (strcmp(arg, "off") == 0) {
         archive_codes(is_seed4_code, "seed4 off");
         return;
@@ -253,6 +308,37 @@ static void job_seed4(const char *arg)
         err = upsert_debug("C", "Calcium", 4, &c_time, 1, 4, 30, 120, NULL);
         ESP_LOGI(TAG, "seed4: upsert C: %s", hy_err_str(err));
     }
+}
+
+/* "archive <code> [yes]": the archive confirmation for the active medicine; yes presses Archive */
+static void job_archive(const char *arg)
+{
+    char code[4] = "", yes[8] = "";
+    sscanf(arg, "%3s %7s", code, yes);
+    if (!code[0]) {
+        ESP_LOGE(TAG, "usage: archive <code> [yes]");
+        return;
+    }
+    uint32_t id;
+    if (!home_med_id_by_code(code, &id)) {
+        ESP_LOGW(TAG, "no active medicine with code \"%s\"", code);
+        return;
+    }
+    ui_nav_reset();
+    ui_open_detail(id);
+    ui_nav_push(HY_V_MED_ARCHIVE);
+    if (strcmp(yes, "yes") == 0) {
+        medarchive_confirm();
+    }
+}
+
+/* "limits": the active and stored counts against the limits */
+static void job_limits(void)
+{
+    const hy_med_t *ms;
+    size_t stored = hy_meds(&ms);
+    ESP_LOGI(TAG, "limits: active %u of %d, stored %u of %d", (unsigned)hy_meds_active_count(), HY_MAX_MEDS,
+             (unsigned)stored, HY_MAX_STORED);
 }
 
 /* "remindtest <minutes> [count] [miss2]": T "Test" (colour 9), with count 2 also U "Test 2" (colour 8),
@@ -763,6 +849,12 @@ static void run_job(void *arg)
     case J_MF:
         medform_debug(j->arg);
         break;
+    case J_ARCHIVE:
+        job_archive(j->arg);
+        break;
+    case J_LIMITS:
+        job_limits();
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -818,5 +910,7 @@ void hy_ui_debug_gaps(void) { post(J_GAPS, NULL); }
 void hy_ui_debug_poweroff(const char *arg) { post(J_POWEROFF, arg); }
 void hy_ui_debug_scr(const char *arg) { post(J_SCR, arg); }
 void hy_ui_debug_mf(const char *arg) { post(J_MF, arg); }
+void hy_ui_debug_archive(const char *arg) { post(J_ARCHIVE, arg); }
+void hy_ui_debug_limits(void) { post(J_LIMITS, NULL); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

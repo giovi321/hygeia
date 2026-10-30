@@ -56,6 +56,8 @@ void hy_ui_debug_settings(void);          /* logs the settings in the RAM copy (
 void hy_ui_debug_poweroff(const char *arg); /* "show|cancel|slide|crit": the power-off confirmation, its slide (powers off) and the critical countdown */
 void hy_ui_debug_gaps(void);              /* the stored untracked gaps of the last 30 days */
 void hy_ui_debug_scr(const char *arg);    /* "": screen state and timers; "off": OFF now; "nousb": run as on battery; "usb": back */
+void hy_ui_debug_archive(const char *arg); /* "<code> [yes]": the archive confirmation; yes presses Archive */
+void hy_ui_debug_limits(void);            /* the active and stored counts against the limits */
 void hy_ui_debug_mf(const char *arg);     /* the medicine form: "new|edit <code>|name <text>|dose [text]|code <xy>|color <n>|type fixed|asneeded|time add HH:MM|time del <idx>|interval <min>|next|back|save|state" */
 #endif
 
