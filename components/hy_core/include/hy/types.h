@@ -7,7 +7,7 @@
 
 typedef enum { HY_OK = 0, HY_E_INVALID, HY_E_CODE, HY_E_CODE_DUP, HY_E_NAME,
                HY_E_TIMES, HY_E_NOT_FOUND, HY_E_CLOCK, HY_E_UNDO_EXPIRED,
-               HY_E_IO, HY_E_FULL, HY_W_TOO_SOON } hy_err_t;
+               HY_E_IO, HY_E_FULL, HY_W_TOO_SOON, HY_E_INTERVAL, HY_E_DOSE } hy_err_t;
 
 /* Short name of an hy_err_t, for logs ("HY_E_IO"). "HY_E_?" for an unknown value. */
 const char *hy_err_str(hy_err_t e);
