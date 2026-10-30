@@ -67,6 +67,12 @@ hy_err_t hy_act_med_upsert(hy_med_t *m);
 /* Sets pills_left (0..9999, else HY_E_INVALID; unknown id HY_E_NOT_FOUND), saves the
  * medicines (HY_E_IO, state unchanged on failure) and publishes HY_EV_MEDS_CHANGED. */
 hy_err_t hy_act_pills_set(uint32_t med_id, int16_t left);
+/* Debug console only. Permanently deletes the medicines with these ids (active or archived): their
+ * log entries and snoozes first, then the records (one save). Unknown ids are skipped. *n_removed gets
+ * the medicines removed, *n_logs the log entries deleted (either may be NULL). HY_E_IO when a log delete
+ * or the save fails; medicines whose logs were all deleted are still removed in that case only if the
+ * save works. Publishes HY_EV_MEDS_CHANGED. */
+hy_err_t hy_act_med_purge(const uint32_t *ids, size_t n_ids, size_t *n_removed, size_t *n_logs);
 /* Unarchiving re-validates (code uniqueness) and gives HY_E_FULL when HY_MAX_MEDS medicines
  * are active. Same save and event rules as upsert. */
 hy_err_t hy_act_med_archive(uint32_t id, bool archived);
