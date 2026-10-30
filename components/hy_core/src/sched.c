@@ -137,7 +137,7 @@ void hy_sched_eval(hy_sched_t *s, const hy_sched_in_t *in, hy_sched_out_t *out)
     const size_t n_meds = meds ? in->n_meds : 0;
     int64_t wake = 0;
 
-    static cand_t cand[HY_MAX_MEDS];
+    static HY_EXT_BSS cand_t cand[HY_MAX_MEDS];
     size_t n_cand = 0;
     static int64_t occ[SCHED_OCC_MAX];
 

@@ -14,21 +14,23 @@
 
 static const char *TAG = "ui_overview";
 
-#define RING_D       130
-#define RING_W       12
+#define RING_D       150
+#define RING_W       14
 #define RING_X       24
-#define RING_Y       44
-#define ROWS_X       178
-#define ROWS_Y       50
+#define RING_Y       46
+#define ROWS_X       198
+#define ROWS_Y       44
 #define ROWS_W       (HY_SCREEN - ROWS_X - 22)
-#define ROW_H        30
-#define ROWS_H       (4 * ROW_H + 8)   /* a partial fifth row is the scroll cue; the viewport ends at y 178, above the timeline dots */
-#define DOT_D        10
-#define TL_Y         191          /* timeline y on the page, from the mockup */
+#define ROW_H        38
+#define ROWS_H       (6 * ROW_H + 16)  /* six rows and a 16 px cue of the seventh; the viewport ends at y 288, above the now line */
+#define DOT_D        12
+#define TL_Y         330          /* timeline y on the page: the lower part of the page, above the page dots */
 #define TL_X0        24
 #define TL_W         432
-#define TL_DOT       20
-#define TL_NOW_H     60
+#define TL_DOT       22
+#define TL_NOW_H     64           /* the now line spans y 298..362 */
+#define TL_LBL_DY    30           /* hour labels centre below the line: y 349..371 (screen 405..427), inside HY_CORNER_R */
+#define CHECK        16           /* taken check mark box */
 #define MAX_ROWS     64
 
 static lv_obj_t *s_page, *s_arc, *s_count, *s_rows, *s_tl;
@@ -37,9 +39,9 @@ static uint32_t s_gen_seen;
 static uint32_t s_sig;
 static bool s_drawn;
 static uint32_t s_last_us;
-static hy_today_row_t s_trows[MAX_ROWS];
+static HY_EXT_BSS hy_today_row_t s_trows[MAX_ROWS];
 
-static const lv_point_precise_t s_check_pts[] = {{0, 6}, {4, 11}, {12, 1}};
+static const lv_point_precise_t s_check_pts[] = {{1, 8}, {6, 14}, {15, 2}};
 
 static void rows_scroll_cb(lv_event_t *e)
 {
@@ -78,7 +80,7 @@ static void add_row(const hy_snapshot_t *sn, const hy_today_row_t *r, const hy_m
     lv_obj_t *dot = ui_plain(row);
     lv_obj_set_size(dot, DOT_D, DOT_D);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_margin_right(dot, 9, 0);
+    lv_obj_set_style_margin_right(dot, 10, 0);
     if (r->as_needed) {
         lv_obj_set_style_border_width(dot, 2, 0);
         lv_obj_set_style_border_color(dot, lv_color_hex(HY_C_TEXT2), 0);
@@ -118,20 +120,26 @@ static void add_row(const hy_snapshot_t *sn, const hy_today_row_t *r, const hy_m
         case HY_OCC_UPCOMING:  break;
         }
     }
-    lv_obj_t *l = ui_label(row, hy_type.status, 0, text);
+    lv_obj_t *l = ui_label(row, hy_type.body, 0, text);
     lv_obj_set_style_text_color(l, c_main, 0);
+    if (r->as_needed) {
+        /* "AB as needed · 12 today" is wider than the row: the label takes the rest of the row and ends in dots */
+        lv_obj_set_width(l, 0);
+        lv_obj_set_flex_grow(l, 1);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+    }
     if (word) {
         char w[24];
         snprintf(w, sizeof w, " %s", word);
-        lv_obj_t *wl = ui_label(row, hy_type.status, 0, w);
+        lv_obj_t *wl = ui_label(row, hy_type.body, 0, w);
         lv_obj_set_style_text_color(wl, c_word, 0);
     }
 
     if (check) {
         lv_obj_t *c = lv_line_create(row);
-        lv_obj_set_size(c, 12, 12);
-        lv_obj_set_style_margin_left(c, 7, 0);
-        lv_obj_set_style_line_width(c, 2, 0);
+        lv_obj_set_size(c, CHECK, CHECK);
+        lv_obj_set_style_margin_left(c, 8, 0);
+        lv_obj_set_style_line_width(c, 3, 0);
         lv_obj_set_style_line_color(c, lv_color_hex(HY_C_OK), 0);
         lv_obj_set_style_line_rounded(c, true, 0);
         lv_line_set_points(c, s_check_pts, 3);
@@ -295,11 +303,11 @@ void overview_create(lv_obj_t *page)
     s_count = ui_label(page, hy_type.count, HY_C_TEXT, zero);
     lv_obj_set_width(s_count, RING_D - 2 * RING_W);
     lv_obj_set_style_text_align(s_count, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(s_count, RING_X + RING_W, cy - 6 - lv_font_get_line_height(hy_type.count) / 2);
-    lv_obj_t *doses = ui_label(page, hy_type.small, HY_C_TEXT2, HY_S_OV_DOSES);
+    lv_obj_set_pos(s_count, RING_X + RING_W, cy - 8 - lv_font_get_line_height(hy_type.count) / 2);
+    lv_obj_t *doses = ui_label(page, hy_type.status, HY_C_TEXT2, HY_S_OV_DOSES);
     lv_obj_set_width(doses, RING_D - 2 * RING_W);
     lv_obj_set_style_text_align(doses, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(doses, RING_X + RING_W, cy + 26 - lv_font_get_line_height(hy_type.small) / 2);
+    lv_obj_set_pos(doses, RING_X + RING_W, cy + 28 - lv_font_get_line_height(hy_type.status) / 2);
 
     s_rows = lv_obj_create(page);
     lv_obj_remove_style_all(s_rows);
@@ -319,13 +327,13 @@ void overview_create(lv_obj_t *page)
     lv_obj_set_style_bg_color(line, lv_color_hex(HY_C_TRACK), 0);
     lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
 
-    const int lh = lv_font_get_line_height(hy_type.small);
-    lv_obj_t *l0 = ui_label(page, hy_type.small, HY_C_TEXT2, HY_S_OV_TL_0);
-    lv_obj_set_pos(l0, TL_X0, TL_Y + 27 - lh / 2);
-    lv_obj_t *l12 = ui_label(page, hy_type.small, HY_C_TEXT2, HY_S_OV_TL_12);
-    lv_obj_set_pos(l12, TL_X0 + TL_W * 47 / 100, TL_Y + 27 - lh / 2);
-    lv_obj_t *l24 = ui_label(page, hy_type.small, HY_C_TEXT2, HY_S_OV_TL_24);
-    lv_obj_align(l24, LV_ALIGN_TOP_RIGHT, -(HY_SCREEN - TL_X0 - TL_W), TL_Y + 27 - lh / 2);
+    const int lh = lv_font_get_line_height(hy_type.status);
+    lv_obj_t *l0 = ui_label(page, hy_type.status, HY_C_TEXT2, HY_S_OV_TL_0);
+    lv_obj_set_pos(l0, TL_X0, TL_Y + TL_LBL_DY - lh / 2);
+    lv_obj_t *l12 = ui_label(page, hy_type.status, HY_C_TEXT2, HY_S_OV_TL_12);
+    lv_obj_set_pos(l12, TL_X0 + TL_W * 47 / 100, TL_Y + TL_LBL_DY - lh / 2);
+    lv_obj_t *l24 = ui_label(page, hy_type.status, HY_C_TEXT2, HY_S_OV_TL_24);
+    lv_obj_align(l24, LV_ALIGN_TOP_RIGHT, -(HY_SCREEN - TL_X0 - TL_W), TL_Y + TL_LBL_DY - lh / 2);
 
     s_tl = ui_plain(page);
     lv_obj_set_size(s_tl, HY_SCREEN, TL_NOW_H);

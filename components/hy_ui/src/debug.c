@@ -24,7 +24,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS };
 typedef struct {
     int kind;
     char arg[96];
@@ -79,6 +79,15 @@ static void job_logs(void)
     heap_caps_free(buf);
 }
 
+/* "limits": the active and stored counts against the limits */
+static void job_limits(void)
+{
+    const hy_med_t *ms;
+    size_t stored = hy_meds(&ms);
+    ESP_LOGI(TAG, "limits: active %u of %d, stored %u of %d", (unsigned)hy_meds_active_count(), HY_MAX_MEDS,
+             (unsigned)stored, HY_MAX_STORED);
+}
+
 /* Debug medicine codes: Z (Zinc), C (Calcium), T (Test), U (Test 2) and the bulk codes of "seed4 <n>" */
 static bool is_bulk_code(const char *c)
 {
@@ -102,7 +111,7 @@ static bool is_test_code(const char *c)
 }
 
 /* The medicine to reuse for a debug code: the one with that code (active first, then archived), else an
- * archived debug medicine, renamed (the table holds 50 medicines including archived ones), else a new one. */
+ * archived debug medicine, renamed (the table holds 100 medicines including archived ones), else a new one. */
 static void debug_slot(const char *code, hy_med_t *out)
 {
     const hy_med_t *ms;
@@ -162,23 +171,13 @@ static hy_err_t upsert_debug(const char *code, const char *name, uint8_t color, 
     return err;
 }
 
-static size_t active_count(void)
-{
-    const hy_med_t *ms;
-    size_t n = hy_meds(&ms), k = 0;
-    for (size_t i = 0; i < n; i++) {
-        k += !ms[i].archived;
-    }
-    return k;
-}
-
 static void archive_codes(bool (*match)(const char *), const char *what)
 {
     const hy_med_t *ms;
     size_t n = hy_meds(&ms);
     uint32_t ids[HY_MAX_MEDS];
     size_t k = 0;
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < n && k < HY_MAX_MEDS; i++) {
         if (!ms[i].archived && match(ms[i].code)) {
             ids[k++] = ms[i].id;
         }
@@ -213,12 +212,125 @@ static void sort_times(uint16_t *t, size_t n)
     }
 }
 
+/* Largest stored order + 1, as for a new medicine */
+static uint16_t next_order(void)
+{
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    uint16_t o = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (ms[i].order >= o) {
+            o = (uint16_t)(ms[i].order + 1);
+        }
+    }
+    return o;
+}
+
+static bool code_in_use(const char *code)
+{
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(ms[i].code, code) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* "seed4 arch <n>": adds n new archived example medicines (fresh ids, codes X1.. that no stored record uses), so
+ * "50 active plus 50 archived" can be set up. Stops at the stored limit. */
+static void seed_archived(int count)
+{
+    static const char second[] = "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0";
+    int added = 0;
+    for (const char *p = "XW"; *p && added < count; p++) {
+        for (const char *q = second; *q && added < count; q++) {
+            char code[3] = {*p, *q, 0};
+            if (code_in_use(code)) {
+                continue;
+            }
+            hy_med_t m;
+            memset(&m, 0, sizeof m);
+            hy_med_defaults(&m);
+            m.id = 0;
+            snprintf(m.code, sizeof m.code, "%s", code);
+            snprintf(m.name, sizeof m.name, "Zinc");
+            m.color = (uint8_t)(added % 10);
+            m.type = HY_SCHED_FIXED;
+            m.times[0] = 8 * 60;
+            m.n_times = 1;
+            m.active_from = hy_clock_today_ymd();
+            m.archived = true;
+            m.order = next_order();
+            hy_err_t err = hy_act_med_upsert(&m);
+            if (err != HY_OK) {
+                ESP_LOGW(TAG, "seed4 arch: %s: %s", code, hy_err_str(err));
+                added = count;
+                break;
+            }
+            added++;
+        }
+    }
+    const hy_med_t *all;
+    size_t stored = hy_meds(&all);
+    ESP_LOGI(TAG, "seed4 arch: %u active, %u stored", (unsigned)hy_meds_active_count(), (unsigned)stored);
+}
+
 /* "seed4": adds Z (Zinc), the 4th medicine; "seed4 5" also adds C (Calcium) for a 3rd row, which scrolls.
  * "seed4 <n>" (n >= 6) fills up to n active medicines (at most 50) with Z1..Z9, ZA..ZZ, Z0, then Y1.., four
  * daily times 6 h apart each, the first 60 to 107 min from now: no dose is open while measuring.
- * "seed4 off" archives all of them. */
+ * "seed4 off" archives all of them; "seed4 purge" deletes them for good (see seed_purge). "seed4 arch <n>" adds n archived Zinc records (see seed_archived). */
+static bool is_seed4_record(const hy_med_t *m)
+{
+    const char *c = m->code;
+    if (strcmp(c, "C") == 0) {
+        return strcmp(m->name, "Calcium") == 0;
+    }
+    if (strcmp(m->name, "Zinc") != 0) {
+        return false;
+    }
+    /* Z (seed4), Z1.. / Y1.. (seed4 <n>), X1.. / W1.. (seed4 arch <n>) */
+    return strcmp(c, "Z") == 0 ||
+           (strlen(c) == 2 && (c[0] == 'Z' || c[0] == 'Y' || c[0] == 'X' || c[0] == 'W') &&
+            strchr("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0", c[1]) != NULL);
+}
+
+/* "seed4 purge": permanently deletes every record seed4 created (code C named Calcium; name Zinc with code
+ * Z, Z?, Y?, X? or W?), active or archived, with their log entries and snoozes. Real medicines never match. */
+static void seed_purge(void)
+{
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    uint32_t ids[HY_MAX_STORED];
+    size_t k = 0;
+    for (size_t i = 0; i < n && k < HY_MAX_STORED; i++) {
+        if (is_seed4_record(&ms[i])) {
+            ids[k++] = ms[i].id;
+        }
+    }
+    size_t removed = 0, logs = 0;
+    hy_err_t err = hy_act_med_purge(ids, k, &removed, &logs);
+    ESP_LOGI(TAG, "seed4 purge: %s, %u of %u medicines deleted, %u log entries deleted", hy_err_str(err),
+             (unsigned)removed, (unsigned)k, (unsigned)logs);
+    job_limits();
+}
+
 static void job_seed4(const char *arg)
 {
+    if (strncmp(arg, "arch", 4) == 0 && (arg[4] == 0 || arg[4] == ' ')) {
+        int count = atoi(arg + 4);
+        if (count < 1) {
+            ESP_LOGE(TAG, "usage: seed4 arch <n>");
+            return;
+        }
+        seed_archived(count);
+        return;
+    }
+    if (strcmp(arg, "purge") == 0) {
+        seed_purge();
+        return;
+    }
     if (strcmp(arg, "off") == 0) {
         archive_codes(is_seed4_code, "seed4 off");
         return;
@@ -237,8 +349,8 @@ static void job_seed4(const char *arg)
         uint16_t first = (uint16_t)((local_minute(ck->now(NULL)) + 60) % 1440);
         size_t k = 0;
         bool full = false;
-        for (const char *p = "ZY"; *p && !full && (int)active_count() < target; p++) {
-            for (const char *q = second; *q && !full && (int)active_count() < target; q++, k++) {
+        for (const char *p = "ZY"; *p && !full && (int)hy_meds_active_count() < target; p++) {
+            for (const char *q = second; *q && !full && (int)hy_meds_active_count() < target; q++, k++) {
                 char code[3] = {*p, *q, 0};
                 uint16_t times[4];
                 for (int i = 0; i < 4; i++) {
@@ -253,7 +365,7 @@ static void job_seed4(const char *arg)
                 }
             }
         }
-        ESP_LOGI(TAG, "seed4: %u active medicines", (unsigned)active_count());
+        ESP_LOGI(TAG, "seed4: %u active medicines", (unsigned)hy_meds_active_count());
         return;
     }
     static const uint16_t z_time = 20 * 60, c_time = 21 * 60;
@@ -262,6 +374,28 @@ static void job_seed4(const char *arg)
     if (strcmp(arg, "5") == 0) {
         err = upsert_debug("C", "Calcium", 4, &c_time, 1, 4, 30, 120, NULL);
         ESP_LOGI(TAG, "seed4: upsert C: %s", hy_err_str(err));
+    }
+}
+
+/* "archive <code> [yes]": the archive confirmation for the active medicine; yes presses Archive */
+static void job_archive(const char *arg)
+{
+    char code[4] = "", yes[8] = "";
+    sscanf(arg, "%3s %7s", code, yes);
+    if (!code[0]) {
+        ESP_LOGE(TAG, "usage: archive <code> [yes]");
+        return;
+    }
+    uint32_t id;
+    if (!home_med_id_by_code(code, &id)) {
+        ESP_LOGW(TAG, "no active medicine with code \"%s\"", code);
+        return;
+    }
+    ui_nav_reset();
+    ui_open_detail(id);
+    ui_nav_push(HY_V_MED_ARCHIVE);
+    if (strcmp(yes, "yes") == 0) {
+        medarchive_confirm();
     }
 }
 
@@ -313,7 +447,7 @@ static void job_perf(void)
     uint32_t q_us = hy_sched_run_query_us();
     ESP_LOGI(TAG, "perf: %u active medicines, %u logs: evaluation %u.%03u ms (log query %u.%03u ms), "
              "home_refresh %u.%03u ms",
-             (unsigned)active_count(), (unsigned)hy_sched_snapshot()->in.n_logs,
+             (unsigned)hy_meds_active_count(), (unsigned)hy_sched_snapshot()->in.n_logs,
              (unsigned)((t1 - t0) / 1000), (unsigned)((t1 - t0) % 1000), (unsigned)(q_us / 1000),
              (unsigned)(q_us % 1000), (unsigned)((t2 - t1) / 1000), (unsigned)((t2 - t1) % 1000));
     uint32_t view_us, lvgl_us;
@@ -472,7 +606,7 @@ static void job_gesture(const char *arg)
     ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright> [consumed]");
 }
 
-/* "due slide|skip|snooze|next|flash": the same functions the knob, the Skip tap and the swipes call */
+/* "due slide|skip|snooze|next|prev|flash": the same functions the knob, the Skip tap and the swipes call */
 static void job_due(const char *arg)
 {
     if (strcmp(arg, "slide") == 0) {
@@ -483,12 +617,14 @@ static void job_due(const char *arg)
         due_snooze();
     } else if (strcmp(arg, "next") == 0) {
         due_next();
+    } else if (strcmp(arg, "prev") == 0) {
+        due_prev();
     } else if (strcmp(arg, "drag") == 0 || strcmp(arg, "drop") == 0) {
         due_drag_debug(arg[2] == 'o');
     } else if (strcmp(arg, "flash") == 0) {
         due_flash_debug();
     } else {
-        ESP_LOGE(TAG, "usage: due <slide|skip|snooze|next|flash|drag|drop>");
+        ESP_LOGE(TAG, "usage: due <slide|skip|snooze|next|prev|flash|drag|drop>");
     }
 }
 
@@ -652,7 +788,7 @@ static void job_settz(const char *iana)
 static void job_gaps(void)
 {
     enum { GAPS_MAX = 64 };
-    static hy_gap_t g[GAPS_MAX + 1];      /* one more than shown: tells whether more exist */
+    static HY_EXT_BSS hy_gap_t g[GAPS_MAX + 1];      /* one more than shown: tells whether more exist */
     static uint8_t why[GAPS_MAX + 1];
     if (!hy_clock_valid()) {
         ESP_LOGW(TAG, "gaps: clock invalid");
@@ -768,6 +904,15 @@ static void run_job(void *arg)
     case J_SCR:
         screen_debug(j->arg);
         break;
+    case J_MF:
+        medform_debug(j->arg);
+        break;
+    case J_ARCHIVE:
+        job_archive(j->arg);
+        break;
+    case J_LIMITS:
+        job_limits();
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -822,5 +967,8 @@ void hy_ui_debug_settings(void) { post(J_SETTINGS, NULL); }
 void hy_ui_debug_gaps(void) { post(J_GAPS, NULL); }
 void hy_ui_debug_poweroff(const char *arg) { post(J_POWEROFF, arg); }
 void hy_ui_debug_scr(const char *arg) { post(J_SCR, arg); }
+void hy_ui_debug_mf(const char *arg) { post(J_MF, arg); }
+void hy_ui_debug_archive(const char *arg) { post(J_ARCHIVE, arg); }
+void hy_ui_debug_limits(void) { post(J_LIMITS, NULL); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

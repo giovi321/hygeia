@@ -162,6 +162,59 @@ static void test_weekdays_and_dates(void)
     }
 }
 
+static void test_interval_range(void)
+{
+    hy_med_t m;
+    make_valid(&m, 1, "A");
+    m.min_interval_min = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_med_validate(&m, NULL, 0));
+    m.min_interval_min = 1440;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_med_validate(&m, NULL, 0));
+    m.min_interval_min = 1441;
+    TEST_ASSERT_EQUAL_INT(HY_E_INTERVAL, hy_med_validate(&m, NULL, 0));
+    m.type = HY_SCHED_AS_NEEDED; m.n_times = 0;
+    TEST_ASSERT_EQUAL_INT(HY_E_INTERVAL, hy_med_validate(&m, NULL, 0));
+    m.min_interval_min = 1440;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_med_validate(&m, NULL, 0));
+    /* checked after the schedule */
+    make_valid(&m, 1, "A");
+    m.n_times = 0; m.min_interval_min = 1441;
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_med_validate(&m, NULL, 0));
+}
+
+static void test_code_chars(void)
+{
+    hy_med_t m;
+    const char *bad[] = { "", "ABC", "a", "A-", "\xC3\x84" };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        make_valid(&m, 1, "A");
+        memset(m.code, 0, sizeof m.code);
+        memcpy(m.code, bad[i], strlen(bad[i]) < 3 ? strlen(bad[i]) : 3);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(HY_E_CODE, hy_med_validate(&m, NULL, 0), bad[i]);
+    }
+    const char *ok[] = { "A", "7", "V2" };
+    for (size_t i = 0; i < sizeof ok / sizeof ok[0]; i++) {
+        make_valid(&m, 1, "A");
+        memset(m.code, 0, sizeof m.code);
+        strcpy(m.code, ok[i]);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(HY_OK, hy_med_validate(&m, NULL, 0), ok[i]);
+    }
+}
+
+static void test_dose_validate(void)
+{
+    hy_med_t m;
+    make_valid(&m, 1, "A");
+    memset(m.dose, 'x', sizeof m.dose); /* 17 bytes, no terminator */
+    TEST_ASSERT_EQUAL_INT(HY_E_DOSE, hy_med_validate(&m, NULL, 0));
+    m.dose[16] = '\0';
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_med_validate(&m, NULL, 0));
+    /* checked after the name */
+    memset(m.dose, 'x', sizeof m.dose);
+    m.name[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(HY_E_NAME, hy_med_validate(&m, NULL, 0));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -172,5 +225,8 @@ int main(void)
     RUN_TEST(test_times_rules);
     RUN_TEST(test_color_range);
     RUN_TEST(test_weekdays_and_dates);
+    RUN_TEST(test_interval_range);
+    RUN_TEST(test_code_chars);
+    RUN_TEST(test_dose_validate);
     return UNITY_END();
 }

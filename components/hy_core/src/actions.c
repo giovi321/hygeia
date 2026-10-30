@@ -7,6 +7,7 @@
 
 #define UNDO_SLOTS 8
 #define QUERY_MAX 128
+#define PURGE_LOG_END 4102444800LL   /* 2100-01-01 UTC */
 #define LOOKBACK_S (8 * 86400LL)
 
 typedef struct {
@@ -27,17 +28,18 @@ static void *store_ctx;
 static const hy_clock_port_t *clk;
 static void *clk_ctx;
 
-static hy_med_t meds[HY_MAX_MEDS];
-static hy_med_t scratch[HY_MAX_MEDS];
+static HY_EXT_BSS hy_med_t meds[HY_MAX_STORED];
+static HY_EXT_BSS hy_med_t scratch[HY_MAX_STORED];
 static size_t n_meds;
-static undo_rec_t undo[UNDO_SLOTS];
+static HY_EXT_BSS undo_rec_t undo[UNDO_SLOTS];
 static size_t undo_next;
 static bool inited;
-static hy_log_t qbuf[QUERY_MAX];
-static hy_snooze_t snz[HY_MAX_MEDS];
+static HY_EXT_BSS hy_log_t qbuf[QUERY_MAX];
+static HY_EXT_BSS hy_snooze_t snz[HY_MAX_MEDS];      /* archived medicines have no snooze */
 static size_t n_snz;
-static hy_snooze_t snz_out[HY_MAX_MEDS];
+static HY_EXT_BSS hy_snooze_t snz_out[HY_MAX_MEDS];
 static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out);
+static void undo_forget(uint32_t log_id);
 
 static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id, int64_t slot)
 {
@@ -78,12 +80,12 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
     store = NULL; clk = NULL; store_ctx = NULL; clk_ctx = NULL;
     if (!s || !c) return HY_E_INVALID;
     size_t n = 0;
-    hy_err_t err = s->load_meds(sctx, meds, HY_MAX_MEDS, &n);
+    hy_err_t err = s->load_meds(sctx, meds, HY_MAX_STORED, &n);
     if (err != HY_OK) {
         memset(meds, 0, sizeof meds);
         return HY_E_IO;
     }
-    if (n > HY_MAX_MEDS) n = HY_MAX_MEDS;
+    if (n > HY_MAX_STORED) n = HY_MAX_STORED;
     n_meds = n;
     sort_meds(meds, n_meds);
     store = s; store_ctx = sctx; clk = c; clk_ctx = cctx;
@@ -95,6 +97,14 @@ size_t hy_meds(const hy_med_t **out)
 {
     if (out) *out = meds;
     return n_meds;
+}
+
+size_t hy_meds_active_count(void)
+{
+    size_t k = 0;
+    for (size_t i = 0; i < n_meds; i++)
+        if (!meds[i].archived) k++;
+    return k;
 }
 
 /* ---- medicines ---- */
@@ -110,7 +120,8 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
     bool drop_snooze = false;
     hy_med_t entry = *m;
     if (m->id == 0) {
-        if (n_meds >= HY_MAX_MEDS) return HY_E_FULL;
+        if (n_meds >= HY_MAX_STORED) return HY_E_FULL;
+        if (!m->archived && hy_meds_active_count() >= HY_MAX_MEDS) return HY_E_FULL;
         uint32_t max_id = 0;
         for (size_t i = 0; i < n_meds; i++)
             if (meds[i].id > max_id) max_id = meds[i].id;
@@ -121,6 +132,8 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
         for (i = 0; i < n; i++)
             if (scratch[i].id == m->id) break;
         if (i == n) return HY_E_NOT_FOUND;
+        if (scratch[i].archived && !entry.archived && hy_meds_active_count() >= HY_MAX_MEDS)
+            return HY_E_FULL;
         /* The caller's copy may be stale: the pill count is owned by this module, unless
          * the caller turns counting on, when its value is the starting count. */
         if (!(m->pills_enabled && !scratch[i].pills_enabled))
@@ -166,6 +179,62 @@ hy_err_t hy_act_med_archive(uint32_t id, bool archived)
     hy_med_t upd = *cur;
     upd.archived = archived;
     return hy_act_med_upsert(&upd);
+}
+
+/* Debug only (the console is the sole caller): removes the medicines with the given ids for good. */
+hy_err_t hy_act_med_purge(const uint32_t *ids, size_t n_ids, size_t *n_removed, size_t *n_logs)
+{
+    size_t removed = 0, logs = 0;
+    if (n_removed) *n_removed = 0;
+    if (n_logs) *n_logs = 0;
+    if (!inited || (n_ids && !ids) || n_ids > HY_MAX_STORED) return HY_E_INVALID;
+    hy_err_t result = HY_OK;
+    uint32_t done[HY_MAX_STORED];
+    size_t kept = 0;
+    memcpy(scratch, meds, n_meds * sizeof meds[0]);
+    for (size_t k = 0; k < n_ids && result == HY_OK; k++) {
+        if (!find_med(ids[k])) continue;
+        /* Log entries first: a failure leaves an unchanged medicine list, not orphaned references */
+        for (;;) {
+            size_t q = store->query_log(store_ctx, 0, PURGE_LOG_END, ids[k], qbuf, QUERY_MAX);
+            if (q == 0) break;
+            for (size_t i = 0; i < q; i++) {
+                if (store->delete_log(store_ctx, qbuf[i].id, qbuf[i].ts) != HY_OK) {
+                    result = HY_E_IO;
+                    break;
+                }
+                undo_forget(qbuf[i].id);
+                logs++;
+            }
+            if (result != HY_OK) break;
+        }
+        if (result == HY_OK) {
+            snooze_drop(ids[k], 0, NULL);
+            done[removed++] = ids[k];
+        }
+    }
+    /* Drop the medicines whose logs are gone */
+    size_t out = 0;
+    for (size_t i = 0; i < n_meds; i++) {
+        bool drop = false;
+        for (size_t k = 0; k < removed; k++)
+            if (meds[i].id == done[k]) drop = true;
+        if (!drop) scratch[out++] = meds[i];
+    }
+    kept = out;
+    if (removed) {
+        if (store->save_meds(store_ctx, scratch, kept) != HY_OK) {
+            result = HY_E_IO;
+        } else {
+            memcpy(meds, scratch, kept * sizeof meds[0]);
+            memset(&meds[kept], 0, (n_meds - kept) * sizeof meds[0]);
+            n_meds = kept;
+            publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, 0, 0, 0);
+        }
+    }
+    if (n_removed) *n_removed = removed;
+    if (n_logs) *n_logs = logs;
+    return result;
 }
 
 /* ---- undo records ---- */

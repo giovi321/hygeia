@@ -448,7 +448,28 @@ static void button_cb(lv_event_t *e)
     ui_nav_push(v);
 }
 
-static void make_button(lv_obj_t *parent, int x, const char *text, hy_view_t target)
+/* Edit and Archive: a still tap only; the medicine is the one the detail shows */
+static void edit_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!ui_input_last_was_tap()) {
+        return;
+    }
+    ESP_LOGI(TAG, "button: edit med %u", (unsigned)s_med_id);
+    medform_open_edit(s_med_id);
+}
+
+static void archive_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!ui_input_last_was_tap()) {
+        return;
+    }
+    ESP_LOGI(TAG, "button: archive med %u", (unsigned)s_med_id);
+    ui_nav_push(HY_V_MED_ARCHIVE);
+}
+
+static lv_obj_t *make_button_cb(lv_obj_t *parent, int x, const char *text, lv_event_cb_t cb, void *ud)
 {
     lv_obj_t *b = lv_obj_create(parent);
     lv_obj_remove_style_all(b);
@@ -461,8 +482,15 @@ static void make_button(lv_obj_t *parent, int x, const char *text, hy_view_t tar
     lv_obj_set_scrollable(b, false);
     lv_obj_set_clickable(b, true);
     lv_obj_set_scroll_chain(b, true);
-    lv_obj_add_event_cb(b, button_cb, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)target);
-    lv_obj_center(ui_label(b, hy_type.body_bold, HY_C_TEXT, text));
+    lv_obj_add_event_cb(b, cb, LV_EVENT_SHORT_CLICKED, ud);
+    lv_obj_t *l = ui_label(b, hy_type.body_bold, HY_C_TEXT, text);
+    lv_obj_center(l);
+    return b;
+}
+
+static void make_button(lv_obj_t *parent, int x, const char *text, hy_view_t target)
+{
+    make_button_cb(parent, x, text, button_cb, (void *)(uintptr_t)target);
 }
 
 static lv_obj_t *one_line(lv_obj_t *parent, const lv_font_t *f, uint32_t color, int w)
@@ -582,4 +610,12 @@ void detail_create(void)
     }
     s_adh = ui_label(s_scroll, hy_type.status, HY_C_TEXT2, "");
     lv_obj_set_style_margin_left(s_adh, 24, 0);
+
+    /* Edit and Archive */
+    lv_obj_t *erow = ui_plain(s_scroll);
+    lv_obj_set_size(erow, HY_SCREEN - 2 * CARD_M, BTN_H);
+    lv_obj_set_style_margin_left(erow, CARD_M, 0);
+    make_button_cb(erow, 0, HY_S_DET_EDIT, edit_cb, NULL);
+    lv_obj_t *arch = make_button_cb(erow, HY_SCREEN - 2 * CARD_M - BTN_W, HY_S_DET_ARCHIVE, archive_cb, NULL);
+    lv_obj_set_style_text_color(lv_obj_get_child(arch, 0), lv_color_hex(HY_C_MISS), 0);
 }

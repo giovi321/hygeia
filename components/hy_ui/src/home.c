@@ -33,7 +33,7 @@ typedef struct {
     char text[32];
 } tile_t;
 
-static tile_t s_tiles[HY_MAX_MEDS];
+static HY_EXT_BSS tile_t s_tiles[HY_MAX_MEDS];
 static size_t s_ntiles;
 static lv_obj_t *s_grid;
 static uint32_t s_gen_seen;
@@ -237,7 +237,7 @@ static void plus_click_cb(lv_event_t *e)
         return;
     }
     ESP_LOGI(TAG, "plus tile tap");
-    toast_show_info(HY_S_ADD_IN_WEB);
+    medform_open_new();   /* the limit toasts come from there */
 }
 
 /* The "+" tile after the medicine tiles; the QR to the web UI comes with plan 4 */
@@ -419,6 +419,33 @@ void home_refresh_if_changed(void)
     }
 }
 
+static uint32_t s_show_id;   /* a tile to scroll into view once the grid has it (a medicine just added) */
+
+static void scroll_to_pending(void)
+{
+    if (!s_show_id) {
+        return;
+    }
+    for (size_t i = 0; i < s_ntiles; i++) {
+        if (s_tiles[i].med_id == s_show_id) {
+            lv_obj_scroll_to_view(s_tiles[i].tile, LV_ANIM_OFF);
+            s_show_id = 0;
+            return;
+        }
+    }
+}
+
+void home_show_med(uint32_t med_id)
+{
+    s_show_id = med_id;
+    scroll_to_pending();   /* the rebuild after a medicines event does it when the tile is not there yet */
+}
+
+void home_scroll_to(uint32_t med_id)
+{
+    home_show_med(med_id);
+}
+
 void home_rebuild(void)
 {
     lv_obj_clean(s_grid);
@@ -433,6 +460,7 @@ void home_rebuild(void)
     }
     make_plus();
     lv_obj_update_layout(s_grid);
+    scroll_to_pending();
     ESP_LOGI(TAG, "grid rebuilt: %u tiles, viewport %d px, scrollable %d px",
              (unsigned)s_ntiles, (int)lv_obj_get_height(s_grid), (int)lv_obj_get_scroll_bottom(s_grid));
     home_refresh(false);
@@ -475,6 +503,11 @@ const char *ui_err_text(hy_err_t err)
     case HY_E_NOT_FOUND: return HY_S_ERR_NOT_FOUND;
     case HY_E_IO:        return HY_S_ERR_IO;
     case HY_E_FULL:      return HY_S_ERR_FULL;
+    case HY_E_NAME:      return HY_S_MF_ERR_NAME;
+    case HY_E_DOSE:      return HY_S_MF_ERR_DOSE;
+    case HY_E_CODE:      return HY_S_MF_ERR_CODE;
+    case HY_E_TIMES:     return HY_S_MF_ERR_TIMES;
+    case HY_E_INTERVAL:  return HY_S_MF_ERR_INTERVAL;
     default:             return HY_S_ERR_LOG;
     }
 }

@@ -32,7 +32,8 @@ typedef struct {
     bool        (*last_change)(void *ctx, hy_tzchange_t *out);
 } hy_clock_port_t;
 
-#define HY_MAX_MEDS 50
+#define HY_MAX_MEDS    50    /* active (non-archived) medicines; sizes every per-active array */
+#define HY_MAX_STORED  100   /* all stored medicines, archived included; sizes the action module's arrays */
 #define HY_UNDO_WINDOW_S 5
 
 /*
@@ -44,12 +45,17 @@ typedef struct {
  */
 hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_port_t *c, void *cctx);
 
-/* Active and archived medicines, stable-sorted by `order`. The pointer stays valid until the next action. */
+/* Active and archived medicines (at most HY_MAX_STORED), stable-sorted by `order`. The pointer
+ * stays valid until the next action. */
 size_t   hy_meds(const hy_med_t **out);
+/* Medicines in hy_meds that are not archived (at most HY_MAX_MEDS through the actions below). */
+size_t   hy_meds_active_count(void);
 
 /*
- * id 0 = new: assigns id = max id over all medicines (archived too) + 1; HY_E_FULL
- * at HY_MAX_MEDS. A nonzero unknown id gives HY_E_NOT_FOUND. Validation errors
+ * id 0 = new: assigns id = max id over all medicines (archived too) + 1; HY_E_FULL when
+ * the new medicine is active and HY_MAX_MEDS medicines are active, or when HY_MAX_STORED
+ * medicines are stored. An existing id that goes from archived to active gives HY_E_FULL
+ * when HY_MAX_MEDS medicines are active. A nonzero unknown id gives HY_E_NOT_FOUND. Validation errors
  * come from hy_med_validate against all current medicines. The whole array is
  * saved; on a save failure (HY_E_IO) the in-memory state is unchanged.
  * For an existing id the in-memory pills_left is kept and the caller's value is ignored
@@ -61,7 +67,14 @@ hy_err_t hy_act_med_upsert(hy_med_t *m);
 /* Sets pills_left (0..9999, else HY_E_INVALID; unknown id HY_E_NOT_FOUND), saves the
  * medicines (HY_E_IO, state unchanged on failure) and publishes HY_EV_MEDS_CHANGED. */
 hy_err_t hy_act_pills_set(uint32_t med_id, int16_t left);
-/* Unarchiving re-validates (code uniqueness). Same save and event rules as upsert. */
+/* Debug console only. Permanently deletes the medicines with these ids (active or archived): their
+ * log entries and snoozes first, then the records (one save). Unknown ids are skipped. *n_removed gets
+ * the medicines removed, *n_logs the log entries deleted (either may be NULL). HY_E_IO when a log delete
+ * or the save fails; medicines whose logs were all deleted are still removed in that case only if the
+ * save works. Publishes HY_EV_MEDS_CHANGED. */
+hy_err_t hy_act_med_purge(const uint32_t *ids, size_t n_ids, size_t *n_removed, size_t *n_logs);
+/* Unarchiving re-validates (code uniqueness) and gives HY_E_FULL when HY_MAX_MEDS medicines
+ * are active. Same save and event rules as upsert. */
 hy_err_t hy_act_med_archive(uint32_t id, bool archived);
 
 /*

@@ -177,6 +177,19 @@ void toast_show_info(const char *text)
     open(MODE_INFO);
 }
 
+void toast_show_ok(const char *text)
+{
+    lv_obj_set_style_bg_color(s_icon, lv_color_hex(HY_C_OK), 0);
+    lv_obj_set_hidden(s_check, false);
+    lv_obj_set_hidden(s_bang, true);
+    lv_label_set_text(s_text, text);
+    lv_obj_set_width(s_text, HY_TOAST_W - 22 - ICON - 16 - 22);
+    lv_obj_align(s_text, LV_ALIGN_LEFT_MID, 22 + ICON + 16, 0);
+    lv_obj_set_hidden(s_undo_area, true);
+    lv_obj_set_hidden(s_scrim, true);
+    open(MODE_INFO);
+}
+
 void ui_battery_toast(int pct)
 {
     s_batt_pending = pct;
