@@ -41,7 +41,7 @@ static bool date_ok(int32_t d)
     return d > 0 && y >= 2000 && y <= 9999 && mo >= 1 && mo <= 12 && day >= 1 && day <= 31;
 }
 
-static bool times_ok(const hy_med_t *m)
+bool hy_med_times_valid(const hy_med_t *m)
 {
     if (m->weekdays & 0x80) {
         return false; /* bits above Sunday */
@@ -92,7 +92,7 @@ hy_err_t hy_med_validate(const hy_med_t *m, const hy_med_t *others, size_t n_oth
     if (!date_ok(m->active_from) || !date_ok(m->active_until)) {
         return HY_E_INVALID;
     }
-    if (!times_ok(m)) {
+    if (!hy_med_times_valid(m)) {
         return HY_E_TIMES;
     }
     if (m->min_interval_min > HY_INTERVAL_MAX_MIN) {
