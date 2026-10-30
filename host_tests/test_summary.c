@@ -420,6 +420,36 @@ static void test_local_date_across_dst(void)
     TEST_ASSERT_EQUAL_INT32(20261025, hy_date_add(20261102, -8));
 }
 
+static void test_due_within(void)
+{
+    reset();
+    hy_med_t *a = add_a();
+    a->times[0] = 8 * 60; a->n_times = 1;
+    TEST_ASSERT_TRUE(hy_due_within(meds, n_meds, TZ_ZURICH, L(7, 0), 24 * HOUR));
+    TEST_ASSERT_FALSE(hy_due_within(meds, n_meds, TZ_ZURICH, L(8, 0), HOUR));
+    TEST_ASSERT_TRUE(hy_due_within(meds, n_meds, TZ_ZURICH, L(7, 0), HOUR));
+    TEST_ASSERT_FALSE(hy_due_within(meds, n_meds, TZ_ZURICH, L(7, 0), HOUR - 1));
+    TEST_ASSERT_FALSE(hy_due_within(meds, 0, TZ_ZURICH, L(7, 0), 24 * HOUR));
+
+    reset();
+    hy_med_t *m = add_m();
+    TEST_ASSERT_EQUAL(HY_SCHED_AS_NEEDED, m->type);
+    TEST_ASSERT_FALSE(hy_due_within(meds, n_meds, TZ_ZURICH, L(7, 0), 24 * HOUR));
+
+    reset();
+    a = add_a(); a->times[0] = 8 * 60; a->n_times = 1; a->archived = true;
+    TEST_ASSERT_FALSE(hy_due_within(meds, n_meds, TZ_ZURICH, L(7, 0), 24 * HOUR));
+
+    reset();
+    a = add_a(); a->times[0] = 8 * 60; a->n_times = 1; a->active_until = 20261101;
+    TEST_ASSERT_FALSE(hy_due_within(meds, n_meds, TZ_ZURICH, L(7, 0), 24 * HOUR));
+
+    /* 2026-11-02 is a Monday (bit0), 2026-11-03 a Tuesday (bit1): Wednesday and Thursday only */
+    reset();
+    a = add_a(); a->times[0] = 8 * 60; a->n_times = 1; a->weekdays = (1u << 2) | (1u << 3);
+    TEST_ASSERT_FALSE(hy_due_within(meds, n_meds, TZ_ZURICH, L(9, 0), 24 * HOUR));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -435,6 +465,7 @@ int main(void)
     RUN_TEST(test_rows_and_mark_on_23h_day);
     RUN_TEST(test_rows_and_mark_on_25h_day);
     RUN_TEST(test_delta_text);
+    RUN_TEST(test_due_within);
     RUN_TEST(test_local_date_across_dst);
     return UNITY_END();
 }

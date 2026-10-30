@@ -1,5 +1,6 @@
 /* Navigation host: owns the hy_nav_t, keeps one view per hy_view_t inside ui_content() and shows the top of
- * the stack. The idle clock overlay is idle.c. */
+ * the stack. The screen state machine and the idle clock are idle.c; it keeps the nav idle flag equal to
+ * "state is DIM or OFF". */
 
 #include <stdio.h>
 #include <string.h>
@@ -173,8 +174,9 @@ void ui_nav_log(void)
     for (uint8_t i = 0; i < s_nav.depth && o < sizeof b; i++) {
         o += (size_t)snprintf(b + o, sizeof b - o, "%s%s", i ? " > " : "", view_names[s_nav.stack[i]]);
     }
-    if (o < sizeof b && (s_nav.idle || s_nav.due)) {
-        snprintf(b + o, sizeof b - o, "%s%s", s_nav.idle ? " [idle]" : "", s_nav.due ? " [due]" : "");
+    if (o < sizeof b && (s_nav.idle || s_nav.due || s_nav.poweroff)) {
+        snprintf(b + o, sizeof b - o, "%s%s%s", s_nav.idle ? " [idle]" : "", s_nav.due ? " [due]" : "",
+                 s_nav.poweroff ? " [poweroff]" : "");
     }
     ESP_LOGI(TAG, "%s", b);
 }
@@ -226,6 +228,11 @@ void ui_nav_set_due(bool due)
 {
     s_nav.due = due;
     topbar_set_grab(!due && s_shown == HY_V_HOME);   /* pull-down is ignored while the card is up */
+}
+
+void ui_nav_set_poweroff(bool on)
+{
+    s_nav.poweroff = on;
 }
 
 void ui_nav_push(hy_view_t v)

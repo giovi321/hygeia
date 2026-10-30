@@ -7,4 +7,11 @@ menu "Hygeia"
             Line commands on the USB console for development (time, tap, shot, ...).
             Release builds set this to n.
 
+    config HY_PMU_CHARGER_SETUP
+        bool "Set up the AXP2101 charger at boot"
+        default y
+        help
+            At boot, turn off the TS-pin measurement and set the charge target to 4.2 V and the
+            constant charge current to 150 mA (sized for a 320 mAh cell). n leaves the charger as found.
+
 endmenu

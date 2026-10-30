@@ -16,10 +16,12 @@ static const char *TAG = "ui_qs";
 #define TILE_W   216
 #define TILE_H   96
 #define SLIDE_MS 200
+#define SLIDER_H 56
 
 enum { T_WIFI, T_AP, T_SOUND, T_DND, T_N };
 
-static lv_obj_t *s_root, *s_tile[T_N], *s_sub[T_N], *s_slider;
+static lv_obj_t *s_root, *s_tile[T_N], *s_sub[T_N], *s_slider, *s_batt, *s_btn[2];
+static int s_slider_bottom;
 
 static void save(const hy_settings_t *s)
 {
@@ -38,6 +40,29 @@ static void refresh(void)
     lv_obj_set_style_bg_color(s_tile[T_SOUND], lv_color_hex(st->sound ? HY_C_ON : HY_C_SURFACE2), 0);
     lv_obj_set_style_bg_color(s_tile[T_DND], lv_color_hex(st->dnd ? HY_C_ON : HY_C_SURFACE2), 0);
     lv_slider_set_value(s_slider, st->brightness, LV_ANIM_OFF);
+}
+
+/* The line shows only while a discharge estimate exists; hidden, the buttons move up into its place */
+void qs_battery_refresh(void)
+{
+    if (!s_batt) {
+        return;
+    }
+    char pct[16], est[16], b[48];
+    bool red, bolt, has_est, known;
+    ui_battery_text(pct, sizeof pct, &red, &bolt, est, sizeof est, &has_est, &known);
+    bool show = known && has_est;
+    int y = s_slider_bottom + 16;
+    if (show) {
+        snprintf(b, sizeof b, HY_S_QS_BATTERY_LEFT, est);
+        lv_label_set_text(s_batt, b);
+        lv_obj_set_pos(s_batt, 24, y);
+        y += 21 + 13;
+    }
+    lv_obj_set_hidden(s_batt, !show);
+    for (int i = 0; i < 2; i++) {
+        lv_obj_set_y(s_btn[i], y);
+    }
 }
 
 static void toggle_sound(void)
@@ -126,23 +151,31 @@ void qs_create(void)
 
     int y = 2 * (TILE_H + GAP) + 2;
     s_slider = ui_slider(s_root, HY_SCREEN - 2 * MARGIN, 10, 100, slider_live, slider_commit);
+    lv_obj_set_height(s_slider, SLIDER_H);
+    lv_obj_set_style_radius(s_slider, SLIDER_H / 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_slider, SLIDER_H / 2, LV_PART_INDICATOR);
     lv_obj_set_pos(s_slider, MARGIN, y);
+    /* The label is a child of the slider, drawn over track and fill. HY_C_TEXT is light and both HY_C_SURFACE2 (track,
+     * 0% fill) and HY_C_FILL (indicator, 100% fill) are dark, so it reads on either. It is not clickable: touches reach
+     * the slider. */
+    lv_obj_t *bl = ui_label(s_slider, hy_type.status_bold, HY_C_TEXT, HY_S_QS_BRIGHTNESS);
+    lv_obj_set_clickable(bl, false);
+    lv_obj_align(bl, LV_ALIGN_LEFT_MID, 20, 0);
 
-    y += 30 + 16;
-    lv_obj_t *l = ui_label(s_root, hy_type.status, HY_C_TEXT2, HY_S_QS_BRIGHTNESS);
-    lv_obj_set_pos(l, 24, y);
-    lv_obj_t *r = ui_label(s_root, hy_type.status, HY_C_TEXT2, HY_S_QS_BATTERY);
-    lv_obj_align(r, LV_ALIGN_TOP_RIGHT, -24, y);
-
-    y += 21 + 13;
+    y += SLIDER_H + 16;
+    s_slider_bottom = y - 16;
+    s_batt = ui_label(s_root, hy_type.status, HY_C_TEXT2, "");
     int bw = (HY_SCREEN - 2 * MARGIN - GAP) / 2;
     lv_obj_t *b = ui_button(s_root, bw, 64, hy_type.status_bold, HY_S_QS_SETTINGS, settings_tap, NULL);
-    lv_obj_set_pos(b, MARGIN, y);
+    lv_obj_set_x(b, MARGIN);
     lv_obj_align(lv_obj_get_child(b, 0), LV_ALIGN_LEFT_MID, 16, 0);   /* left-aligned as in the mockup */
+    s_btn[0] = b;
     b = ui_button(s_root, bw, 64, hy_type.status_bold, HY_S_QS_QR, qr_tap, NULL);
-    lv_obj_set_pos(b, MARGIN + bw + GAP, y);
+    lv_obj_set_x(b, MARGIN + bw + GAP);
     lv_obj_align(lv_obj_get_child(b, 0), LV_ALIGN_LEFT_MID, 16, 0);
     lv_obj_set_style_opa(b, LV_OPA_40, 0);
+    s_btn[1] = b;
+    qs_battery_refresh();
 }
 
 static void slide_done(lv_anim_t *a)

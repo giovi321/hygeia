@@ -1,24 +1,40 @@
-/* Top bar on lv_layer_top: time left; crossed Wi-Fi arcs (Wi-Fi is off in this firmware) and the battery
- * placeholder right; the pull-down handle above the middle on Home. Nothing here takes touches. */
+/* Top bar on lv_layer_top: time left; crossed Wi-Fi arcs (Wi-Fi is off in this firmware), the charging bolt
+ * and the battery percent right; the pull-down handle above the middle on Home. Nothing here takes touches. */
 
 #include <stdio.h>
 #include <string.h>
 
+#include "hy/battery.h"
 #include "hy/clock.h"
+#include "hy/power_run.h"
 #include "ui_internal.h"
 
 #define PAD_X     24
 #define WIFI_W    30
 #define WIFI_H    24
 #define WIFI_GAP  16
+#define BOLT_W    12
+#define BOLT_H    18
+#define BOLT_GAP  6
 #define GRAB_W    44
 #define GRAB_H    5
 #define GRAB_Y    6
 
-static lv_obj_t *s_bar, *s_time, *s_wifi, *s_batt, *s_grab;
+static lv_obj_t *s_bar, *s_time, *s_wifi, *s_batt, *s_bolt, *s_grab;
 static char s_time_txt[32];
+/* what the battery widgets show now; a refresh with the same values does no LVGL work */
+static char s_batt_txt[16], s_est_txt[16];
+static bool s_batt_red, s_batt_bolt, s_batt_est, s_batt_known, s_batt_shown;
+static lv_color_t s_bolt_col;   /* the bolt takes the colour of the percent text */
 
 static const lv_point_precise_t slash_pts[] = {{3, 1}, {27, 23}};
+/* Charging bolt, filled, in a BOLT_W x BOLT_H box: two triangles that overlap between y 7 and y 10. The upper blade
+ * runs from the top tip (8,0) down-left to (1,10); the lower blade from the right corner (11,7) down-left to the
+ * bottom tip (4,17). Together they draw the zigzag of a lightning bolt leaning right. */
+static const lv_point_precise_t bolt_tri[2][3] = {
+    {{8, 0}, {1, 10}, {7, 10}},
+    {{5, 7}, {11, 7}, {4, 17}},
+};
 
 static lv_obj_t *plain(lv_obj_t *parent)
 {
@@ -43,6 +59,25 @@ static void wifi_arc(lv_obj_t *parent, int32_t d)
     lv_obj_set_style_arc_opa(a, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_rounded(a, true, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
+}
+
+static void bolt_draw(lv_event_t *e)
+{
+    lv_obj_t *o = lv_event_get_target(e);
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    for (int t = 0; t < 2; t++) {
+        lv_draw_triangle_dsc_t d;
+        lv_draw_triangle_dsc_init(&d);
+        d.color = s_bolt_col;
+        d.opa = LV_OPA_COVER;
+        for (int i = 0; i < 3; i++) {
+            d.p[i].x = a.x1 + bolt_tri[t][i].x;
+            d.p[i].y = a.y1 + bolt_tri[t][i].y;
+        }
+        lv_draw_triangle(layer, &d);
+    }
 }
 
 /* The top bar is the first child of lv_layer_top. Overlays that must cover it (idle clock, due card fade)
@@ -76,6 +111,12 @@ void topbar_create(void)
     lv_obj_set_style_line_rounded(slash, true, 0);
     lv_obj_align_to(s_wifi, s_batt, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
 
+    s_bolt = plain(s_bar);
+    lv_obj_set_size(s_bolt, BOLT_W, BOLT_H);
+    s_bolt_col = lv_color_hex(HY_C_TEXT);
+    lv_obj_add_event_cb(s_bolt, bolt_draw, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_set_hidden(s_bolt, true);
+
     s_grab = plain(s_bar);
     lv_obj_set_size(s_grab, GRAB_W, GRAB_H);
     lv_obj_set_pos(s_grab, (HY_SCREEN - GRAB_W) / 2, GRAB_Y);
@@ -84,7 +125,69 @@ void topbar_create(void)
     lv_obj_set_style_bg_opa(s_grab, LV_OPA_COVER, 0);
     lv_obj_set_hidden(s_grab, true);
 
+    topbar_battery_refresh();
     topbar_refresh();
+}
+
+/* The percent text, the red flag, the bolt and the estimate from the power task's snapshot. A PMU read error
+ * or no battery reads as unknown. */
+void ui_battery_text(char *pct, size_t pct_len, bool *red, bool *bolt, char *est, size_t est_len, bool *has_est,
+                     bool *known)
+{
+    hy_power_state_t st;
+    hy_power_state(&st);
+    if (!st.pmu_ok) {
+        st.batt.pct = -1;
+        st.batt.raw.chg = HY_CHG_NONE;
+        st.batt.raw.present = false;
+    }
+    if (st.batt.pct < 0) {
+        st.batt.raw.present = false;   /* no battery: no bolt */
+    }
+    hy_batt_text(&st.batt, pct, pct_len, HY_S_BATTERY_NONE, red, bolt);
+    *has_est = hy_batt_estimate(&st.batt, est, est_len);
+    if (!*has_est) {
+        est[0] = '\0';
+    }
+    *known = st.batt.pct >= 0;
+}
+
+void topbar_battery_refresh(void)
+{
+    char pct[sizeof s_batt_txt], est[sizeof s_est_txt];
+    bool red, bolt, has_est, known;
+    ui_battery_text(pct, sizeof pct, &red, &bolt, est, sizeof est, &has_est, &known);
+    if (s_batt_shown && strcmp(pct, s_batt_txt) == 0 && red == s_batt_red && bolt == s_batt_bolt &&
+        has_est == s_batt_est && strcmp(est, s_est_txt) == 0 && known == s_batt_known) {
+        return;
+    }
+    bool bar_changed = !s_batt_shown || strcmp(pct, s_batt_txt) != 0 || red != s_batt_red || bolt != s_batt_bolt ||
+                       known != s_batt_known;
+    snprintf(s_batt_txt, sizeof s_batt_txt, "%s", pct);
+    snprintf(s_est_txt, sizeof s_est_txt, "%s", est);
+    s_batt_red = red;
+    s_batt_bolt = bolt;
+    s_batt_est = has_est;
+    s_batt_known = known;
+    s_batt_shown = true;
+    if (bar_changed) {
+        uint32_t col = red ? HY_C_MISS : (known ? HY_C_TEXT : HY_C_TEXT2);
+        lv_label_set_text(s_batt, pct);
+        lv_obj_set_style_text_color(s_batt, lv_color_hex(col), 0);
+        s_bolt_col = lv_color_hex(col);
+        lv_obj_invalidate(s_bolt);
+        lv_obj_set_hidden(s_bolt, !bolt);
+        lv_obj_update_layout(s_bar);   /* the label took its new width */
+        lv_obj_align(s_batt, LV_ALIGN_RIGHT_MID, -PAD_X, 0);
+        if (bolt) {
+            lv_obj_align_to(s_bolt, s_batt, LV_ALIGN_OUT_LEFT_MID, -BOLT_GAP, 0);
+            lv_obj_align_to(s_wifi, s_bolt, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
+        } else {
+            lv_obj_align_to(s_wifi, s_batt, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
+        }
+    }
+    idle_status_refresh();
+    qs_battery_refresh();
 }
 
 void topbar_refresh(void)

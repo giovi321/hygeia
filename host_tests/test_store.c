@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include "unity.h"
 #include "hy/codec.h"
+#include "hy/gap.h"
 #include "hy/med.h"
 #include "hy/store.h"
 
@@ -511,6 +512,86 @@ void test_update_into_new_month_when_index_full(void)
     TEST_ASSERT_NOT_EQUAL(0, stat(p, &sb));
 }
 
+/* ---- gaps ---- */
+static void put_gap(int64_t s, int64_t e, uint8_t r)
+{
+    hy_gap_t g = { s, e };
+    TEST_ASSERT_EQUAL(HY_OK, P->append_gap(NULL, &g, r));
+}
+
+static size_t gap_lines(void)
+{
+    char p[128], line[256];
+    path(p, sizeof p, "gaps.jsonl");
+    FILE *f = fopen(p, "rb");
+    if (!f) return 0;
+    size_t n = 0;
+    while (fgets(line, sizeof line, f)) n++;
+    fclose(f);
+    return n;
+}
+
+void test_gaps_append_query(void)
+{
+    put_gap(1000, 2000, HY_GAP_OFF);
+    put_gap(3000, 4000, HY_GAP_LOST);
+    put_gap(5000, 6000, HY_GAP_JUMP);
+    hy_gap_t out[8];
+    uint8_t rs[8];
+    TEST_ASSERT_EQUAL(3, P->query_gaps(NULL, 0, 10000, out, rs, 8));
+    TEST_ASSERT_EQUAL_INT64(1000, out[0].start);
+    TEST_ASSERT_EQUAL_INT64(5000, out[2].start);
+    /* overlap, not containment; end is exclusive */
+    TEST_ASSERT_EQUAL(2, P->query_gaps(NULL, 3500, 5001, out, rs, 8));
+    TEST_ASSERT_EQUAL_INT64(3000, out[0].start);
+    TEST_ASSERT_EQUAL_UINT8(HY_GAP_LOST, rs[0]);
+    TEST_ASSERT_EQUAL_INT64(5000, out[1].start);
+    TEST_ASSERT_EQUAL_UINT8(HY_GAP_JUMP, rs[1]);
+    TEST_ASSERT_EQUAL(1, P->query_gaps(NULL, 3000, 4000, out, rs, 8));
+    TEST_ASSERT_EQUAL(0, P->query_gaps(NULL, 2000, 3000, out, rs, 8));
+    TEST_ASSERT_EQUAL(0, P->query_gaps(NULL, 7000, 7000, out, rs, 8));
+    TEST_ASSERT_EQUAL(2, P->query_gaps(NULL, 0, 10000, out, rs, 2));
+    /* survives reopen */
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    P = hy_store_port();
+    TEST_ASSERT_EQUAL(3, P->query_gaps(NULL, 0, 10000, out, rs, 8));
+}
+
+void test_gaps_trim(void)
+{
+    for (int i = 0; i < 1100; i++) put_gap(10000 + i * 10, 10005 + i * 10, HY_GAP_OFF);
+    TEST_ASSERT_EQUAL(1100, gap_lines());
+    put_gap(10000 + 1100 * 10, 10005 + 1100 * 10, HY_GAP_LOST);   /* 1101st line */
+    TEST_ASSERT_EQUAL(1000, gap_lines());
+    static hy_gap_t out[1100];
+    static uint8_t rs[1100];
+    TEST_ASSERT_EQUAL(1000, P->query_gaps(NULL, 0, 1000000, out, rs, 1100));
+    TEST_ASSERT_EQUAL_INT64(10000 + 101 * 10, out[0].start);        /* oldest 101 dropped */
+    TEST_ASSERT_EQUAL_INT64(10000 + 1100 * 10, out[999].start);
+    TEST_ASSERT_EQUAL_UINT8(HY_GAP_LOST, rs[999]);
+    char p[128];
+    path(p, sizeof p, "gaps.jsonl.tmp");
+    TEST_ASSERT_NOT_EQUAL(0, access(p, F_OK));
+}
+
+void test_gaps_skip_corrupt(void)
+{
+    put_gap(1000, 2000, HY_GAP_OFF);
+    char p[128];
+    path(p, sizeof p, "gaps.jsonl");
+    FILE *f = fopen(p, "ab");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("garbage\n{\"s\":9,\"e\":3,\"r\":\"off\"}\n", f);
+    fclose(f);
+    put_gap(3000, 4000, HY_GAP_CLOCK);
+    hy_gap_t out[8];
+    uint8_t rs[8];
+    size_t before = hy_store_skipped_lines();
+    TEST_ASSERT_EQUAL(2, P->query_gaps(NULL, 0, 10000, out, rs, 8));
+    TEST_ASSERT_EQUAL(before + 2, hy_store_skipped_lines());
+    TEST_ASSERT_EQUAL_INT64(3000, out[1].start);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -535,5 +616,8 @@ int main(void)
     RUN_TEST(test_open_with_too_many_months_is_full);
     RUN_TEST(test_append_to_new_month_when_index_full);
     RUN_TEST(test_update_into_new_month_when_index_full);
+    RUN_TEST(test_gaps_append_query);
+    RUN_TEST(test_gaps_trim);
+    RUN_TEST(test_gaps_skip_corrupt);
     return UNITY_END();
 }

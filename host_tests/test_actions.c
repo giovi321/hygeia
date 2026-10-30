@@ -2,6 +2,7 @@
 #include "unity.h"
 #include "hy/actions.h"
 #include "hy/events.h"
+#include "hy/gap.h"
 #include "hy/med.h"
 #include "hy/occ.h"
 
@@ -15,6 +16,7 @@ static struct {
     hy_log_t logs[MAXLOG]; size_t n_logs; uint32_t next_id;
     int saves, appends, append_attempts, updates, deletes, loads;
     bool fail_load, fail_save, fail_append, fail_update, fail_delete;
+    hy_gap_t gaps[8]; uint8_t gap_reasons[8]; int n_gaps;
 } st;
 
 static hy_err_t s_load(void *c, hy_med_t *out, size_t max, size_t *n)
@@ -67,7 +69,20 @@ static size_t s_query(void *c, int64_t from, int64_t to, uint32_t med_id, hy_log
             out[n++] = st.logs[i];
     return n;
 }
-static const hy_store_port_t store_port = { s_load, s_save, s_append, s_update, s_delete, s_query };
+static hy_err_t s_append_gap(void *c, const hy_gap_t *g, uint8_t reason)
+{
+    (void)c;
+    if (st.n_gaps < 8) { st.gaps[st.n_gaps] = *g; st.gap_reasons[st.n_gaps] = reason; }
+    st.n_gaps++;
+    return HY_OK;
+}
+static size_t s_query_gaps(void *c, int64_t from, int64_t to, hy_gap_t *out, uint8_t *reasons, size_t max)
+{
+    (void)c; (void)from; (void)to; (void)out; (void)reasons; (void)max;
+    return 0;
+}
+static const hy_store_port_t store_port = { s_load, s_save, s_append, s_update, s_delete, s_query,
+                                            s_append_gap, s_query_gaps };
 
 /* ---- clock port ---- */
 static struct { int64_t now; bool valid; } clk;
@@ -140,7 +155,7 @@ static void test_events_subscribe_unsubscribe(void)
     hy_ev_unsubscribe(h[3]);
     extra = hy_ev_subscribe(on_ev, NULL);
     TEST_ASSERT_EQUAL_INT(h[3], extra);
-    hy_event_t e = { HY_EV_DUE, 1, 2, 3, 0 };
+    hy_event_t e = { HY_EV_DUE, 1, 2, 3, 0, 0 };
     n_evs = 0;
     hy_ev_publish(&e);
     TEST_ASSERT_EQUAL_INT(HY_EV_MAX_SUBSCRIBERS, n_evs);
@@ -963,6 +978,52 @@ static void test_archive_and_schedule_change_drop_snooze(void)
     TEST_ASSERT_EQUAL_size_t(0, hy_snoozes(&sn));
 }
 
+/* ---- untracked gaps ---- */
+static void test_record_gap_publishes_once(void)
+{
+    hy_gap_t g = { D0 + 1000, D0 + 5000 };
+    n_evs = 0;
+    TEST_ASSERT_EQUAL(HY_OK, hy_act_record_gap(&g, HY_GAP_LOST));
+    TEST_ASSERT_EQUAL_INT(1, st.n_gaps);
+    TEST_ASSERT_EQUAL_INT64(g.start, st.gaps[0].start);
+    TEST_ASSERT_EQUAL_INT64(g.end, st.gaps[0].end);
+    TEST_ASSERT_EQUAL_UINT8(HY_GAP_LOST, st.gap_reasons[0]);
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL(HY_EV_UNTRACKED, evs[0].type);
+    TEST_ASSERT_EQUAL_INT64(g.start, evs[0].slot);
+    TEST_ASSERT_EQUAL_INT64(g.end, evs[0].ts);
+    TEST_ASSERT_EQUAL_INT32(HY_GAP_LOST, evs[0].value);
+
+    /* needs no valid clock */
+    clk.valid = false;
+    n_evs = 0;
+    TEST_ASSERT_EQUAL(HY_OK, hy_act_record_gap(&g, HY_GAP_CLOCK));
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    clk.valid = true;
+
+    hy_gap_t bad = { 500, 500 };
+    n_evs = 0;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_act_record_gap(&bad, HY_GAP_OFF));
+    bad.end = 400;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_act_record_gap(&bad, HY_GAP_OFF));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_act_record_gap(NULL, HY_GAP_OFF));
+    TEST_ASSERT_EQUAL_INT(2, st.n_gaps);
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void test_record_gap_without_port_member(void)
+{
+    static hy_store_port_t bare;
+    bare = store_port;
+    bare.append_gap = NULL;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&bare, NULL, &clock_port, NULL));
+    n_evs = 0;
+    hy_gap_t g = { D0, D0 + 600 };
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_act_record_gap(&g, HY_GAP_OFF));
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+    TEST_ASSERT_EQUAL_INT(0, st.n_gaps);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1020,5 +1081,7 @@ int main(void)
     RUN_TEST(test_undo_restores_snooze);
     RUN_TEST(test_undo_does_not_restore_expired_snooze);
     RUN_TEST(test_archive_and_schedule_change_drop_snooze);
+    RUN_TEST(test_record_gap_publishes_once);
+    RUN_TEST(test_record_gap_without_port_member);
     return UNITY_END();
 }
