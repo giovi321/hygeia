@@ -40,6 +40,7 @@ export default defineConfig({
             { label: 'Due card and reminders', link: '/user-guide/due-card/' },
             { label: 'Overview and history', link: '/user-guide/overview-history/' },
             { label: 'Medicine detail', link: '/user-guide/detail/' },
+            { label: 'Add, edit and archive', link: '/user-guide/medicines/' },
             { label: 'Quick settings and settings', link: '/user-guide/settings/' },
             { label: 'Idle clock and power', link: '/user-guide/idle-power/' },
             { label: 'Gestures', link: '/user-guide/gestures/' },

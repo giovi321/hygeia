@@ -31,7 +31,7 @@ If the device finds no medicines file in its storage, it adds three example medi
 | V | Vitamin D | fixed: 08:30, every day |
 | M | Magnesium | as needed, no minimum interval |
 
-These are placeholders. There is no way yet to add, edit or archive medicines on the device, and the web UI that would do it is not built (see [Roadmap](../../roadmap/)). Until then, the medicines on a device are the three examples, or whatever a debug build adds through the serial console.
+These are placeholders. Replace them on the device: tap the "+" tile on Home to add a medicine, or open a medicine's detail page and tap Edit or Archive. See [Add, edit and archive medicines](../../user-guide/medicines/). The web UI, which would edit more details, is not built (see [Roadmap](../../roadmap/)).
 
 ## Storage problems
 
