@@ -15,14 +15,14 @@ Observed on the Waveshare ESP32-S3-Touch-AMOLED-2.16 with the registry BSP (wave
 - Flush areas seen: x=0..479, y in steps of 48 (480x48), including the full-screen redraw after `lv_obj_clean`
 - None logged: no odd-size or misaligned flush appeared in the serial log during the observed runs (the 2-pixel rounder is re-implemented in `board.c`, because the BSP display start function is bypassed)
 - Partial flushes narrower than the screen can be taller than 48 rows (210 px wide: 108 rows), because LVGL fits rows into the same 46080-byte buffer; the flush log flags only misalignment or more than 480 x 48 pixels
-- Display, owner-verified on firmware a319c4e: all four 40 px corner squares fully visible, no offset or tearing
+- Display, owner-verified on firmware ce5023b: all four 40 px corner squares fully visible, no offset or tearing
 
 ## Rounded glass corners
 
 The glass hides a rounded area in each corner of the 480 x 480 panel. The radius is not documented and was not measured.
 
 - Design estimate: 70 px, the constant `HY_CORNER_R` in `components/hy_ui/src/ui_internal.h`. Layouts keep everything that must be read or touched inside a circle of that radius centred 70 px in from each corner
-- Basis (to be confirmed by the owner): on c1f8102 the outer bottom keys of the text keyboard (key edge 6 px from the side, bottom 8 px above the screen edge, 12 px rounding) were reported half cut. Geometry says those keys start losing pixels at a radius of about 35 px and lose 4 to 8 % of their area at 50 to 60 px, so the reported cut points to the upper end of the 40 to 60 px first guess or above. Nothing else was reported clipped; the top bar clock and the Set buttons of Time zone and Set the time would start to lose pixels at about 70 to 72 px
+- Basis (to be confirmed by the owner): on 090c744 the outer bottom keys of the text keyboard (key edge 6 px from the side, bottom 8 px above the screen edge, 12 px rounding) were reported half cut. Geometry says those keys start losing pixels at a radius of about 35 px and lose 4 to 8 % of their area at 50 to 60 px, so the reported cut points to the upper end of the 40 to 60 px first guess or above. Nothing else was reported clipped; the top bar clock and the Set buttons of Time zone and Set the time would start to lose pixels at about 70 to 72 px
 - The corner-square check above ("all four 40 px corner squares fully visible") does not fit these figures: a rounded corner of 50 px would hide about a third of such a square, its outer corner first. That check was looser than its wording
 - To confirm: `boardtest` draws, in every corner, quarter circles of radius 50, 60, 70, 80, 90 and 100 px (colours listed in the centre label). The glass radius is the smallest one whose arc shows whole, its middle included. Set `HY_CORNER_R` to that value or above
 
@@ -58,7 +58,7 @@ The device-to-address mapping is inferred from the usual addresses of these part
 
 ## Touch orientation
 
-Verified on firmware a319c4e: no axis swap or mirror. The BSP default `swap_xy=1, mirror_x=0, mirror_y=1` is used unchanged, and the logged touches match the corners: TL x=33 y=28, TR x=466 y=29, BL x=24 y=460, BR x=460 y=466.
+Verified on firmware ce5023b: no axis swap or mirror. The BSP default `swap_xy=1, mirror_x=0, mirror_y=1` is used unchanged, and the logged touches match the corners: TL x=33 y=28, TR x=466 y=29, BL x=24 y=460, BR x=460 y=466.
 
 The owner's first two touch attempts in one session logged no touches at all; this is unexplained and was not reproduced.
 
@@ -72,7 +72,7 @@ The owner's first two touch attempts in one session logged no touches at all; th
   - the VBUS-insert bit stays latched across chip resets; flash and RTS resets report ESP_RST_USB (11), not power-on, so they keep running
 - Decision: enforcement is unconditional. Only `ESP_RST_POWERON` is gated; everything else keeps running. The gate fails open: a power-on reset with no known source bit (R22), or with EN mode (bit 5) set (R24), boots; a chip-id register (0x03) other than 0x4A skips the gate and writes nothing to 0x10
 
-Owner-verified on firmware a319c4e:
+Owner-verified on firmware ce5023b:
 
 - Battery connected, after a PWR long-press off: unplugging and replugging USB leaves the screen dark and the charge LED shows charging
 - A PWR press boots with `pwron_status=0x01`, `reset_reason=1` (power-on); the gate allows
@@ -101,7 +101,7 @@ Verified on the board from the serial log, 2026-10-28.
 
 ## RTC alarm
 
-Verified on the board, 2026-10-28 (serial) and 2026-10-29 (owner, build 7f8df51).
+Verified on the board, 2026-10-28 (serial) and 2026-10-29 (owner, build 203158c).
 
 - The PCF85063 interrupt is on GPIO 13 (input, pull-up, falling edge); the ISR only sets a flag, `hy_clock_alarm_take` reads it
 - `alarm 20`: fired 19.5 s after the command, at exactly set time + 20 s, through the hardware interrupt
@@ -118,7 +118,7 @@ Verified on the board, 2026-10-28 (serial) and 2026-10-29 (owner, build 7f8df51)
 
 ## Gestures
 
-Thresholds that worked on the panel (owner session 2026-10-29, build 7f8df51):
+Thresholds that worked on the panel (owner session 2026-10-29, build 203158c):
 
 - Edge zone: 40 px (top edge down, bottom edge up from y 440, left edge right)
 - Swipe: dominant axis at least 60 px and at least 1.5 times the other axis
@@ -129,7 +129,7 @@ Thresholds that worked on the panel (owner session 2026-10-29, build 7f8df51):
 
 ## Splash
 
-- Splash done in 1008 ms on both boots; maximum frame gap 74 ms inside the 900 ms animation (target about 50), measured on build 7f8df51 before the hidden views moved out of the splash
+- Splash done in 1008 ms on both boots; maximum frame gap 74 ms inside the 900 ms animation (target about 50), measured on build 203158c before the hidden views moved out of the splash
 
 ## Performance
 
@@ -142,15 +142,15 @@ Scheduler evaluation and Home refresh on the board (newlib, CLIB malloc):
 
 ## Owed hardware checks
 
-Owner-verified on firmware 73db1cc (2026-10-29): repeat chimes (5 plays at 2 min intervals, then silent), Play chime in Sound settings, detail scroll, due card dots, QWERTY note keyboard. Splash 1000 to 1009 ms with a 52 ms maximum frame gap over 3 boots. RTC alarm log line: hardware fire at the programmed second, software due-now fire within 1 s.
+Owner-verified on firmware fc3e571 (2026-10-29): repeat chimes (5 plays at 2 min intervals, then silent), Play chime in Sound settings, detail scroll, due card dots, QWERTY note keyboard. Splash 1000 to 1009 ms with a 52 ms maximum frame gap over 3 boots. RTC alarm log line: hardware fire at the programmed second, software due-now fire within 1 s.
 
 Still owed:
-- Serial check A: waking stroke while a due card appears (`idle on`, `gesture hold`, `remindtest 0`, `gesture release left`: no snooze, nav stays `[due]`). The run on 73db1cc was inconclusive because real touches released the scripted hold
+- Serial check A: waking stroke while a due card appears (`idle on`, `gesture hold`, `remindtest 0`, `gesture release left`: no snooze, nav stays `[due]`). The run on fc3e571 was inconclusive because real touches released the scripted hold
 - Serial check B: idle Next after an early dose (take V early, `idle on`, the idle screen must not name the satisfied slot)
 
 ## Home grid
 
-- Owner-verified on firmware a319c4e: tile tap, Undo by finger, scroll with 5 medicines, and the panel's look against the mockup
+- Owner-verified on firmware ce5023b: tile tap, Undo by finger, scroll with 5 medicines, and the panel's look against the mockup
 - LVGL task stack minimum free: 6996 bytes
 
-- Owner-verified on firmware 86d1ea6: taps on other tiles while the logged toast shows do not log, Undo still removes the entry, and a second tap within 5 s after the too-soon warning logs the dose (serial log not captured for this check)
+- Owner-verified on firmware 7bdb136: taps on other tiles while the logged toast shows do not log, Undo still removes the entry, and a second tap within 5 s after the too-soon warning logs the dose (serial log not captured for this check)
