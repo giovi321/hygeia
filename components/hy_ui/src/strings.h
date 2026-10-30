@@ -231,6 +231,7 @@
 #define HY_S_MF_AT_LEAST   HY_S_DOT "at least %s"   /* duration */
 #define HY_S_MF_WEB_ONLY   "Days and reminder windows: web UI"
 #define HY_S_MF_DUE_NOW    "%s today will be due right away" /* HH:MM */
+#define HY_S_MF_SNOOZE_WARN "A snoozed dose will show again now"
 #define HY_S_MF_SAVE       "Save"
 #define HY_S_MF_DISCARD_TITLE "Discard changes?"
 #define HY_S_MF_KEEP       "Keep editing"

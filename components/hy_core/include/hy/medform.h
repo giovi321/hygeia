@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include "hy/types.h"
 #include "hy/med.h"
+#include "hy/actions.h"
 
 /*
  * State and rules of the on-device medicine form. Pure: no clock, storage or UI.
@@ -101,5 +102,11 @@ hy_mf_step_t hy_mf_step_for_err(hy_err_t e);
    Returns the count, at most max. */
 size_t   hy_mf_due_on_save(const hy_med_t *built, const hy_med_t *old /* NULL = new */, int64_t now,
                            const char *posix_tz, int64_t *out, size_t max);
+
+/* True when saving the form would make a snoozed dose show and chime again at once: edit mode, the live
+   record of edit_id in `meds` exists and the draft changes its times (type, count or any time; the as-needed
+   interval does not count), and `snoozes` (hy_snoozes) holds a snooze for edit_id. Never for a new medicine. */
+bool     hy_mf_snooze_warn(const hy_medform_t *f, const hy_med_t *meds, size_t n,
+                           const hy_snooze_t *snoozes, size_t n_snoozes);
 
 #endif
