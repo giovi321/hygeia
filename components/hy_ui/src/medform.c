@@ -39,6 +39,7 @@ typedef enum {
 
 static hy_medform_t s_f;
 static page_t s_page, s_discard_from;
+static bool s_fresh;                        /* just opened: the first medform_show draws the page; later shows keep the sub-page state */
 static bool s_loading;                      /* the text area is being set by code: its change handler stays quiet */
 static bool s_via_code_row;                 /* opened from the Code and colour row: Next goes on to Colour */
 static char s_pick[3];                      /* the code typed in the picker */
@@ -55,9 +56,9 @@ static lv_obj_t *s_dot[N_COLORS], *s_dot_lbl[N_COLORS], *s_color_prev;
 static lv_obj_t *s_opt[2];
 static lv_obj_t *s_days, *s_list, *s_add_btn;
 static struct { lv_obj_t *row, *time, *rm; } s_rows[HY_MAX_TIMES];
-static lv_obj_t *s_hour, *s_min, *s_add_lbl;
+static lv_obj_t *s_hour, *s_min;
 static lv_obj_t *s_iroller;
-static struct { lv_obj_t *row, *val; } s_rv[4];
+static struct { lv_obj_t *val; } s_rv[4];
 static lv_font_t s_pick_font;               /* Inter 26 bold with the Montserrat fallback for the backspace symbol */
 
 static const char *const s_step_names[] = {"NAME", "DOSE", "CODE", "COLOR", "TYPE", "TIMES", "INTERVAL", "REVIEW"};
@@ -246,7 +247,7 @@ static void text_load(void)
 static void ta_changed_cb(lv_event_t *e)
 {
     (void)e;
-    if (s_loading || !on_text_page()) {
+    if (s_loading || !on_text_page() || ui_input_waking()) {   /* a waking keystroke is restored by the keyboard */
         return;
     }
     const char *t = lv_textarea_get_text(s_ta);
@@ -501,7 +502,7 @@ static void add_label_update(void)
     char t[8], b[24];
     fmt_hhmm(add_sel(), t, sizeof t);
     snprintf(b, sizeof b, HY_S_MF_ADD_AT, t);
-    lv_label_set_text(s_add_lbl, b);
+    lv_label_set_text(s_next_l, b);   /* the Add time page labels the Next button "Add 08:00" */
 }
 
 static void roller_changed_cb(lv_event_t *e)
@@ -786,6 +787,9 @@ static void do_back(void)
     default:
         break;
     }
+    if (on_text_page()) {
+        text_load();   /* the draft holds the last accepted value: the field shows it again, so Review never differs from it */
+    }
     if (s_f.from_review) {
         go_step(s_f.step == HY_MF_COLOR && s_via_code_row ? HY_MF_CODE : HY_MF_REVIEW);
         return;
@@ -939,9 +943,16 @@ static void show_page(page_t pg)
 
 void medform_show(void)
 {
-    if (s_root) {
-        show_page(s_page);
+    if (!s_root) {
+        return;
     }
+    /* After the quick settings closed, the picker, Add time and Times pages keep what the person had entered */
+    if (!s_fresh && (s_page == PG_PICK || s_page == PG_ADD_TIME || s_page == PG_TIMES)) {
+        ui_nav_set_form_dirty(s_f.dirty);
+        return;
+    }
+    s_fresh = false;
+    show_page(s_page);
 }
 
 void medform_back(void)
@@ -960,6 +971,7 @@ void medform_open_new(void)
     hy_mf_new(&s_f, ms, n);
     s_page = PG_NAME;
     s_via_code_row = false;
+    s_fresh = true;
     ui_nav_set_form_dirty(false);
     ESP_LOGI(TAG, "medform: new");
     ui_nav_push(HY_V_MEDFORM);
@@ -977,6 +989,7 @@ void medform_open_edit(uint32_t med_id)
     }
     s_page = PG_REVIEW;
     s_via_code_row = false;
+    s_fresh = true;
     ui_nav_set_form_dirty(false);
     ESP_LOGI(TAG, "medform: edit id %u", (unsigned)med_id);
     ui_nav_push(HY_V_MEDFORM);
@@ -1321,7 +1334,6 @@ static void create_review(void)
         lv_obj_set_width(v, 300);
         lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
         lv_obj_align(v, LV_ALIGN_RIGHT_MID, -20, 0);
-        s_rv[i].row = r;
         s_rv[i].val = v;
     }
     lv_obj_t *web = ui_label(c, hy_type.status, HY_C_TEXT2, HY_S_MF_WEB_ONLY);
@@ -1364,7 +1376,6 @@ void medform_create(void)
     s_back_l = lv_obj_get_child(s_back, 0);
     s_next = ui_button(s_root, NEXT_W, 66, hy_type.body_bold, HY_S_NEXT, next_cb, NULL);
     s_next_l = lv_obj_get_child(s_next, 0);
-    s_add_lbl = s_next_l;   /* the Add time page labels the Next button "Add 08:00" */
     lv_obj_set_pos(s_back, PAD_X, BTN_Y);
     lv_obj_set_pos(s_next, NEXT_X, BTN_Y);
 }

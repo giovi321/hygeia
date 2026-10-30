@@ -293,11 +293,7 @@ void ui_nav_home(void)
 #if CONFIG_HY_DEBUG_CONSOLE
 void ui_nav_reset(void)
 {
-    s_nav.depth = 1;
-    if (s_nav.stack[0] == HY_V_OVERVIEW || s_nav.stack[0] == HY_V_HISTORY) {
-        s_nav.stack[0] = HY_V_HOME;
-    }
-    show_top();
+    ui_nav_home();
 }
 #endif
 
