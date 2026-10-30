@@ -32,12 +32,15 @@ bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap);
 
 typedef enum { HY_V_HOME = 0, HY_V_OVERVIEW, HY_V_HISTORY, HY_V_DETAIL, HY_V_NOTE, HY_V_EARLIER, HY_V_QS,
                HY_V_SETTINGS, HY_V_SET_ZONE, HY_V_SET_TIME, HY_V_SET_SOUND, HY_V_SET_DISPLAY, HY_V_ABOUT,
-               HY_V_CLOCK_INVALID, HY_V_STORAGE_DOWN } hy_view_t;
-typedef enum { HY_FX_NONE = 0, HY_FX_WAKE, HY_FX_SNOOZE, HY_FX_DUE_NEXT } hy_nav_fx_t;
+               HY_V_CLOCK_INVALID, HY_V_STORAGE_DOWN, HY_V_MEDFORM, HY_V_MED_ARCHIVE } hy_view_t;
+typedef enum { HY_FX_NONE = 0, HY_FX_WAKE, HY_FX_SNOOZE, HY_FX_DUE_NEXT,
+               HY_FX_FORM_BACK, /* the UI steps the medicine form back one page, or asks to discard on the first */
+               HY_FX_DUE_PREV } hy_nav_fx_t;
 #define HY_NAV_DEPTH 6
 typedef struct { hy_view_t stack[HY_NAV_DEPTH]; uint8_t depth; uint32_t med_id;
                  bool due, idle, clock_invalid, storage_down;
-                 bool poweroff; /* power-off confirmation showing: every gesture is ignored */ } hy_nav_t;
+                 bool poweroff; /* power-off confirmation showing: every gesture is ignored */
+                 bool form_dirty; /* medicine form has unsaved changes: EDGE_UP is ignored there */ } hy_nav_t;
 
 void        hy_nav_init(hy_nav_t *n);                 /* root HOME, depth 1 */
 hy_view_t   hy_nav_view(const hy_nav_t *n);           /* top of the stack */

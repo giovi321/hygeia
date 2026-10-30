@@ -51,6 +51,9 @@ extern const hy_type_scale_t hy_type;
 /* medicine palette, index 0..9 */
 lv_color_t hy_med_color(uint8_t idx);
 
+/* Key font for button matrices: Inter 26 bold whose symbol fallback glyphs are centred on the line (theme.c) */
+void hy_key_font_init(lv_font_t *out);
+
 /* geometry (px) */
 #define HY_SCREEN       480
 #define HY_BAR_H        56
@@ -65,6 +68,11 @@ lv_color_t hy_med_color(uint8_t idx);
 #define HY_TOAST_H      88
 #define HY_TOAST_Y      358
 #define HY_TOO_SOON_WINDOW_MS (HY_UNDO_WINDOW_S * 1000)
+/* Design radius of the rounded glass corners (px). The panel draws 480 x 480, but the glass hides a rounded area in
+ * each corner. Not documented: an estimate rounded up (design/hardware-notes.md), to be confirmed on the device with
+ * the boardtest corner arcs. Nothing that must be read or touched may lie outside a circle of this radius centred
+ * (R, R) px in from a corner. */
+#define HY_CORNER_R     70
 
 /* ui.c */
 lv_obj_t *ui_content(void);                      /* y 56..480 container hosting every view */
@@ -109,6 +117,8 @@ void      ui_nav_push(hy_view_t v);
 void      ui_nav_reset(void);                    /* debug: back to the root whatever overlay is showing */
 #endif
 void      ui_nav_pop(void);                      /* one level up, whatever overlay is showing */
+void      ui_nav_home(void);                     /* back to the root; a pager root becomes HOME */
+void      ui_nav_set_form_dirty(bool dirty);     /* medform.c: the draft has unsaved changes (nav rule 4b) */
 lv_obj_t *ui_view_box(void);                     /* a hidden 480 x 424 view container in ui_content() */
 void      ui_register_view(hy_view_t v, lv_obj_t *obj); /* the view nav_host shows for v */
 void      ui_open_detail(uint32_t med_id);
@@ -184,6 +194,15 @@ void detail_refresh_if_changed(void);            /* generation changed and the d
 #if CONFIG_HY_DEBUG_CONSOLE
 void detail_debug_scroll(void);                  /* scrolls the detail to its end */
 #endif
+/* kbd.c: the QWERTY keyboard of the note view, shared with the medicine form: maps, controls, 244 px height (four rows
+   of 56 px keys), Inter 26 bold with the Montserrat fallback, no auto-repeat on enter and OK, the waking-stroke text
+   restore and stroke consumption, and a one-shot shift key. It sits at the bottom of its parent; the outer keys of the
+   bottom row are inset so they clear the rounded corners (HY_CORNER_R). Bound to `ta`; READY and CANCEL arrive on the
+   text area. State is per keyboard. */
+#define HY_KBD_H 244
+#define HY_KBD_TOP (HY_CONTENT_H - HY_KBD_H)     /* 180: the keyboard's top in a view; content above ends by here */
+lv_obj_t *ui_kbd_create(lv_obj_t *parent, lv_obj_t *ta);
+
 void note_create(void);
 void note_show(uint32_t med_id);
 void note_submit(void);                          /* the Log button: log taken now with the note, back to detail */
@@ -194,6 +213,25 @@ void earlier_submit(void);                       /* the Log at button: log taken
 void note_debug_ok(void);                        /* the keyboard's OK key */
 void note_debug_text(const char *text);          /* sets the note field as typing would */
 void earlier_debug_set(int hour, int minute);    /* sets the rollers as turning them would */
+#endif
+
+/* medarchive.c: the archive confirmation opened from the detail. */
+void medarchive_create(void);                   /* registers HY_V_MED_ARCHIVE */
+void medarchive_destroy(void);                  /* deletes the widgets (deferred); nav_host recreates on the next show */
+void medarchive_show(uint32_t med_id);          /* nav_host: the view became the top, for the nav med_id */
+void medarchive_refresh_if_shown(void);         /* recomputes the "dose is due" line when the scheduler snapshot changed */
+void medarchive_confirm(void);                  /* the Archive button's action (also the debug "archive <code> yes") */
+
+/* medform.c: the step-by-step form that adds or edits a medicine on the device (hy_core hy/medform.h holds the draft
+ * and the rules). The draft is static RAM, so it survives dimming, a due card and the power-off overlay. */
+void medform_create(void);                       /* registers HY_V_MEDFORM */
+void medform_destroy(void);                      /* deletes the widgets (deferred), keeps the draft; nav_host recreates */
+void medform_open_new(void);                     /* hy_mf_new on hy_meds(), push HY_V_MEDFORM */
+void medform_open_edit(uint32_t med_id);         /* hy_mf_edit; on error the info toast, no push */
+void medform_show(void);                         /* nav_host: the view became the top; redraws the current page */
+void medform_back(void);                         /* HY_FX_FORM_BACK: previous page, or "Discard changes?" */
+#if CONFIG_HY_DEBUG_CONSOLE
+void medform_debug(const char *arg);             /* "new|edit <code>|name <text>|...|state": see hy_ui_debug_mf */
 #endif
 
 /* qs.c, settings.c, timeset.c: quick settings, Settings and its sub-views, the set-the-time screen */
@@ -225,6 +263,8 @@ void home_refresh(bool animate);         /* tiles from the scheduler snapshot; L
 void home_tap_med(uint32_t med_id);      /* logs a dose (debug `tap` calls it directly) */
 void home_tile_click(uint32_t med_id);   /* a tile's SHORT_CLICKED: logs only when the stroke was a TAP */
 bool home_med_id_by_code(const char *code, uint32_t *id);
+void home_scroll_to(uint32_t med_id);           /* scrolls the grid so the tile is fully visible; new code calls this one */
+void home_show_med(uint32_t med_id);     /* scroll that medicine's tile into view (now, or at the next rebuild) */
 void home_refresh_if_changed(void);      /* home_refresh(true) when the snapshot generation changed */
 void home_refresh_timing(uint32_t *view_us, uint32_t *lvgl_us); /* last home_refresh, for perf */
 
@@ -262,6 +302,7 @@ void splash_finish(lv_obj_t *next);              /* LVGL lock held: loads next w
 void due_create(void);
 void due_refresh(void);                  /* from the snapshot, when its generation changed; flash request too */
 bool due_visible(void);                  /* on USB the screen is held on while true (R1) */
+void due_prev(void);                     /* swipe down: previous showing entry, wrapping */
 void due_next(void);                     /* swipe up: next showing entry, wrapping */
 void due_snooze(void);                   /* swipe left: snooze the shown entry by settings snooze_min */
 void due_slide_complete(void);           /* the knob reached 90%: log taken */
@@ -294,5 +335,6 @@ void toast_show_skipped(const char *code, const char *hhmm, uint32_t log_id); /*
 void ui_battery_toast(int pct);
 void ui_battery_toast_flush(void);
 void toast_show_info(const char *text);  /* warning style, no Undo */
+void toast_show_ok(const char *text);    /* green tick, no Undo: a completed action */
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */

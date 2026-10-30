@@ -36,7 +36,7 @@ void hy_ui_set_storage_ok(bool ok);
 void hy_ui_debug_tap(const char *code);   /* same handler as tapping the tile of that medicine code */
 void hy_ui_debug_undo(void);              /* same handler as tapping Undo on the visible toast */
 void hy_ui_debug_logs(void);              /* today's and yesterday's log entries */
-void hy_ui_debug_seed4(const char *arg);  /* "": adds Z (Zinc); "5": also C; "<n>": up to n active (Z1.., Y1..); "off": archives them */
+void hy_ui_debug_seed4(const char *arg);  /* "": adds Z (Zinc); "5": also C; "<n>": up to n active (Z1.., Y1..); "off": archives them; "purge": deletes them for good; "arch <n>": n archived */
 void hy_ui_debug_shot(void);              /* streams a PNG-convertible snapshot of the active screen */
 void hy_ui_debug_remindtest(const char *arg); /* "<minutes> [count] [miss2]": T (and U) due then; "off": archives both */
 void hy_ui_debug_perf(void);              /* times one forced scheduler evaluation and one home_refresh */
@@ -56,6 +56,9 @@ void hy_ui_debug_settings(void);          /* logs the settings in the RAM copy (
 void hy_ui_debug_poweroff(const char *arg); /* "show|cancel|slide|crit": the power-off confirmation, its slide (powers off) and the critical countdown */
 void hy_ui_debug_gaps(void);              /* the stored untracked gaps of the last 30 days */
 void hy_ui_debug_scr(const char *arg);    /* "": screen state and timers; "off": OFF now; "nousb": run as on battery; "usb": back */
+void hy_ui_debug_archive(const char *arg); /* "<code> [yes]": the archive confirmation; yes presses Archive */
+void hy_ui_debug_limits(void);            /* the active and stored counts against the limits */
+void hy_ui_debug_mf(const char *arg);     /* the medicine form: "new|edit <code>|name <text>|dose [text]|code <xy>|color <n>|type fixed|asneeded|time add HH:MM|time del <idx>|interval <min>|next|back|save|state" */
 #endif
 
 #ifdef __cplusplus

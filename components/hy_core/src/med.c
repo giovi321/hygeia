@@ -41,7 +41,7 @@ static bool date_ok(int32_t d)
     return d > 0 && y >= 2000 && y <= 9999 && mo >= 1 && mo <= 12 && day >= 1 && day <= 31;
 }
 
-static bool times_ok(const hy_med_t *m)
+bool hy_med_times_valid(const hy_med_t *m)
 {
     if (m->weekdays & 0x80) {
         return false; /* bits above Sunday */
@@ -69,7 +69,7 @@ static bool times_ok(const hy_med_t *m)
 }
 
 /*
- * Check order: code format, name, color, schedule, then code uniqueness.
+ * Check order as listed in med.h.
  * Uniqueness is only enforced for a non-archived `m`, against non-archived
  * others with a different id. An archived medicine is not active, so it may
  * share a code.
@@ -83,14 +83,20 @@ hy_err_t hy_med_validate(const hy_med_t *m, const hy_med_t *others, size_t n_oth
     if (name_len == 0 || name_len == sizeof(m->name)) {
         return HY_E_NAME; /* empty, or unterminated */
     }
+    if (strnlen(m->dose, sizeof(m->dose)) == sizeof(m->dose)) {
+        return HY_E_DOSE; /* unterminated */
+    }
     if (m->color > 9) {
         return HY_E_INVALID;
     }
     if (!date_ok(m->active_from) || !date_ok(m->active_until)) {
         return HY_E_INVALID;
     }
-    if (!times_ok(m)) {
+    if (!hy_med_times_valid(m)) {
         return HY_E_TIMES;
+    }
+    if (m->min_interval_min > HY_INTERVAL_MAX_MIN) {
+        return HY_E_INTERVAL;
     }
     if (!m->archived) {
         for (size_t i = 0; i < n_others; i++) {

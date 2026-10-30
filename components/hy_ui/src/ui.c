@@ -35,6 +35,7 @@ static void async_refresh(void *arg)
     history_refresh_if_changed();
     detail_refresh_if_changed();
     due_refresh();
+    medarchive_refresh_if_shown();
     screen_sched_evaluated();
     topbar_refresh();   /* a zone change moves the clock */
 }
@@ -104,6 +105,7 @@ void ui_refresh_all(void)
     history_refresh_if_changed();
     detail_refresh_if_changed();
     due_refresh();
+    medarchive_refresh_if_shown();
     screen_sched_evaluated();
 }
 
@@ -158,6 +160,7 @@ static void first_tick(void *arg)
     overview_refresh_if_changed();
     history_refresh_if_changed();
     due_refresh();
+    medarchive_refresh_if_shown();
     screen_sched_evaluated();
 }
 
