@@ -300,7 +300,7 @@ static void slider_event_cb(lv_event_t *e)
         break;
     case LV_EVENT_PRESSED:
         ui_input_consume_force();   /* the slider owns the stroke, also one that starts in an edge zone */
-        c->ok = ui_input_still();   /* false when the stroke only wakes the dimmed screen */
+        c->ok = !ui_input_waking();   /* false when the stroke only wakes the dimmed screen */
         c->start = lv_slider_get_value(s);
         break;
     case LV_EVENT_PRESSING:

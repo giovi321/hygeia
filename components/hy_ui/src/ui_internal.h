@@ -138,8 +138,10 @@ bool      ui_input_last_was_tap(void);           /* the stroke that produced the
 bool      ui_input_last_was_double(void);        /* ... and it was the second tap of a double tap (300 ms, 40 px) */
 bool      ui_input_still(void);                  /* the current or last stroke never left the tap slop */
 bool      ui_input_waking(void);                 /* the current or last stroke started on the dimmed screen: it only wakes */
-void      ui_input_consume_force(void);          /* sliders: consumed even from an edge zone (P45) */
+void      ui_input_consume_force(void);          /* sliders: consumed even from an edge zone */
 void      ui_input_consume(void);                /* the current stroke belongs to a widget: no gesture */
+void      ui_scroller(lv_obj_t *o);              /* vertical list with glide and end bounce; a touch on it while it
+                                                    moves only stops it (no tap, no long press, no gesture) */
 #if CONFIG_HY_DEBUG_CONSOLE
 void      input_debug_stroke(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms); /* press + release */
 void      input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms, bool consume);

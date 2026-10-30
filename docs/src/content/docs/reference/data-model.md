@@ -54,7 +54,7 @@ Stored in NVS:
 | sound | on | on or off |
 | do not disturb | off | on or off |
 | volume | 60 | 0 to 100 |
-| brightness | 80 | 10 to 100 |
+| brightness | 50 | 10 to 100 |
 | snooze | 15 min | 1 to 120 |
 
 The time zone (IANA name and POSIX rule) is also stored in NVS, namespace `clock`.
