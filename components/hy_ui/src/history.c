@@ -23,21 +23,23 @@ static const char *TAG = "ui_history";
 #define TAP_WAIT_MS  300
 #define CODE_X       24
 #define CODE_W       40
-#define ROWS_Y       78
-#define ROWS_H       148
+/* The rows take the height down to the legend; the legend and the adherence sit low but above the rounded corners
+ * (HY_CORNER_R): the legend ends at y 343 (screen 399), the adherence spans x 130..350 */
+#define ROWS_Y       76
+#define ROWS_H       238           /* 7 days: five rows and a 16 px cue of the sixth; 30 days: seven rows */
 #define INIT_Y       56            /* weekday initials and tick labels, centre */
-#define LEGEND_Y     237           /* legend centre */
-#define ADH_Y        280           /* adherence centre */
+#define LEGEND_Y     332           /* legend centre */
+#define ADH_Y        374           /* adherence centre */
 #define SQ           10            /* legend square */
 
 typedef struct {
-    int cell, radius, pitch_x, x0, row_h, row_pitch, dot;
+    int cell_w, cell_h, radius, pitch_x, x0, row_h, row_pitch, dot;
 } geom_t;
 
-static const geom_t G7 = {.cell = 34, .radius = 9, .pitch_x = 48, .x0 = CODE_X + CODE_W + 14,
-                          .row_h = 34, .row_pitch = 44, .dot = 8};
-static const geom_t G30 = {.cell = 10, .radius = 3, .pitch_x = 12, .x0 = CODE_X + CODE_W,
-                           .row_h = 28, .row_pitch = 30, .dot = 4};
+static const geom_t G7 = {.cell_w = 40, .cell_h = 38, .radius = 10, .pitch_x = 52, .x0 = CODE_X + CODE_W + 14,
+                          .row_h = 38, .row_pitch = 46, .dot = 8};
+static const geom_t G30 = {.cell_w = 10, .cell_h = 26, .radius = 3, .pitch_x = 12, .x0 = CODE_X + CODE_W,
+                           .row_h = 28, .row_pitch = 32, .dot = 4};
 
 static lv_obj_t *s_page, *s_bg, *s_title, *s_rows, *s_adh;
 static lv_obj_t *s_wd[7], *s_tick[5];
@@ -192,8 +194,8 @@ static void rows_scroll_cb(lv_event_t *e)
 static void add_cell(lv_obj_t *row, const geom_t *g, int i, hy_mark_t mk, lv_color_t col, bool dim)
 {
     lv_obj_t *c = ui_plain(row);
-    lv_obj_set_size(c, g->cell, g->cell);
-    lv_obj_set_pos(c, g->x0 + i * g->pitch_x, (g->row_h - g->cell) / 2);
+    lv_obj_set_size(c, g->cell_w, g->cell_h);
+    lv_obj_set_pos(c, g->x0 + i * g->pitch_x, (g->row_h - g->cell_h) / 2);
     lv_obj_set_style_radius(c, g->radius, 0);
     switch (mk) {
     case HY_MARK_ON_TIME:
@@ -483,7 +485,7 @@ void history_create(lv_obj_t *page)
 
     for (int i = 0; i < 7; i++) {
         s_wd[i] = ui_label(page, hy_type.status, HY_C_TEXT2, "");
-        lv_obj_set_width(s_wd[i], G7.cell);
+        lv_obj_set_width(s_wd[i], G7.cell_w);
         lv_obj_set_style_text_align(s_wd[i], LV_TEXT_ALIGN_CENTER, 0);
     }
     for (int k = 0; k < 5; k++) {
