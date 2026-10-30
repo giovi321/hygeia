@@ -102,7 +102,7 @@ static bool is_test_code(const char *c)
 }
 
 /* The medicine to reuse for a debug code: the one with that code (active first, then archived), else an
- * archived debug medicine, renamed (the table holds 50 medicines including archived ones), else a new one. */
+ * archived debug medicine, renamed (the table holds 100 medicines including archived ones), else a new one. */
 static void debug_slot(const char *code, hy_med_t *out)
 {
     const hy_med_t *ms;
@@ -162,23 +162,13 @@ static hy_err_t upsert_debug(const char *code, const char *name, uint8_t color, 
     return err;
 }
 
-static size_t active_count(void)
-{
-    const hy_med_t *ms;
-    size_t n = hy_meds(&ms), k = 0;
-    for (size_t i = 0; i < n; i++) {
-        k += !ms[i].archived;
-    }
-    return k;
-}
-
 static void archive_codes(bool (*match)(const char *), const char *what)
 {
     const hy_med_t *ms;
     size_t n = hy_meds(&ms);
     uint32_t ids[HY_MAX_MEDS];
     size_t k = 0;
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < n && k < HY_MAX_MEDS; i++) {
         if (!ms[i].archived && match(ms[i].code)) {
             ids[k++] = ms[i].id;
         }
@@ -237,8 +227,8 @@ static void job_seed4(const char *arg)
         uint16_t first = (uint16_t)((local_minute(ck->now(NULL)) + 60) % 1440);
         size_t k = 0;
         bool full = false;
-        for (const char *p = "ZY"; *p && !full && (int)active_count() < target; p++) {
-            for (const char *q = second; *q && !full && (int)active_count() < target; q++, k++) {
+        for (const char *p = "ZY"; *p && !full && (int)hy_meds_active_count() < target; p++) {
+            for (const char *q = second; *q && !full && (int)hy_meds_active_count() < target; q++, k++) {
                 char code[3] = {*p, *q, 0};
                 uint16_t times[4];
                 for (int i = 0; i < 4; i++) {
@@ -253,7 +243,7 @@ static void job_seed4(const char *arg)
                 }
             }
         }
-        ESP_LOGI(TAG, "seed4: %u active medicines", (unsigned)active_count());
+        ESP_LOGI(TAG, "seed4: %u active medicines", (unsigned)hy_meds_active_count());
         return;
     }
     static const uint16_t z_time = 20 * 60, c_time = 21 * 60;
@@ -313,7 +303,7 @@ static void job_perf(void)
     uint32_t q_us = hy_sched_run_query_us();
     ESP_LOGI(TAG, "perf: %u active medicines, %u logs: evaluation %u.%03u ms (log query %u.%03u ms), "
              "home_refresh %u.%03u ms",
-             (unsigned)active_count(), (unsigned)hy_sched_snapshot()->in.n_logs,
+             (unsigned)hy_meds_active_count(), (unsigned)hy_sched_snapshot()->in.n_logs,
              (unsigned)((t1 - t0) / 1000), (unsigned)((t1 - t0) % 1000), (unsigned)(q_us / 1000),
              (unsigned)(q_us % 1000), (unsigned)((t2 - t1) / 1000), (unsigned)((t2 - t1) % 1000));
     uint32_t view_us, lvgl_us;

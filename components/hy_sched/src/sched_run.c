@@ -27,8 +27,8 @@ static const char *TAG = "sched";
 static hy_sched_t s_sched;
 static hy_snapshot_t s_snap;
 static hy_log_t *s_logs;                /* LOG_CAP entries, PSRAM */
-static hy_med_t *s_meds;                /* HY_MAX_MEDS entries, PSRAM: a stable copy for the snapshot */
-static hy_snooze_t s_snoozes[HY_MAX_MEDS];
+static hy_med_t *s_meds;                /* HY_MAX_STORED entries, PSRAM: a stable copy for the snapshot */
+static hy_snooze_t s_snoozes[HY_MAX_MEDS];   /* hy_snoozes skips archived medicines */
 static char s_tz[HY_TZ_LEN];
 static hy_tzchange_t s_change;
 
@@ -98,7 +98,7 @@ esp_err_t hy_sched_run_init(void)
         return ESP_OK;
     }
     s_logs = heap_caps_malloc(LOG_CAP * sizeof(hy_log_t), MALLOC_CAP_SPIRAM);
-    s_meds = heap_caps_malloc(HY_MAX_MEDS * sizeof(hy_med_t), MALLOC_CAP_SPIRAM);
+    s_meds = heap_caps_malloc(HY_MAX_STORED * sizeof(hy_med_t), MALLOC_CAP_SPIRAM);
     if (!s_logs || !s_meds) {
         ESP_LOGE(TAG, "no PSRAM for the log buffer (%u bytes)", (unsigned)(LOG_CAP * sizeof(hy_log_t)));
         free_buffers();
@@ -327,8 +327,8 @@ static void evaluate(int64_t now, bool pre_jump)
 
     const hy_med_t *ms;
     size_t nm = hy_meds(&ms);
-    if (nm > HY_MAX_MEDS) {
-        nm = HY_MAX_MEDS;
+    if (nm > HY_MAX_STORED) {   /* archived ones included, so no active medicine is cut */
+        nm = HY_MAX_STORED;
     }
     memcpy(s_meds, ms, nm * sizeof *ms);
     const hy_snooze_t *sz;
