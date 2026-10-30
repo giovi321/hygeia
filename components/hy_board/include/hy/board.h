@@ -31,6 +31,7 @@ void hy_board_set_brightness(uint8_t pct);
 
 /* Take the LVGL lock. timeout_ms 0 waits forever. Returns true when taken */
 bool hy_board_lock(uint32_t timeout_ms);
+bool hy_board_in_lvgl_task(void);   /* the caller is the LVGL adapter's worker task */
 void hy_board_unlock(void);
 
 /* PMU setup after the power gate: IRQ enable = hy_axp_irq_enable_mask, IRQ status cleared, key timing

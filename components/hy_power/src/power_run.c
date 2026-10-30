@@ -66,9 +66,10 @@ static bool s_stopping;             /* a power-off is in progress: no write may 
 static bool s_alive_on;             /* the runner tracks: the power task's periodic heartbeat runs; s_alive_mu */
 
 /* ---- sleep mode state ---- */
-typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_TIMER, W_N } wake_cause_t;
+/* W_UI: the LVGL task left the sleep mode itself (the screen left OFF before the pausing pass ended) */
+typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_UI, W_TIMER, W_N } wake_cause_t;
 static const char *const k_cause[W_N] = {"pwr", "usb", "touch", "key", "rtc", "next_wake", "batt", "debug",
-                                         "timer-only"};
+                                         "ui", "timer-only"};
 static int64_t (*volatile s_next_wake_fn)(void);
 static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
 static StaticSemaphore_t s_sleep_mu_buf;
@@ -390,6 +391,10 @@ static bool sleep_requested(void)
  * worker blocks at the top of its loop after the current lv_timer_handler pass: no wait, no timeout. */
 static void enter_sleep(void)
 {
+    if (!hy_board_in_lvgl_task()) {
+        ESP_LOGE(TAG, "sleep mode: requested outside the LVGL task, not paused");   /* would reopen the race */
+        return;
+    }
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
     if (s_asleep || !sleep_requested()) {
         xSemaphoreGive(s_sleep_mu);
@@ -429,12 +434,17 @@ static void enter_sleep(void)
 }
 
 /* Any task. Ends the sleep mode: CPU max, no light sleep, LVGL running. The request is cleared: the UI asks again if
- * the screen stays OFF. From the LVGL task only between its own pause and the end of that lv_timer_handler pass
- * (the screen left OFF in the same pass); the resume does not wait for the worker.
+ * the screen stays OFF. The resume does not wait for the worker, so the LVGL task may call it too: in the pass that
+ * paused (the screen left OFF before the pass ended, counted as W_UI), or in the first pass after another task's
+ * resume, where it waits for s_sleep_mu and then finds the sleep mode already over.
+ * The state and the request are cleared before the resume: a re-request in LVGL's first pass then stands.
  * Work for the LVGL task (lv_async_call) is queued before this call, not after: once LVGL runs, a tick can pause it
  * again, and a call queued after that waits for the next wake. */
 static void exit_sleep(wake_cause_t cause)
 {
+    if (cause == W_DEBUG && hy_board_in_lvgl_task()) {
+        cause = W_UI;
+    }
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
     if (!s_asleep) {
         xSemaphoreGive(s_sleep_mu);
@@ -446,19 +456,20 @@ static void exit_sleep(wake_cause_t cause)
         hy_board_sleep_wake_arm(false);
         s_light = false;
     }
-    esp_lv_adapter_resume();
     int64_t now = mono_ms();
+    int64_t asleep_ms = now - s_sleep_t0_ms;
     portENTER_CRITICAL(&s_mux);
     s_asleep = false;
     s_sleep_req = false;
     s_n_wake[cause]++;
-    s_ms_asleep += now - s_sleep_t0_ms;
+    s_ms_asleep += asleep_ms;
     s_stretch_open = true;
     s_stretch_t0_ms = now;
     portEXIT_CRITICAL(&s_mux);
-    ESP_LOGI(TAG, "power: wake (%s) at %lld ms, asleep %lld ms", k_cause[cause], (long long)now,
-             (long long)(now - s_sleep_t0_ms));
+    esp_lv_adapter_resume();
     xSemaphoreGive(s_sleep_mu);
+    ESP_LOGI(TAG, "power: wake (%s) at %lld ms, asleep %lld ms", k_cause[cause], (long long)now,
+             (long long)asleep_ms);
 }
 
 void hy_power_screen_off(bool off)
@@ -474,7 +485,7 @@ void hy_power_screen_off(bool off)
         return;
     }
     if (s_asleep) {
-        exit_sleep(W_DEBUG);   /* paused earlier in this same LVGL pass, or a caller in another task */
+        exit_sleep(W_DEBUG);   /* counted as W_UI from the LVGL task (see exit_sleep) */
     }
 }
 
@@ -632,13 +643,16 @@ static void power_task(void *arg)
         s_touch_isr = s_key_isr = false;
         portEXIT_CRITICAL(&s_mux);
         wake_cause_t cause = W_N;
-        if (s_asleep) {
+        bool seen_asleep = s_asleep;
+        if (seen_asleep) {
             int64_t (*nw)(void) = s_next_wake_fn;
             int64_t next = nw ? nw() : 0;
             if (irq & (HY_PMU_PKEY_SHORT | HY_PMU_PKEY_LONG)) {
                 cause = W_PWR;
-            } else if ((irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) || (s_light && s_vbus_real)) {
-                cause = W_USB;   /* s_light with VBUS seen: a lost VBUS_IN IRQ must not keep light sleep on USB */
+            } else if ((irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) || s_light == s_vbus_real) {
+                /* light sleep must match the real VBUS (on: no VBUS). A lost VBUS IRQ, or a sleep entered on a VBUS
+                 * reading taken before an unplug, ends the sleep mode; the UI asks again with the fresh reading */
+                cause = W_USB;
             } else if (touch) {
                 cause = W_TOUCH;
             } else if (key) {
@@ -678,6 +692,16 @@ static void power_task(void *arg)
         }
         if (irq & HY_PMU_VBUS_OUT) {
             post(async_usb, NULL);
+        }
+        if (cause == W_N && !seen_asleep && s_asleep) {
+            /* LVGL paused itself while the posts above waited for its lock: they are queued while paused */
+            if (irq & (HY_PMU_PKEY_SHORT | HY_PMU_PKEY_LONG)) {
+                cause = W_PWR;
+            } else if (irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) {
+                cause = W_USB;
+            } else if (key) {
+                cause = W_KEY;
+            }
         }
         if (cause != W_N) {
             exit_sleep(cause);
@@ -877,8 +901,9 @@ void hy_power_sleep_stats(void)
              asleep ? "asleep" : "awake", asleep ? (s_light ? " (light sleep)" : " (no light sleep)") : "", entries,
              (long long)ms, chimes, (long long)longest, req, vbus);
     ESP_LOGI(TAG, "sleepstat wakes: pwr %" PRIu32 ", usb %" PRIu32 ", touch %" PRIu32 ", key %" PRIu32 ", rtc %" PRIu32
-             ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", timer-only %" PRIu32,
-             w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_TIMER]);
+             ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", ui %" PRIu32 ", timer-only %" PRIu32,
+             w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_UI],
+             w[W_TIMER]);
     /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
      * build) this also prints the measured time per mode: LIGHT_SLEEP is the light-sleep time since boot, and the
      * light-sleep counts. */
