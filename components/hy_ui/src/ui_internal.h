@@ -65,6 +65,11 @@ lv_color_t hy_med_color(uint8_t idx);
 #define HY_TOAST_H      88
 #define HY_TOAST_Y      358
 #define HY_TOO_SOON_WINDOW_MS (HY_UNDO_WINDOW_S * 1000)
+/* Design radius of the rounded glass corners (px). The panel draws 480 x 480, but the glass hides a rounded area in
+ * each corner. Not documented: an estimate rounded up (design/hardware-notes.md), to be confirmed on the device with
+ * the boardtest corner arcs. Nothing that must be read or touched may lie outside a circle of this radius centred
+ * (R, R) px in from a corner. */
+#define HY_CORNER_R     70
 
 /* ui.c */
 lv_obj_t *ui_content(void);                      /* y 56..480 container hosting every view */
@@ -186,10 +191,13 @@ void detail_refresh_if_changed(void);            /* generation changed and the d
 #if CONFIG_HY_DEBUG_CONSOLE
 void detail_debug_scroll(void);                  /* scrolls the detail to its end */
 #endif
-/* kbd.c: the QWERTY keyboard of the note view, shared with the medicine form: maps, controls, 220 px height, Inter 26
-   bold with the Montserrat fallback, no auto-repeat on enter and OK, the waking-stroke text restore and stroke
-   consumption, and a one-shot shift key. Bound to `ta`; READY and CANCEL arrive on the text area. State is per keyboard. */
-#define HY_KBD_H 220
+/* kbd.c: the QWERTY keyboard of the note view, shared with the medicine form: maps, controls, 244 px height (four rows
+   of 56 px keys), Inter 26 bold with the Montserrat fallback, no auto-repeat on enter and OK, the waking-stroke text
+   restore and stroke consumption, and a one-shot shift key. It sits at the bottom of its parent; the outer keys of the
+   bottom row are inset so they clear the rounded corners (HY_CORNER_R). Bound to `ta`; READY and CANCEL arrive on the
+   text area. State is per keyboard. */
+#define HY_KBD_H 244
+#define HY_KBD_TOP (HY_CONTENT_H - HY_KBD_H)     /* 180: the keyboard's top in a view; content above ends by here */
 lv_obj_t *ui_kbd_create(lv_obj_t *parent, lv_obj_t *ta);
 
 void note_create(void);

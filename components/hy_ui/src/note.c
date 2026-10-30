@@ -154,7 +154,7 @@ void note_create(void)
 
     s_ta = lv_textarea_create(s_root);
     lv_obj_set_size(s_ta, HY_SCREEN - 36, 56);
-    lv_obj_set_pos(s_ta, 18, 56);
+    lv_obj_set_pos(s_ta, 18, 44);
     lv_textarea_set_one_line(s_ta, true);
     lv_textarea_set_max_length(s_ta, HY_NOTE_MAX);
     lv_textarea_set_placeholder_text(s_ta, HY_S_NOTE_HINT);
@@ -182,7 +182,7 @@ void note_create(void)
     lv_obj_t *log = lv_obj_create(s_root);
     lv_obj_remove_style_all(log);
     lv_obj_set_size(log, HY_SCREEN - 36, 66);
-    lv_obj_set_pos(log, 18, 128);
+    lv_obj_set_pos(log, 18, 108);   /* ends at y 174, above the keyboard (HY_KBD_TOP 180) */
     lv_obj_set_style_radius(log, 22, 0);
     lv_obj_set_style_bg_color(log, lv_color_hex(HY_C_SURFACE2), 0);
     lv_obj_set_style_bg_opa(log, LV_OPA_COVER, 0);

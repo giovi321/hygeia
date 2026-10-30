@@ -834,8 +834,31 @@ void hy_board_selftest(void)
         lv_obj_set_clickable(o, true);
         lv_obj_add_event_cb(o, square_cb, LV_EVENT_PRESSED, (void *)sq[i].name);
     }
+    /* Corner radius gauge: in each corner a quarter circle of radius r for r = 50 ... 100, centred r px in from both
+     * edges. The glass corner radius is the smallest r whose arc shows whole, its middle included. */
+    static const uint32_t gauge_color[6] = {0xE04040, 0xF6C453, 0x7CE38B, 0x4FD1C5, 0x60A5FA, 0xE879F9};
+    for (int c = 0; c < 4; c++) {
+        bool right = c == 1 || c == 3, bottom = c >= 2;
+        for (int g = 0; g < 6; g++) {
+            int32_t r = 50 + 10 * g;
+            lv_obj_t *a = lv_arc_create(scr);
+            lv_obj_remove_style(a, NULL, LV_PART_KNOB);
+            lv_obj_remove_style(a, NULL, LV_PART_INDICATOR);
+            lv_obj_set_style_pad_all(a, 0, 0);
+            lv_obj_set_size(a, 2 * r, 2 * r);
+            lv_obj_set_pos(a, right ? 480 - 2 * r : 0, bottom ? 480 - 2 * r : 0);
+            /* LVGL angles: 0 is 3 o'clock, clockwise */
+            lv_arc_set_bg_angles(a, right ? (bottom ? 0 : 270) : (bottom ? 90 : 180), right ? (bottom ? 90 : 360) : (bottom ? 180 : 270));
+            lv_obj_set_style_arc_width(a, 2, LV_PART_MAIN);
+            lv_obj_set_style_arc_rounded(a, false, LV_PART_MAIN);
+            lv_obj_set_style_arc_color(a, lv_color_hex(gauge_color[g]), LV_PART_MAIN);
+            lv_obj_set_clickable(a, false);
+        }
+    }
     lv_obj_t *l = lv_label_create(scr);
-    lv_label_set_text(l, "board test");
+    lv_label_set_text(l, "board test\ncorner arcs, r px:\n#E04040 50# #F6C453 60# #7CE38B 70# #4FD1C5 80# #60A5FA 90# #E879F9 100#");
+    lv_label_set_recolor(l, true);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(l, lv_color_hex(0xEDEDF0), 0);
     lv_obj_center(l);
     ESP_LOGI(TAG, "selftest screen built");
