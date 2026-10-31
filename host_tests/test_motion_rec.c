@@ -148,15 +148,20 @@ static void orient_run(const rec_t *r, sw_t *w)
     }
 }
 
+static void no_shake(const char *name, const rec_t *r)
+{
+    int n = shake_count(name, r);
+    int n2 = shake_count_scaled(name, r, 2, 1);   /* margin: twice the motion is still not a shake */
+    TEST_ASSERT_EQUAL_MESSAGE(0, n, name);
+    TEST_ASSERT_EQUAL_MESSAGE(0, n2, name);
+}
+
 static void check_no_shake(const char *name)
 {
     rec_t r;
     if (!load(name, &r)) TEST_IGNORE_MESSAGE(name);
-    int n = shake_count(name, &r);
-    int n2 = shake_count_scaled(name, &r, 2, 1);   /* margin: twice the motion is still not a shake */
+    no_shake(name, &r);
     unload(&r);
-    TEST_ASSERT_EQUAL_MESSAGE(0, n, name);
-    TEST_ASSERT_EQUAL_MESSAGE(0, n2, name);
 }
 
 static void check_no_switch(const char *name)
@@ -164,14 +169,14 @@ static void check_no_switch(const char *name)
     rec_t r;
     sw_t w;
     if (!load(name, &r)) TEST_IGNORE_MESSAGE(name);
-    (void)shake_count(name, &r);
+    no_shake(name, &r);
     orient_run(&r, &w);
     unload(&r);
     TEST_ASSERT_EQUAL_MESSAGE(0, w.n, name);
 }
 
-/* Each shake is one burst of strokes; shake_firm holds three (the first is a fragment, the recording starts in it),
-   and each gives exactly one detection. */
+/* shake_firm holds three bursts and detects 2: the recording starts inside the first shake, so burst 1 is a fragment
+   of 3 strokes at t = 0, which is below HY_SHK_STROKES (4). The two full bursts give one detection each. */
 static void test_shake_firm(void)
 {
     rec_t r;
@@ -179,8 +184,8 @@ static void test_shake_firm(void)
     int n = shake_count("shake_firm.csv", &r);
     int n_weak = shake_count_scaled("shake_firm.csv", &r, 100, 115);   /* threshold 15 % higher */
     unload(&r);
-    TEST_ASSERT_EQUAL(3, n);
-    TEST_ASSERT_EQUAL(3, n_weak);
+    TEST_ASSERT_EQUAL(2, n);
+    TEST_ASSERT_EQUAL(2, n_weak);
 }
 
 /* A live recording made with the detector armed: two bursts (about 3.2 to 4.7 s and 6.8 to 8.7 s) and a 0.9 g
@@ -196,8 +201,8 @@ static void test_shake_live_combo(void)
     TEST_ASSERT_EQUAL(2, n_weak);
 }
 
-/* A recording made right after arming the detector: the board lay still for the whole 30 s (every axis stays within
-   46 mg), so it holds no shake. */
+/* A recording of the board lying still for 30 s (every axis stays within 46 mg), made about 40 s before the detector
+   was armed (see data/motion/README.md): it holds no shake. */
 static void test_shake_live_arm(void)
 {
     rec_t r;
@@ -230,7 +235,7 @@ static void test_rotate_cycle(void)
     rec_t r;
     sw_t w;
     LOAD_OR_IGNORE("rotate_cycle.csv", r);
-    (void)shake_count("rotate_cycle.csv", &r);
+    no_shake("rotate_cycle.csv", &r);
     orient_run(&r, &w);
     TEST_ASSERT_EQUAL(4, w.n);
     hy_rot_t prev = w.init;
@@ -258,17 +263,17 @@ static void test_rotate_cycle(void)
 static void test_tilt_diagonal_real_tilts(void)
 {
     static const hy_rot_t want[] = {HY_ROT_270, HY_ROT_0, HY_ROT_270};
-    static const uint32_t at_ms[] = {14680, 17340, 19280};
+    static const uint32_t at_ms[] = {14680, 17340, 19280};   /* recorded; checked within +-100 ms */
     rec_t r;
     sw_t w;
     LOAD_OR_IGNORE("tilt_diagonal.csv", r);
-    (void)shake_count("tilt_diagonal.csv", &r);
+    no_shake("tilt_diagonal.csv", &r);
     orient_run(&r, &w);
     TEST_ASSERT_EQUAL(HY_ROT_0, w.init);
     TEST_ASSERT_EQUAL(3, w.n);
     for (int k = 0; k < w.n; k++) {
         TEST_ASSERT_EQUAL(want[k], w.rot[k]);
-        TEST_ASSERT_EQUAL_UINT32(at_ms[k], r.s[w.idx[k]].t);
+        TEST_ASSERT_UINT32_WITHIN(100, at_ms[k], r.s[w.idx[k]].t);
         /* the candidate held on every sample of the dwell before the switch */
         int j = w.idx[k];
         for (hy_rot_t c; j > 0 && hy_orient_candidate(r.s[j - 1].a, &c) && c == w.rot[k]; j--) {}

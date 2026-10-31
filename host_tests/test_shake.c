@@ -57,8 +57,9 @@ static void test_shake_basic(void)
     TEST_ASSERT_EQUAL(1, r.trues);
 }
 
-/* Alternating spikes: every spike is a turning point, so n spikes make n - 1 strokes. */
-static void test_shake_four_peaks(void)
+/* Alternating spikes: every spike is a turning point, so n spikes make n - 1 strokes. Five spikes are the four strokes
+   of HY_SHK_STROKES. */
+static void test_shake_four_strokes(void)
 {
     rig_t r;
     start(&r);
@@ -66,16 +67,18 @@ static void test_shake_four_peaks(void)
     spike(&r, 0, -2500, 120);
     spike(&r, 0, 2500, 120);
     spike(&r, 0, -2500, 120);
+    spike(&r, 0, 2500, 120);
     TEST_ASSERT_EQUAL(1, r.trues);
 }
 
-static void test_shake_three_peaks(void)
+static void test_shake_three_strokes(void)
 {
     rig_t r;
     start(&r);
     spike(&r, 0, 2500, 120);
     spike(&r, 0, -2500, 120);
     spike(&r, 0, 2500, 120);
+    spike(&r, 0, -2500, 120);
     quiet(&r, 1000);
     TEST_ASSERT_EQUAL(0, r.trues);
 }
@@ -99,7 +102,7 @@ static void test_shake_same_sign_train(void)
     quiet(&r, 1000);
     TEST_ASSERT_EQUAL(1, r.trues);
 
-    start(&r);   /* two spikes are three turning points: two strokes */
+    start(&r);   /* two spikes make three strokes, not enough */
     spike(&r, 0, 3500, 120);
     spike(&r, 0, 3500, 120);
     quiet(&r, 1000);
@@ -149,6 +152,47 @@ static void test_shake_knock(void)
     }
     quiet(&r, 1000);
     TEST_ASSERT_EQUAL(0, r.trues);
+
+    start(&r);   /* the same ring-down from 8000: strokes 12000, 6000, 3000, 1500 - three qualify, the fourth does not */
+    amp = 8000;
+    for (int i = 0; i < 8; i++) {
+        feed_axis(&r, 0, amp);
+        quiet(&r, 80);
+        amp = -amp / 2;
+    }
+    quiet(&r, 1000);
+    TEST_ASSERT_EQUAL(0, r.trues);
+}
+
+/* Gravity is on y (-1000), so a y offset of +1000 is free fall (0 g) and a negative offset is an impact. One sample
+   each, 20 ms apart. */
+static void drop(rig_t *r, const int *dy, int n)
+{
+    for (int i = 0; i < n; i++) feed_axis(r, 1, dy[i]);
+    quiet(r, 1000);
+}
+
+/* A drop onto a desk and an impact that rings once make 3 strokes at most, which must not be a shake. */
+static void test_shake_drop_and_ring(void)
+{
+    rig_t r;
+    /* free fall, impact, one airborne rebound to 0 g, second hit */
+    static const int bounce[] = {0, 1000, 1000, 1000, -5000, 1000, 1000, 1000, -3000, 0, 300, 0};
+    start(&r);
+    drop(&r, bounce, (int)(sizeof bounce / sizeof bounce[0]));
+    TEST_ASSERT_EQUAL(0, r.trues);
+
+    /* impact, undershoot below rest, overshoot */
+    static const int ring[] = {0, 1000, 1000, -5000, 2500, -1500, 300, -100, 0};
+    start(&r);
+    drop(&r, ring, (int)(sizeof ring / sizeof ring[0]));
+    TEST_ASSERT_EQUAL(0, r.trues);
+
+    /* a single impact with no bounce */
+    static const int hit[] = {0, 1000, 1000, 1000, -5000, 0, 0};
+    start(&r);
+    drop(&r, hit, (int)(sizeof hit / sizeof hit[0]));
+    TEST_ASSERT_EQUAL(0, r.trues);
 }
 
 static void test_shake_walk_like(void)
@@ -186,7 +230,7 @@ static void test_shake_slow_peaks(void)
     TEST_ASSERT_EQUAL(0, r.trues);
 }
 
-/* Four alternating spikes 100 ms apart, the first one lead_ms after reset. */
+/* Five alternating spikes 100 ms apart, the first one lead_ms after reset. */
 static int shake_after_reset(uint32_t lead_ms)
 {
     rig_t r;
@@ -198,21 +242,22 @@ static int shake_after_reset(uint32_t lead_ms)
     spike(&r, 0, -2500, 100);
     spike(&r, 0, 2500, 100);
     spike(&r, 0, -2500, 100);
+    spike(&r, 0, 2500, 100);
     quiet(&r, 500);
     return r.trues;
 }
 
 static void test_shake_settle(void)
 {
-    /* spikes at 20, 120, 220, 320: the strokes end at about 140, 240, 340; the first is inside the settle time and is
-       not counted, so only two strokes count */
+    /* spikes at 20, 120, 220, 320, 420: the strokes end at about 140, 240, 340, 440; the first is inside the settle
+       time and is not counted, so only three strokes count */
     TEST_ASSERT_EQUAL(0, shake_after_reset(20));
     TEST_ASSERT_EQUAL(1, shake_after_reset(300));
 }
 
 static void one_shake(rig_t *r)
 {
-    sine(r, 0, 2500, 4, 500);
+    sine(r, 0, 2500, 4, 750);
 }
 
 static void test_shake_cooldown(void)
@@ -220,7 +265,7 @@ static void test_shake_cooldown(void)
     rig_t r;
     start(&r);
     one_shake(&r);
-    quiet(&r, 500);
+    quiet(&r, 300);
     one_shake(&r);
     quiet(&r, 1000);
     TEST_ASSERT_EQUAL(1, r.trues);
@@ -278,8 +323,9 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_shake_basic);
-    RUN_TEST(test_shake_four_peaks);
-    RUN_TEST(test_shake_three_peaks);
+    RUN_TEST(test_shake_four_strokes);
+    RUN_TEST(test_shake_three_strokes);
+    RUN_TEST(test_shake_drop_and_ring);
     RUN_TEST(test_shake_same_sign_train);
     RUN_TEST(test_shake_small_swing);
     RUN_TEST(test_shake_single_spike);
