@@ -78,6 +78,8 @@ static StaticSemaphore_t s_sleep_mu_buf;
 static esp_pm_lock_handle_t s_pm_lock;     /* CPU max: see awake_lock_wanted */
 static bool s_lock_held;                   /* s_sleep_mu */
 static bool s_light;                       /* light sleep enabled in this sleep mode; s_sleep_mu */
+/* ISR event counts (under s_mux): all, and those that arrived while the sleep mode was active */
+static uint32_t s_n_key_isr, s_n_key_isr_asleep, s_n_touch_isr, s_n_touch_isr_asleep;
 static volatile bool s_asleep;             /* LVGL paused by the sleep mode; written under s_sleep_mu and s_mux */
 static bool s_sleep_req;                   /* the UI asked for the sleep mode; s_mux */
 static bool s_vbus_real = true;            /* the last PMU reading saw VBUS (fakebatt does not change it); true until
@@ -546,6 +548,10 @@ static void IRAM_ATTR touch_hook(void)
 {
     portENTER_CRITICAL_ISR(&s_mux);
     s_touch_isr = true;
+    s_n_touch_isr++;
+    if (s_asleep) {
+        s_n_touch_isr_asleep++;
+    }
     portEXIT_CRITICAL_ISR(&s_mux);
     if (s_asleep && s_task) {
         BaseType_t hp = pdFALSE;
@@ -558,6 +564,10 @@ static void IRAM_ATTR key_hook(void)
 {
     portENTER_CRITICAL_ISR(&s_mux);
     s_key_isr = true;
+    s_n_key_isr++;
+    if (s_asleep) {
+        s_n_key_isr_asleep++;
+    }
     portEXIT_CRITICAL_ISR(&s_mux);
     if (s_task) {
         BaseType_t hp = pdFALSE;
@@ -923,6 +933,7 @@ void hy_power_sleep_stats(void)
     uint32_t entries = s_n_entries, chimes = s_n_chime_batt, w[W_N];
     memcpy(w, s_n_wake, sizeof w);
     int64_t ms = s_ms_asleep, longest = s_longest_awake_off_ms;
+    uint32_t keys = s_n_key_isr, keys_a = s_n_key_isr_asleep, touches = s_n_touch_isr, touches_a = s_n_touch_isr_asleep;
     bool req = s_sleep_req, vbus = s_vbus_real;
     portEXIT_CRITICAL(&s_mux);
     bool asleep = s_asleep;
@@ -937,6 +948,8 @@ void hy_power_sleep_stats(void)
              ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", ui %" PRIu32 ", timer-only %" PRIu32,
              w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_UI],
              w[W_TIMER]);
+    ESP_LOGI(TAG, "key presses %" PRIu32 " (%" PRIu32 " while asleep)", keys, keys_a);
+    ESP_LOGI(TAG, "touch irqs %" PRIu32 " (%" PRIu32 " while asleep)", touches, touches_a);
     /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
      * build) this also prints the measured time per mode: LIGHT_SLEEP is the light-sleep time since boot, and the
      * light-sleep counts. */

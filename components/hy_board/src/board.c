@@ -897,6 +897,13 @@ void hy_board_sleep_wake_arm(bool on)
         }
         s_wake_armed = armed;
         esp_sleep_enable_gpio_wakeup();
+        char list[48] = "";
+        for (size_t i = 0, n = 0; i < sizeof pins / sizeof pins[0]; i++) {
+            if (armed & (1u << pins[i])) {
+                n += snprintf(list + n, sizeof list - n, " %u", (unsigned)pins[i]);
+            }
+        }
+        ESP_LOGI(TAG, "sleep wake: armed gpio%s", list[0] ? list : " none");
         return;
     }
     if (!s_wake_armed) {
