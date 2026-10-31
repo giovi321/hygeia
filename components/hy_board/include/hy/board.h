@@ -51,6 +51,22 @@ void      hy_board_pmu_power_off(void);              /* the boot gate's AXP2101 
    then takes the last hy_board_set_brightness value. Blocks about 120 ms on, 10 ms off. While the panel is off the
    LVGL flushes are dropped (completed at once) and hy_board_set_brightness only records the value. */
 void      hy_board_display_power(bool on);
+/* Panel rotation, rot 0..3 as hy_rot_t (the UI turned 0, 90, 180, 270 degrees clockwise on the panel); LVGL keeps one
+   unrotated 480 x 480 frame. LVGL task, or any task holding hy_board_lock, outside a refresh. In order: brightness
+   to 0 with the wake hold, MADCTL from HY_ROT_TABLE[rot] (raw panel_cmd, which waits for queued colour transfers),
+   the panel gap and the touch swap_xy / mirror_x / mirror_y from the same row, a full invalidate of the active
+   screen, lv_layer_top and lv_layer_sys; the brightness returns after the first full frame has been flushed
+   (refr_ready_cb). No-op when rot equals the current one. While the panel is off only the row is stored: Sleep Out
+   in hy_board_display_power(true) sends MADCTL and the wake's full invalidate redraws. Logs
+   `rot: <deg> madctl 0x.. touch s.. mx.. my..`, then `rot: madctl write to brightness back N ms`. */
+void    hy_board_set_rotation(uint8_t rot);
+uint8_t hy_board_rotation(void);
+#if CONFIG_HY_DEBUG_CONSOLE
+/* Bring-up: applies these MADCTL, touch flags and panel gaps as hy_board_set_rotation applies a row (same order,
+   same brightness hold, full redraw). Odd gaps are refused (the 2-pixel rounder). The next hy_board_set_rotation
+   applies even for the current rot. Same calling context as hy_board_set_rotation. */
+void    hy_board_debug_madctl(uint8_t madctl, bool swap, bool mx, bool my, int16_t x_gap, int16_t y_gap);
+#endif
 /* Called from the touch interrupt (ISR context) on every touch INT edge, beside the LVGL adapter's own
    handling; NULL clears. fn must be ISR safe. */
 void      hy_board_set_touch_isr_hook(void (*fn)(void));

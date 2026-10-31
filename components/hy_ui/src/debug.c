@@ -24,7 +24,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS, J_MADCTL, J_ROT };
 typedef struct {
     int kind;
     char arg[96];
@@ -812,6 +812,30 @@ static void job_gaps(void)
     ESP_LOGI(TAG, "gaps: %u in the last 30 days%s", (unsigned)n, more ? " (first 64 shown, more exist)" : "");
 }
 
+/* "<hex> <swap> <mx> <my> [xgap ygap]": the raw panel and touch values, for the rotation bring-up */
+static void job_madctl(const char *arg)
+{
+    unsigned m;
+    int s, mx, my, xg = 0, yg = 0;
+    int n = sscanf(arg, "%x %d %d %d %d %d", &m, &s, &mx, &my, &xg, &yg);
+    if ((n != 4 && n != 6) || m > 0xFF || (unsigned)s > 1 || (unsigned)mx > 1 || (unsigned)my > 1 || xg < -64 ||
+        xg > 64 || yg < -64 || yg > 64) {
+        ESP_LOGW(TAG, "usage: madctl <hex> <swap 0|1> <mx 0|1> <my 0|1> [xgap ygap, even, -64..64]");
+        return;
+    }
+    hy_board_debug_madctl((uint8_t)m, s, mx, my, (int16_t)xg, (int16_t)yg);
+}
+
+static void job_rot(const char *arg)
+{
+    int r;
+    if (sscanf(arg, "%d", &r) != 1 || r < 0 || r > 3) {
+        ESP_LOGI(TAG, "rot: %u (usage: rot <0-3>)", (unsigned)hy_board_rotation());
+        return;
+    }
+    hy_board_set_rotation((uint8_t)r);
+}
+
 static void run_job(void *arg)
 {
     job_t *j = arg;
@@ -913,6 +937,12 @@ static void run_job(void *arg)
     case J_LIMITS:
         job_limits();
         break;
+    case J_MADCTL:
+        job_madctl(j->arg);
+        break;
+    case J_ROT:
+        job_rot(j->arg);
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -970,5 +1000,7 @@ void hy_ui_debug_scr(const char *arg) { post(J_SCR, arg); }
 void hy_ui_debug_mf(const char *arg) { post(J_MF, arg); }
 void hy_ui_debug_archive(const char *arg) { post(J_ARCHIVE, arg); }
 void hy_ui_debug_limits(void) { post(J_LIMITS, NULL); }
+void hy_ui_debug_madctl(const char *arg) { post(J_MADCTL, arg); }
+void hy_ui_debug_rot(const char *arg) { post(J_ROT, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */
