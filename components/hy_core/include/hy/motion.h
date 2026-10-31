@@ -50,7 +50,8 @@ void     hy_orient_set(hy_orient_t *o, hy_rot_t r);   /* forced (lock, debug): c
 
 #define HY_SHK_SWING_MG    3000  /* a stroke: the change between two successive turning points on one axis */
 #define HY_SHK_REVERSAL_MG  500  /* the signal must back off this far from its extreme to confirm a turning point */
-#define HY_SHK_STROKES        3  /* consecutive strokes on one axis that make a shake */
+#define HY_SHK_STROKES        4  /* consecutive strokes on one axis that make a shake; a drop with one bounce or an
+                                    impact with one undershoot makes 3 and must not undo a logged dose */
 #define HY_SHK_STROKE_MS    200  /* a stroke longer than this is slow motion, not a shake */
 #define HY_SHK_SETTLE_MS    200  /* after reset: strokes are tracked but not counted */
 #define HY_SHK_COOLDOWN_MS 1000  /* after a detection, at least this long without detections */
