@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -13,6 +14,10 @@ extern "C" {
    gaps, 30 ms tail silence. Each tone: 8 ms linear attack, linear decay to 0 over its last 120 ms, peak 16384. */
 size_t hy_chime_len(uint32_t rate);
 size_t hy_chime_render(int16_t *out, size_t max, uint32_t rate);   /* returns samples written, 0 if max too small */
+
+/* True when local_min (minutes after local midnight) is inside [from, to) on a 24 h circle; from > to wraps
+   midnight; false when from == to. */
+bool hy_quiet_now(uint16_t from, uint16_t to, uint16_t local_min);
 
 #ifdef __cplusplus
 }

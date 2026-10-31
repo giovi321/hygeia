@@ -31,6 +31,7 @@ static void *clk_ctx;
 static HY_EXT_BSS hy_med_t meds[HY_MAX_STORED];
 static HY_EXT_BSS hy_med_t scratch[HY_MAX_STORED];
 static size_t n_meds;
+static uint32_t next_med_id;   /* id the next new medicine takes; only grows, so a deleted id is not reused */
 static HY_EXT_BSS undo_rec_t undo[UNDO_SLOTS];
 static size_t undo_next;
 static bool inited;
@@ -40,6 +41,31 @@ static size_t n_snz;
 static HY_EXT_BSS hy_snooze_t snz_out[HY_MAX_MEDS];
 static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out);
 static void undo_forget(uint32_t log_id);
+
+/* Largest id over the medicines in a, plus one (0xFFFFFFFF stays). */
+static uint32_t id_after_max(const hy_med_t *a, size_t n)
+{
+    uint32_t mx = 0;
+    for (size_t i = 0; i < n; i++)
+        if (a[i].id > mx) mx = a[i].id;
+    return mx == 0xFFFFFFFFu ? mx : mx + 1;
+}
+
+/* Saves the medicine array with the stored next id (raised past every id in it). next_med_id is not touched:
+ * the caller updates it once the save has worked. */
+static hy_err_t persist_meds(const hy_med_t *a, size_t n, uint32_t next)
+{
+    uint32_t floor_id = id_after_max(a, n);
+    if (next < floor_id) next = floor_id;
+    if (store->save_meds_next) return store->save_meds_next(store_ctx, a, n, next);
+    return store->save_meds(store_ctx, a, n);
+}
+
+static void raise_next_id(const hy_med_t *a, size_t n)
+{
+    uint32_t floor_id = id_after_max(a, n);
+    if (next_med_id < floor_id) next_med_id = floor_id;
+}
 
 static void publish(hy_ev_type_t type, int64_t ts, uint32_t med_id, uint32_t log_id, int64_t slot)
 {
@@ -75,6 +101,7 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
     memset(undo, 0, sizeof undo);
     n_snz = 0;
     n_meds = 0;
+    next_med_id = 0;
     undo_next = 0;
     inited = false;
     store = NULL; clk = NULL; store_ctx = NULL; clk_ctx = NULL;
@@ -88,6 +115,8 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
     if (n > HY_MAX_STORED) n = HY_MAX_STORED;
     n_meds = n;
     sort_meds(meds, n_meds);
+    next_med_id = s->load_next_id ? s->load_next_id(sctx) : 0;
+    raise_next_id(meds, n_meds);
     store = s; store_ctx = sctx; clk = c; clk_ctx = cctx;
     inited = true;
     return HY_OK;
@@ -122,10 +151,8 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
     if (m->id == 0) {
         if (n_meds >= HY_MAX_STORED) return HY_E_FULL;
         if (!m->archived && hy_meds_active_count() >= HY_MAX_MEDS) return HY_E_FULL;
-        uint32_t max_id = 0;
-        for (size_t i = 0; i < n_meds; i++)
-            if (meds[i].id > max_id) max_id = meds[i].id;
-        entry.id = max_id + 1;
+        if (next_med_id == 0 || next_med_id == 0xFFFFFFFFu) return HY_E_FULL;
+        entry.id = next_med_id;
         scratch[n++] = entry;
     } else {
         size_t i;
@@ -146,10 +173,13 @@ hy_err_t hy_act_med_upsert(hy_med_t *m)
         scratch[i] = entry;
     }
     sort_meds(scratch, n);
-    if (store->save_meds(store_ctx, scratch, n) != HY_OK) return HY_E_IO;
+    uint32_t next_after = m->id == 0 ? entry.id + 1 : next_med_id;
+    if (persist_meds(scratch, n, next_after) != HY_OK) return HY_E_IO;
 
     memcpy(meds, scratch, n * sizeof meds[0]);
     n_meds = n;
+    next_med_id = next_after;
+    raise_next_id(meds, n_meds);
     if (drop_snooze) snooze_drop(entry.id, 0, NULL);
     m->id = entry.id;
     publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, entry.id, 0, 0);
@@ -165,7 +195,7 @@ hy_err_t hy_act_pills_set(uint32_t med_id, int16_t left)
     memcpy(scratch, meds, n_meds * sizeof meds[0]);
     for (size_t i = 0; i < n_meds; i++)
         if (scratch[i].id == med_id) scratch[i].pills_left = left;
-    if (store->save_meds(store_ctx, scratch, n_meds) != HY_OK) return HY_E_IO;
+    if (persist_meds(scratch, n_meds, next_med_id) != HY_OK) return HY_E_IO;
     cur->pills_left = left;
     publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, med_id, 0, 0);
     return HY_OK;
@@ -179,6 +209,114 @@ hy_err_t hy_act_med_archive(uint32_t id, bool archived)
     hy_med_t upd = *cur;
     upd.archived = archived;
     return hy_act_med_upsert(&upd);
+}
+
+/* Removes every log entry of a medicine: the port's purge_med when it has one, entry by entry otherwise. *count
+ * gets the number removed (also on a partial failure). The undo records of the medicine are dropped. */
+static hy_err_t remove_med_logs(uint32_t med_id, size_t *count)
+{
+    hy_err_t result = HY_OK;
+    size_t removed = 0;
+    if (store->purge_med) {
+        removed = store->purge_med(store_ctx, med_id);
+    } else {
+        for (;;) {
+            size_t q = store->query_log(store_ctx, 0, PURGE_LOG_END, med_id, qbuf, QUERY_MAX);
+            if (q == 0) break;
+            for (size_t i = 0; i < q; i++) {
+                if (store->delete_log(store_ctx, qbuf[i].id, qbuf[i].ts) != HY_OK) {
+                    result = HY_E_IO;
+                    break;
+                }
+                removed++;
+            }
+            if (result != HY_OK) break;
+        }
+    }
+    for (int i = 0; i < UNDO_SLOTS; i++)
+        if (undo[i].used && undo[i].med_id == med_id) undo[i].used = false;
+    *count = removed;
+    return result;
+}
+
+size_t hy_act_med_log_count(uint32_t id)
+{
+    if (!inited) return 0;
+    size_t total = 0;
+    int64_t from = 0;
+    int64_t last_ts = 0;
+    uint32_t last_id = 0;
+    bool have_cursor = false;
+    for (;;) {
+        size_t q = store->query_log(store_ctx, from, PURGE_LOG_END, id, qbuf, QUERY_MAX);
+        size_t fresh = 0;
+        for (size_t i = 0; i < q; i++) {
+            bool after = !have_cursor || qbuf[i].ts > last_ts || (qbuf[i].ts == last_ts && qbuf[i].id > last_id);
+            if (after) fresh++;
+        }
+        total += fresh;
+        if (q < QUERY_MAX || fresh == 0) break;
+        last_ts = qbuf[q - 1].ts;
+        last_id = qbuf[q - 1].id;
+        have_cursor = true;
+        from = last_ts;
+    }
+    return total;
+}
+
+hy_err_t hy_act_med_reorder(const uint32_t *ids, size_t n)
+{
+    if (!inited || (n && !ids)) return HY_E_INVALID;
+    if (n != hy_meds_active_count() || n > HY_MAX_MEDS) return HY_E_INVALID;
+    memcpy(scratch, meds, n_meds * sizeof meds[0]);
+    bool seen[HY_MAX_STORED] = { false };
+    for (size_t k = 0; k < n; k++) {
+        size_t i;
+        for (i = 0; i < n_meds; i++)
+            if (scratch[i].id == ids[k]) break;
+        if (i == n_meds || scratch[i].archived || seen[i]) return HY_E_INVALID;
+        seen[i] = true;
+        scratch[i].order = (uint16_t)k;
+    }
+    /* archived medicines follow, in their previous order (meds is sorted by order) */
+    uint16_t next = (uint16_t)n;
+    for (size_t i = 0; i < n_meds; i++)
+        if (scratch[i].archived) scratch[i].order = next++;
+    sort_meds(scratch, n_meds);
+    if (persist_meds(scratch, n_meds, next_med_id) != HY_OK) return HY_E_IO;
+    memcpy(meds, scratch, n_meds * sizeof meds[0]);
+    publish(HY_EV_MEDS_CHANGED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, 0, 0, 0);
+    return HY_OK;
+}
+
+hy_err_t hy_act_med_delete(uint32_t id, size_t *n_deleted)
+{
+    if (n_deleted) *n_deleted = 0;
+    if (!inited) return HY_E_INVALID;
+    hy_med_t *cur = find_med(id);
+    if (!cur) return HY_E_NOT_FOUND;
+    if (!cur->archived) return HY_E_INVALID;
+
+    size_t removed = 0;
+    hy_err_t r = remove_med_logs(id, &removed);
+    if (n_deleted) *n_deleted = removed;
+    if (r != HY_OK) return r;
+    snooze_drop(id, 0, NULL);
+
+    size_t out = 0;
+    for (size_t i = 0; i < n_meds; i++)
+        if (meds[i].id != id) scratch[out++] = meds[i];
+    uint32_t next = next_med_id;
+    if (next < cur->id + 1 && cur->id != 0xFFFFFFFFu) next = cur->id + 1;
+    if (persist_meds(scratch, out, next) != HY_OK) return HY_E_IO;
+    memcpy(meds, scratch, out * sizeof meds[0]);
+    memset(&meds[out], 0, (n_meds - out) * sizeof meds[0]);
+    n_meds = out;
+    next_med_id = next;
+    int64_t now = clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0;
+    publish(HY_EV_MEDS_CHANGED, now, id, 0, 0);
+    publish(HY_EV_LOG_EDITED, now, id, 0, 0);
+    return HY_OK;
 }
 
 /* Debug only (the console is the sole caller): removes the medicines with the given ids for good. */
@@ -195,19 +333,9 @@ hy_err_t hy_act_med_purge(const uint32_t *ids, size_t n_ids, size_t *n_removed, 
     for (size_t k = 0; k < n_ids && result == HY_OK; k++) {
         if (!find_med(ids[k])) continue;
         /* Log entries first: a failure leaves an unchanged medicine list, not orphaned references */
-        for (;;) {
-            size_t q = store->query_log(store_ctx, 0, PURGE_LOG_END, ids[k], qbuf, QUERY_MAX);
-            if (q == 0) break;
-            for (size_t i = 0; i < q; i++) {
-                if (store->delete_log(store_ctx, qbuf[i].id, qbuf[i].ts) != HY_OK) {
-                    result = HY_E_IO;
-                    break;
-                }
-                undo_forget(qbuf[i].id);
-                logs++;
-            }
-            if (result != HY_OK) break;
-        }
+        size_t removed_logs = 0;
+        result = remove_med_logs(ids[k], &removed_logs);
+        logs += removed_logs;
         if (result == HY_OK) {
             snooze_drop(ids[k], 0, NULL);
             done[removed++] = ids[k];
@@ -223,7 +351,7 @@ hy_err_t hy_act_med_purge(const uint32_t *ids, size_t n_ids, size_t *n_removed, 
     }
     kept = out;
     if (removed) {
-        if (store->save_meds(store_ctx, scratch, kept) != HY_OK) {
+        if (persist_meds(scratch, kept, next_med_id) != HY_OK) {
             result = HY_E_IO;
         } else {
             memcpy(meds, scratch, kept * sizeof meds[0]);
@@ -370,7 +498,7 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
         med->pills_left--;
         /* The log write is the commit point: a failed save is not reported. The
          * decremented count stays in memory and the next successful meds save persists it. */
-        (void)store->save_meds(store_ctx, meds, n_meds);
+        (void)persist_meds(meds, n_meds, next_med_id);
         rec.pill_dec = true;
     }
 
@@ -538,7 +666,7 @@ hy_err_t hy_act_undo(uint32_t log_id)
             /* The log undo is the commit point: a failed pill save is not reported;
              * the restored count is persisted by the next successful meds save. */
             med->pills_left++;
-            (void)store->save_meds(store_ctx, meds, n_meds);
+            (void)persist_meds(meds, n_meds, next_med_id);
         }
     }
     publish(HY_EV_UNDONE, ts, med_id, log_id, slot);
@@ -556,6 +684,65 @@ hy_err_t hy_act_log_edit(const hy_log_t *e)
     undo_forget(upd.id);
     publish(HY_EV_LOG_EDITED, upd.ts, upd.med_id, upd.id, upd.slot);
     return HY_OK;
+}
+
+hy_err_t hy_act_log_update(uint32_t id, const hy_api_logreq_t *req)
+{
+    if (!inited || !req || req->orig_ts == 0) return HY_E_INVALID;
+    /* One second wide: a month-wide query would be cut at the cap. */
+    size_t q = store->query_log(store_ctx, req->orig_ts, req->orig_ts + 1, 0, qbuf, QUERY_MAX);
+    hy_log_t e;
+    bool found = false;
+    for (size_t i = 0; i < q; i++) {
+        if (qbuf[i].id == id) {
+            e = qbuf[i];
+            found = true;
+            break;
+        }
+    }
+    if (!found) return HY_E_NOT_FOUND;
+
+    bool clock_ok = clk->valid(clk_ctx);
+    int64_t now = clock_ok ? clk->now(clk_ctx) : 0;
+    bool retime = false;
+    if (req->has_ts) {
+        if (req->ts <= 0) return HY_E_INVALID;
+        if (clock_ok && req->ts > now + 60) return HY_E_INVALID;
+        if (req->ts != e.ts) retime = true;
+        e.ts = req->ts;
+    }
+    if (req->has_note) {
+        if (memchr(req->note, '\0', sizeof req->note) == NULL) return HY_E_INVALID;
+        memset(e.note, 0, sizeof e.note);
+        strncpy(e.note, req->note, sizeof e.note - 1);
+    }
+    if (req->has_status) {
+        if ((unsigned)req->status > (unsigned)HY_MISSED) return HY_E_INVALID;
+        e.status = req->status;
+    }
+    if (req->has_med) {
+        if (!find_med(req->med_id)) return HY_E_NOT_FOUND;
+        if (req->med_id != e.med_id) retime = true;
+        e.med_id = req->med_id;
+    }
+
+    hy_med_t *med = find_med(e.med_id);
+    if (retime && med && med->type == HY_SCHED_FIXED && (e.status == HY_TAKEN || e.status == HY_SKIPPED)) {
+        int64_t hi = e.ts + (int64_t)med->early_window_min * 60;
+        if (clock_ok && now > hi) hi = now;
+        size_t n = store->query_log(store_ctx, e.ts - LOOKBACK_S, hi + 1, e.med_id, qbuf, QUERY_MAX);
+        if (n >= QUERY_MAX) return HY_E_FULL;
+        size_t w = 0;
+        for (size_t i = 0; i < n; i++)
+            if (qbuf[i].id != id) qbuf[w++] = qbuf[i];
+        hy_tzchange_t chbuf;
+        e.slot = hy_match_slot(med, e.ts, e.tz, qbuf, w, last_change_of(&chbuf));
+        e.delta_min = e.slot ? (int32_t)((e.ts - e.slot) / 60) : 0;
+    } else if (retime && (!med || med->type != HY_SCHED_FIXED)) {
+        e.slot = 0;
+        e.delta_min = 0;
+    }
+    return hy_act_log_edit(&e);
 }
 
 hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts)

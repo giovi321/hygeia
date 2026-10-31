@@ -14,7 +14,7 @@
 
 static const char *TAG = "ui_nav";
 
-#define N_VIEWS (HY_V_MED_ARCHIVE + 1)
+#define N_VIEWS HY_V_COUNT
 
 static hy_nav_t s_nav;
 static lv_obj_t *s_pager;
@@ -26,8 +26,9 @@ static volatile bool s_storage_down;
 static const char *const view_names[N_VIEWS] = {
     "HOME", "OVERVIEW", "HISTORY", "DETAIL", "NOTE", "EARLIER", "QS", "SETTINGS", "SET_ZONE", "SET_TIME",
     "SET_SOUND", "SET_DISPLAY", "ABOUT", "CLOCK_INVALID", "STORAGE_DOWN",
-    "MEDFORM", "MED_ARCHIVE",
+    "MEDFORM", "MED_ARCHIVE", "SET_WIFI", "AP_INFO", "WEB_QR",
 };
+_Static_assert(sizeof view_names / sizeof view_names[0] == N_VIEWS, "view_names covers every view");
 
 static bool is_pager(hy_view_t v)
 {

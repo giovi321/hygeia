@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "hy/actions.h"
+#include "hy/chime.h"
 #include "hy/audio.h"
 #include "hy/clock.h"
 #include "hy/events.h"
@@ -15,6 +17,7 @@
 #include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
+#include "hy/tzlock.h"
 
 static const char *TAG = "sched";
 
@@ -302,13 +305,27 @@ static const char *code_of(uint32_t id, size_t nm)
  * written (no due events, no chime, no snapshot), so slots already overdue then are not lost. */
 static bool s_chime_deferred;
 
+/* Minutes after local midnight in the clock zone (the process TZ outside the lock), or -1. */
+static int local_minute_now(void)
+{
+    time_t t = (time_t)hy_clock_port()->now(NULL);
+    struct tm tm;
+    hy_tz_lock();
+    bool ok = localtime_r(&t, &tm) != NULL;
+    hy_tz_unlock();
+    return ok ? tm.tm_hour * 60 + tm.tm_min : -1;
+}
+
 static void play_chime(void)
 {
     const hy_settings_t *st = hy_settings();
+    int lm = st->quiet_from != st->quiet_to ? local_minute_now() : -1;
     if (!st->sound) {
         ESP_LOGI(TAG, "chime silent (sound off)");
     } else if (st->dnd) {
         ESP_LOGI(TAG, "chime silent (do not disturb)");
+    } else if (lm >= 0 && hy_quiet_now(st->quiet_from, st->quiet_to, (uint16_t)lm)) {
+        ESP_LOGI(TAG, "chime silent (quiet hours)");
     } else {
         if (!hy_audio_ok()) {
             /* not silenced, but the speaker failed: the UI flashes; the play is still attempted,

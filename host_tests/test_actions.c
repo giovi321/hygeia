@@ -1,6 +1,7 @@
 #include <string.h>
 #include "unity.h"
 #include "hy/actions.h"
+#include "hy/api.h"
 #include "hy/events.h"
 #include "hy/gap.h"
 #include "hy/med.h"
@@ -17,6 +18,7 @@ static struct {
     int saves, appends, append_attempts, updates, deletes, loads;
     bool fail_load, fail_save, fail_append, fail_update, fail_delete;
     hy_gap_t gaps[8]; uint8_t gap_reasons[8]; int n_gaps;
+    uint32_t med_next_id; int purges; bool fail_purge;
 } st;
 
 static hy_err_t s_load(void *c, hy_med_t *out, size_t max, size_t *n)
@@ -81,8 +83,29 @@ static size_t s_query_gaps(void *c, int64_t from, int64_t to, hy_gap_t *out, uin
     (void)c; (void)from; (void)to; (void)out; (void)reasons; (void)max;
     return 0;
 }
+static hy_err_t s_save_next(void *c, const hy_med_t *m, size_t n, uint32_t next_id)
+{
+    hy_err_t r = s_save(c, m, n);
+    if (r == HY_OK) st.med_next_id = next_id;
+    return r;
+}
+static uint32_t s_load_next(void *c) { (void)c; return st.med_next_id; }
+static size_t s_purge(void *c, uint32_t med_id)
+{
+    (void)c; st.purges++;
+    size_t removed = 0, w = 0;
+    for (size_t i = 0; i < st.n_logs; i++) {
+        if (st.logs[i].med_id == med_id) removed++;
+        else st.logs[w++] = st.logs[i];
+    }
+    st.n_logs = w;
+    return removed;
+}
 static const hy_store_port_t store_port = { s_load, s_save, s_append, s_update, s_delete, s_query,
-                                            s_append_gap, s_query_gaps };
+                                            s_append_gap, s_query_gaps, s_save_next, s_load_next, s_purge };
+/* The earlier port: no next id, no purge. */
+static const hy_store_port_t store_port_plain = { s_load, s_save, s_append, s_update, s_delete, s_query,
+                                                  s_append_gap, s_query_gaps, NULL, NULL, NULL };
 
 /* ---- clock port ---- */
 static struct { int64_t now; bool valid; } clk;
@@ -1094,6 +1117,257 @@ static void test_purge_removes_med_logs_and_snooze(void)
     TEST_ASSERT_EQUAL_size_t(0, removed);
 }
 
+/* ---- reorder, delete, log update ---- */
+
+static void add_archived_z(void)
+{
+    fixed_med(&st.meds[3], 4, "Z", "Zinc", 3);
+    st.meds[3].archived = true;
+    st.n_meds = 4;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    n_evs = 0;
+}
+
+static void test_reorder(void)
+{
+    add_archived_z();
+    uint32_t ids[] = {3, 1, 2};
+    int saves = st.saves;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_reorder(ids, 3));
+    TEST_ASSERT_EQUAL_INT(saves + 1, st.saves);
+    const hy_med_t *ms;
+    TEST_ASSERT_EQUAL_size_t(4, hy_meds(&ms));
+    TEST_ASSERT_EQUAL_UINT32(3, ms[0].id);
+    TEST_ASSERT_EQUAL_UINT32(1, ms[1].id);
+    TEST_ASSERT_EQUAL_UINT32(2, ms[2].id);
+    TEST_ASSERT_EQUAL_UINT32(4, ms[3].id);
+    TEST_ASSERT_EQUAL_UINT16(0, med_by_id(3)->order);
+    TEST_ASSERT_EQUAL_UINT16(1, med_by_id(1)->order);
+    TEST_ASSERT_EQUAL_UINT16(2, med_by_id(2)->order);
+    TEST_ASSERT_EQUAL_UINT16(3, med_by_id(4)->order);
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL(HY_EV_MEDS_CHANGED, evs[0].type);
+    /* the stored copy carries the new orders too */
+    for (size_t i = 0; i < st.n_meds; i++)
+        if (st.meds[i].id == 3) TEST_ASSERT_EQUAL_UINT16(0, st.meds[i].order);
+}
+
+static void test_reorder_rejects_partial(void)
+{
+    add_archived_z();
+    int saves = st.saves;
+    uint32_t partial[] = {1, 2};
+    uint32_t dup[] = {1, 1, 2};
+    uint32_t unknown[] = {1, 2, 9};
+    uint32_t with_arch[] = {1, 2, 3, 4};
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_reorder(partial, 2));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_reorder(dup, 3));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_reorder(unknown, 3));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_reorder(with_arch, 4));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_reorder(NULL, 3));
+    TEST_ASSERT_EQUAL_INT(saves, st.saves);
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+    TEST_ASSERT_EQUAL_UINT16(0, med_by_id(1)->order);
+}
+
+static void test_reorder_save_failure(void)
+{
+    uint32_t ids[] = {3, 2, 1};
+    st.fail_save = true;
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_med_reorder(ids, 3));
+    TEST_ASSERT_EQUAL_UINT16(0, med_by_id(1)->order);
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void add_z_logs(int count)
+{
+    for (int i = 0; i < count; i++) {
+        hy_log_t e; memset(&e, 0, sizeof e);
+        e.id = st.next_id++; e.ts = D0 - 86400LL * (i + 1) + H(8, 0); e.med_id = 4; e.status = HY_TAKEN;
+        st.logs[st.n_logs++] = e;
+    }
+}
+
+static void test_delete_active_refused(void)
+{
+    int saves = st.saves;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_med_delete(1, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_med_delete(77, NULL));
+    TEST_ASSERT_EQUAL_INT(saves, st.saves);
+    TEST_ASSERT_NOT_NULL(med_by_id(1));
+    TEST_ASSERT_EQUAL_INT(0, n_evs);
+}
+
+static void test_delete_archived(void)
+{
+    add_archived_z();
+    add_z_logs(4);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, "", HY_SRC_SCREEN, NULL));
+    n_evs = 0;
+    TEST_ASSERT_EQUAL_size_t(4, hy_act_med_log_count(4));
+    TEST_ASSERT_EQUAL_size_t(1, hy_act_med_log_count(1));
+    size_t nd = 99;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_delete(4, &nd));
+    TEST_ASSERT_EQUAL_size_t(4, nd);
+    TEST_ASSERT_NULL(med_by_id(4));
+    TEST_ASSERT_EQUAL_size_t(0, hy_act_med_log_count(4));
+    TEST_ASSERT_EQUAL_size_t(1, hy_act_med_log_count(1));
+    TEST_ASSERT_EQUAL_INT(1, st.purges);
+    TEST_ASSERT_EQUAL_size_t(3, st.n_meds);
+    bool meds_ev = false, log_ev = false;
+    for (int i = 0; i < n_evs; i++) {
+        if (evs[i].type == HY_EV_MEDS_CHANGED) meds_ev = true;
+        if (evs[i].type == HY_EV_LOG_EDITED) log_ev = true;
+    }
+    TEST_ASSERT_TRUE(meds_ev);
+    TEST_ASSERT_TRUE(log_ev);
+    /* the id is not reused */
+    hy_med_t nm;
+    fixed_med(&nm, 0, "T", "Test", 9);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&nm));
+    TEST_ASSERT_EQUAL_UINT32(5, nm.id);
+    TEST_ASSERT_EQUAL_UINT32(6, st.med_next_id);
+    /* and survives a restart */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    fixed_med(&nm, 0, "U", "Test2", 10);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&nm));
+    TEST_ASSERT_EQUAL_UINT32(6, nm.id);
+}
+
+static void test_delete_archived_plain_port(void)
+{
+    add_archived_z();
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port_plain, NULL, &clock_port, NULL));
+    add_z_logs(3);
+    size_t nd = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_delete(4, &nd));
+    TEST_ASSERT_EQUAL_size_t(3, nd);
+    TEST_ASSERT_EQUAL_INT(0, st.purges);
+    TEST_ASSERT_EQUAL_size_t(0, st.n_logs);
+    hy_med_t nm;
+    fixed_med(&nm, 0, "T", "Test", 9);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_upsert(&nm));
+    TEST_ASSERT_EQUAL_UINT32(5, nm.id);
+}
+
+static void test_delete_log_failure_keeps_med(void)
+{
+    add_archived_z();
+    add_z_logs(2);
+    st.fail_delete = true;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port_plain, NULL, &clock_port, NULL));
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_med_delete(4, NULL));
+    TEST_ASSERT_NOT_NULL(med_by_id(4));
+}
+
+/* A with two times a day for the log update tests. */
+static void two_time_a(void)
+{
+    st.meds[0].times[1] = 20 * 60; st.meds[0].n_times = 2;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    n_evs = 0;
+}
+
+static uint32_t add_taken(uint32_t med, int64_t ts, int64_t slot, int32_t delta)
+{
+    hy_log_t e; memset(&e, 0, sizeof e);
+    e.id = st.next_id++; e.ts = ts; e.med_id = med; e.status = HY_TAKEN; e.slot = slot; e.delta_min = delta;
+    strcpy(e.tz, "UTC0");
+    st.logs[st.n_logs++] = e;
+    return e.id;
+}
+
+static const hy_log_t *log_by_id(uint32_t id)
+{
+    for (size_t i = 0; i < st.n_logs; i++) if (st.logs[i].id == id) return &st.logs[i];
+    return NULL;
+}
+
+static void test_log_update_recomputes_slot(void)
+{
+    two_time_a();
+    clk.now = D0 + H(21, 0);
+    uint32_t id = add_taken(1, D0 + H(8, 10), D0 + H(8, 0), 10);
+    hy_api_logreq_t rq; memset(&rq, 0, sizeof rq);
+    rq.orig_ts = D0 + H(8, 10); rq.ts = D0 + H(20, 5); rq.has_ts = true;
+    int updates = st.updates;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_update(id, &rq));
+    TEST_ASSERT_EQUAL_INT(updates + 1, st.updates);
+    const hy_log_t *e = log_by_id(id);
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(20, 5), e->ts);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(20, 0), e->slot);
+    TEST_ASSERT_EQUAL_INT32(5, e->delta_min);
+    TEST_ASSERT_TRUE(e->edited);
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL(HY_EV_LOG_EDITED, evs[0].type);
+}
+
+static void test_log_update_future_refused(void)
+{
+    two_time_a();
+    uint32_t id = add_taken(1, D0 + H(8, 10), D0 + H(8, 0), 10);
+    hy_api_logreq_t rq; memset(&rq, 0, sizeof rq);
+    rq.orig_ts = D0 + H(8, 10); rq.has_ts = true;
+    rq.ts = clk.now + 61;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_update(id, &rq));
+    TEST_ASSERT_EQUAL_INT(0, st.updates);
+    rq.ts = clk.now + 60;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_update(id, &rq));
+    /* an invalid clock does not enforce the limit */
+    rq.orig_ts = clk.now + 60;
+    rq.ts = clk.now + 100000;
+    clk.valid = false;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_update(id, &rq));
+}
+
+static void test_log_update_status_change(void)
+{
+    two_time_a();
+    uint32_t id = add_taken(1, D0 + H(8, 10), D0 + H(8, 0), 10);
+    hy_api_logreq_t rq; memset(&rq, 0, sizeof rq);
+    rq.orig_ts = D0 + H(8, 10); rq.has_status = true; rq.status = HY_SKIPPED;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_update(id, &rq));
+    const hy_log_t *e = log_by_id(id);
+    TEST_ASSERT_EQUAL(HY_SKIPPED, e->status);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), e->slot);
+    TEST_ASSERT_EQUAL_INT32(10, e->delta_min);
+    TEST_ASSERT_TRUE(e->edited);
+}
+
+static void test_log_update_note_and_errors(void)
+{
+    two_time_a();
+    uint32_t id = add_taken(1, D0 + H(8, 10), D0 + H(8, 0), 10);
+    hy_api_logreq_t rq; memset(&rq, 0, sizeof rq);
+    rq.orig_ts = D0 + H(8, 10); rq.has_note = true; strcpy(rq.note, "with food");
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_update(id, &rq));
+    TEST_ASSERT_EQUAL_STRING("with food", log_by_id(id)->note);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), log_by_id(id)->slot);   /* a note edit leaves the slot alone */
+    memset(rq.note, 'x', 64);                                     /* no terminator: 64 bytes */
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_update(id, &rq));
+    rq.has_note = false;
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_log_update(9999, &rq));
+    rq.orig_ts = 0;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_update(id, &rq));
+    rq.orig_ts = D0 + H(8, 10); rq.has_med = true; rq.med_id = 77;
+    TEST_ASSERT_EQUAL_INT(HY_E_NOT_FOUND, hy_act_log_update(id, &rq));
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_update(id, NULL));
+}
+
+static void test_log_update_free_log_keeps_slot_zero(void)
+{
+    /* an as-needed medicine */
+    st.meds[2].type = HY_SCHED_AS_NEEDED; st.meds[2].n_times = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_actions_init(&store_port, NULL, &clock_port, NULL));
+    uint32_t id = add_taken(3, D0 + H(7, 0), 0, 0);
+    hy_api_logreq_t rq; memset(&rq, 0, sizeof rq);
+    rq.orig_ts = D0 + H(7, 0); rq.has_ts = true; rq.ts = D0 + H(7, 30);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_update(id, &rq));
+    TEST_ASSERT_EQUAL_INT64(0, log_by_id(id)->slot);
+    TEST_ASSERT_EQUAL_INT32(0, log_by_id(id)->delta_min);
+}
+
 /* ---- untracked gaps ---- */
 static void test_record_gap_publishes_once(void)
 {
@@ -1202,6 +1476,18 @@ int main(void)
     RUN_TEST(test_undo_does_not_restore_expired_snooze);
     RUN_TEST(test_archive_and_schedule_change_drop_snooze);
     RUN_TEST(test_purge_removes_med_logs_and_snooze);
+    RUN_TEST(test_reorder);
+    RUN_TEST(test_reorder_rejects_partial);
+    RUN_TEST(test_reorder_save_failure);
+    RUN_TEST(test_delete_active_refused);
+    RUN_TEST(test_delete_archived);
+    RUN_TEST(test_delete_archived_plain_port);
+    RUN_TEST(test_delete_log_failure_keeps_med);
+    RUN_TEST(test_log_update_recomputes_slot);
+    RUN_TEST(test_log_update_future_refused);
+    RUN_TEST(test_log_update_status_change);
+    RUN_TEST(test_log_update_note_and_errors);
+    RUN_TEST(test_log_update_free_log_keeps_slot_zero);
     RUN_TEST(test_record_gap_publishes_once);
     RUN_TEST(test_record_gap_without_port_member);
     return UNITY_END();

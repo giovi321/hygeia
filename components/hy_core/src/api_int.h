@@ -14,6 +14,9 @@ bool hy_api_utf8_valid(const char *s);
 /* Fills *err with the mapping of e and the given field (NULL = keep the mapping's own field), returns e. */
 hy_err_t hy_api_fail(hy_api_err_t *err, hy_err_t e, const char *field);
 
+/* HY_E_INVALID with the member name when an object holds the same member name twice. */
+hy_err_t hy_api_reject_dups(const cJSON *obj, hy_api_err_t *err);
+
 /* Prints o unformatted into buf when it fits. Length, or -1. Frees nothing. */
 int hy_api_print(const cJSON *o, char *buf, size_t len);
 

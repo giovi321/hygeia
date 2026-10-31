@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "hy/events.h"
+#include "hy/settings.h"
 #include "hy/types.h"
 
 #define HY_API_VERSION 1
@@ -95,5 +97,68 @@ typedef struct {
 hy_err_t hy_api_time_from_json(const char *body, int64_t build_epoch, hy_api_time_t *out, hy_api_err_t *err);
 /* Manual: true. Auto: true when the clock is invalid or |utc_ms - device_utc_ms| > 2000. */
 bool hy_api_time_should_set(const hy_api_time_t *t, int64_t device_utc_ms, bool clock_valid);
+
+/* ---- settings ---- */
+
+/* {"sound","dnd","volume","brightness","snooze_min","dim_s","off_bat_s","off_usb_s","rot_lock","rot",
+ * "quiet":{"from":"HH:MM","to":"HH:MM"} or null (from == to),"wifi_keep_batt"}. malloc'd, NULL on failure. */
+char    *hy_api_settings_json(const hy_settings_t *s);
+/* Merges the body onto *cur (absent and null members keep their value; "quiet": null clears the quiet hours;
+ * "rot", the applied rotation, and unknown members are ignored), then hy_settings_clamp. A wrong type, a
+ * fractional or negative number, a malformed "quiet" or a repeated member gives HY_E_INVALID with the member
+ * in err->field. Numbers above the member's type are capped, then clamped. On failure *out is untouched. */
+hy_err_t hy_api_settings_from_json(const char *body, const hy_settings_t *cur, hy_settings_t *out,
+                                   hy_api_err_t *err);
+
+/* ---- dashboard state ---- */
+
+typedef struct {
+    uint32_t id;
+    char code[3];
+    char name[33];
+    uint8_t color;
+    uint8_t kind;        /* hy_tile_kind_t: as_needed no_dose since due late snoozed missed */
+    int32_t ring;        /* 0..1000 */
+    int64_t last_taken;  /* 0 = none */
+    int64_t next_due;    /* 0 = none */
+    int16_t pills_left;
+    bool pills;          /* pill counting on; pills_left is null in the JSON otherwise */
+} hy_api_tile_t;
+typedef struct {
+    uint32_t med_id;
+    int64_t slot;
+    uint8_t state;       /* hy_occ_state_t */
+    int64_t snoozed_until;  /* 0 = none */
+} hy_api_due_t;
+typedef struct {
+    int64_t utc_ms;      /* 0 = unknown */
+    bool clock_valid;
+    char zone[48];
+    char sync_src[16];   /* "" = never synced */
+    int64_t sync_at;     /* 0 = never */
+    int8_t batt_pct;     /* -1 = unknown */
+    bool usb, charging;
+    char estimate[16];
+    uint8_t net_mode;    /* hy_net_mode_t: off client ap */
+    uint8_t net_state;   /* off paused connecting connected failing ap */
+    char ssid[33];
+    int8_t rssi;         /* 0 = unknown */
+    char ip[16];
+    char host[33];
+    const hy_api_tile_t *tiles;
+    size_t n_tiles;
+    const hy_api_due_t *due;
+    size_t n_due;
+} hy_api_state_t;
+/* {"api":1,"utc_ms","clock_valid","zone","sync":{"src","at"},"battery":{"pct","usb","charging","estimate"},
+ * "net":{"mode","state","ssid","rssi","ip","host"},"tiles":[...],"due":[...]}. Zero timestamps, an unknown
+ * battery (-1), rssi 0 and empty strings of optional text become null. malloc'd; NULL on failure or when a
+ * count has no array. */
+char *hy_api_state_json(const hy_api_state_t *s);
+
+/* {"ev":"taken","ts":..,"med_id":..,"log_id":..,"slot":..,"value":..}. Names: taken skipped missed due snoozed
+ * undone log_edited meds_changed untracked battery_low battery_critical clock_invalid. Length, or -1 when it
+ * does not fit or the type is unknown. */
+int hy_api_event_json(const hy_event_t *ev, char *buf, size_t len);
 
 #endif /* HY_API_H */

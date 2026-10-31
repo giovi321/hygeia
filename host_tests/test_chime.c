@@ -69,11 +69,27 @@ static void test_chime_small_buffer(void)
     free(b);
 }
 
+static void test_quiet_now(void)
+{
+    TEST_ASSERT_TRUE(hy_quiet_now(22 * 60, 7 * 60, 23 * 60 + 30));
+    TEST_ASSERT_TRUE(hy_quiet_now(22 * 60, 7 * 60, 22 * 60));
+    TEST_ASSERT_TRUE(hy_quiet_now(22 * 60, 7 * 60, 3 * 60));
+    TEST_ASSERT_FALSE(hy_quiet_now(22 * 60, 7 * 60, 7 * 60));
+    TEST_ASSERT_FALSE(hy_quiet_now(22 * 60, 7 * 60, 21 * 60 + 59));
+    TEST_ASSERT_TRUE(hy_quiet_now(8 * 60, 12 * 60, 8 * 60));
+    TEST_ASSERT_FALSE(hy_quiet_now(8 * 60, 12 * 60, 12 * 60));
+    TEST_ASSERT_FALSE(hy_quiet_now(8 * 60, 12 * 60, 7 * 60 + 59));
+    TEST_ASSERT_FALSE(hy_quiet_now(0, 0, 0));
+    TEST_ASSERT_FALSE(hy_quiet_now(600, 600, 600));
+    TEST_ASSERT_FALSE(hy_quiet_now(600, 600, 1000));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_chime_len);
     RUN_TEST(test_chime_shape);
     RUN_TEST(test_chime_small_buffer);
+    RUN_TEST(test_quiet_now);
     return UNITY_END();
 }

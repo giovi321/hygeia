@@ -12,6 +12,9 @@ void hy_settings_defaults(hy_settings_t *s)
     s->off_usb_s = 0;
     s->rot_lock = false;
     s->rot = 0;
+    s->quiet_from = 0;
+    s->quiet_to = 0;
+    s->wifi_keep_batt = false;
 }
 
 void hy_settings_clamp(hy_settings_t *s)
@@ -31,4 +34,6 @@ void hy_settings_clamp(hy_settings_t *s)
         if (s->off_usb_s > 86400) s->off_usb_s = 86400;
     }
     if (s->rot > 3) s->rot = 0;
+    if (s->quiet_from > 1439) s->quiet_from = 0;
+    if (s->quiet_to > 1439) s->quiet_to = 0;
 }

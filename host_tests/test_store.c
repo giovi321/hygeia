@@ -531,6 +531,56 @@ static size_t gap_lines(void)
     return n;
 }
 
+void test_purge_med(void)
+{
+    uint32_t keep[3];
+    TEST_ASSERT_NOT_NULL(P->purge_med);
+    /* med 4 in September, October and November; med 1 beside it in each */
+    for (int i = 0; i < 3; i++) {
+        int64_t m = i == 0 ? SEP : i == 1 ? OCT : NOV;
+        TEST_ASSERT_EQUAL(HY_OK, add(m + 100, 4, NULL));
+        TEST_ASSERT_EQUAL(HY_OK, add(m + 200, 1, &keep[i]));
+        TEST_ASSERT_EQUAL(HY_OK, add(m + 300, 4, NULL));
+    }
+    TEST_ASSERT_EQUAL(6, P->purge_med(NULL, 4));
+    hy_log_t out[32];
+    TEST_ASSERT_EQUAL(0, q(SEP - DAY, NOV + 5 * DAY, 4, out, 32));
+    TEST_ASSERT_EQUAL(3, q(SEP - DAY, NOV + 5 * DAY, 1, out, 32));
+    for (int i = 0; i < 3; i++) TEST_ASSERT_EQUAL_UINT32(keep[i], out[i].id);
+    TEST_ASSERT_EQUAL(0, hy_store_skipped_lines());
+    TEST_ASSERT_FALSE(exists("log/2026-09.jsonl.tmp"));
+    /* nothing left to remove: no rewrite, zero */
+    TEST_ASSERT_EQUAL(0, P->purge_med(NULL, 4));
+    TEST_ASSERT_EQUAL(0, P->purge_med(NULL, 99));
+    TEST_ASSERT_EQUAL(HY_OK, add(SEP + 400, 4, NULL));
+    TEST_ASSERT_EQUAL(1, P->purge_med(NULL, 4));
+    TEST_ASSERT_EQUAL(3, q(SEP - DAY, NOV + 5 * DAY, 1, out, 32));
+}
+
+void test_next_id_port(void)
+{
+    TEST_ASSERT_NOT_NULL(P->save_meds_next);
+    TEST_ASSERT_NOT_NULL(P->load_next_id);
+    hy_med_t m[2], d[4];
+    size_t n = 0;
+    memset(m, 0, sizeof m);
+    hy_med_defaults(&m[0]); hy_med_defaults(&m[1]);
+    m[0].id = 1; strcpy(m[0].code, "A"); strcpy(m[0].name, "Antibiotic");
+    m[1].id = 2; strcpy(m[1].code, "V"); strcpy(m[1].name, "Vitamin D");
+    TEST_ASSERT_EQUAL(HY_OK, P->save_meds_next(NULL, m, 2, 9));
+    TEST_ASSERT_EQUAL(HY_OK, P->load_meds(NULL, d, 4, &n));
+    TEST_ASSERT_EQUAL(2, n);
+    TEST_ASSERT_EQUAL_UINT32(9, P->load_next_id(NULL));
+    /* a reopen reads it from the file */
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    TEST_ASSERT_EQUAL(HY_OK, P->load_meds(NULL, d, 4, &n));
+    TEST_ASSERT_EQUAL_UINT32(9, P->load_next_id(NULL));
+    /* a file written without it gives max id + 1 */
+    write_raw("meds.json", "{\"v\":1,\"meds\":[{\"id\":5,\"code\":\"A\",\"name\":\"a\"}]}");
+    TEST_ASSERT_EQUAL(HY_OK, P->load_meds(NULL, d, 4, &n));
+    TEST_ASSERT_EQUAL_UINT32(6, P->load_next_id(NULL));
+}
+
 void test_gaps_append_query(void)
 {
     put_gap(1000, 2000, HY_GAP_OFF);
@@ -616,6 +666,8 @@ int main(void)
     RUN_TEST(test_open_with_too_many_months_is_full);
     RUN_TEST(test_append_to_new_month_when_index_full);
     RUN_TEST(test_update_into_new_month_when_index_full);
+    RUN_TEST(test_purge_med);
+    RUN_TEST(test_next_id_port);
     RUN_TEST(test_gaps_append_query);
     RUN_TEST(test_gaps_trim);
     RUN_TEST(test_gaps_skip_corrupt);

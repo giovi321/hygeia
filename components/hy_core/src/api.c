@@ -51,6 +51,16 @@ hy_err_t hy_api_fail(hy_api_err_t *err, hy_err_t e, const char *field)
     return e;
 }
 
+hy_err_t hy_api_reject_dups(const cJSON *obj, hy_api_err_t *err)
+{
+    for (const cJSON *a = obj->child; a; a = a->next) {
+        if (!a->string) continue;
+        for (const cJSON *b = a->next; b; b = b->next)
+            if (b->string && strcmp(a->string, b->string) == 0) return hy_api_fail(err, HY_E_INVALID, a->string);
+    }
+    return HY_OK;
+}
+
 int hy_api_print(const cJSON *o, char *buf, size_t len)
 {
     if (!o || !buf || len == 0) return -1;

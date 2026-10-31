@@ -279,12 +279,27 @@ fail:
     return NULL;
 }
 
+static uint32_t default_next_id(const hy_med_t *meds, size_t n)
+{
+    uint32_t mx = 0;
+    for (size_t i = 0; i < n; i++)
+        if (meds[i].id > mx) mx = meds[i].id;
+    return mx == 0xFFFFFFFFu ? mx : mx + 1;
+}
+
 char *hy_meds_to_json(const hy_med_t *meds, size_t n)
+{
+    if (n > 0 && !meds) return NULL;
+    return hy_meds_to_json_next(meds, n, default_next_id(meds, n));
+}
+
+char *hy_meds_to_json_next(const hy_med_t *meds, size_t n, uint32_t next_id)
 {
     if (n > 0 && !meds) return NULL;
     cJSON *root = cJSON_CreateObject();
     cJSON *arr = cJSON_CreateArray();
-    if (!root || !arr || !cJSON_AddNumberToObject(root, "v", HY_SCHEMA_VERSION)) {
+    if (!root || !arr || !cJSON_AddNumberToObject(root, "v", HY_SCHEMA_VERSION) ||
+        !cJSON_AddNumberToObject(root, "next_id", (double)next_id)) {
         cJSON_Delete(root);
         cJSON_Delete(arr);
         return NULL;
@@ -396,13 +411,22 @@ hy_err_t hy_codec_med_from_obj(const cJSON *o, hy_med_t *m)
 
 hy_err_t hy_meds_from_json(const char *json, hy_med_t *out, size_t max, size_t *n)
 {
+    return hy_meds_from_json_next(json, out, max, n, NULL);
+}
+
+hy_err_t hy_meds_from_json_next(const char *json, hy_med_t *out, size_t max, size_t *n, uint32_t *next_id)
+{
     if (!json || !n || (max > 0 && !out)) return HY_E_INVALID;
     cJSON *root = cJSON_ParseWithOpts(json, NULL, true);
     if (!root) return HY_E_INVALID;
     hy_err_t r = HY_E_INVALID;
     cJSON *v = cJSON_GetObjectItemCaseSensitive(root, "v");
     cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "meds");
-    if (cJSON_IsObject(root) && cJSON_IsNumber(v) && v->valuedouble == HY_SCHEMA_VERSION &&
+    cJSON *nx = cJSON_GetObjectItemCaseSensitive(root, "next_id");
+    bool nx_ok = !next_id || !nx || cJSON_IsNull(nx) ||
+                 (cJSON_IsNumber(nx) && nx->valuedouble >= 0 && nx->valuedouble <= 4294967295.0 &&
+                  nx->valuedouble == (double)(uint32_t)nx->valuedouble);
+    if (nx_ok && cJSON_IsObject(root) && cJSON_IsNumber(v) && v->valuedouble == HY_SCHEMA_VERSION &&
         cJSON_IsArray(arr)) {
         size_t count = (size_t)cJSON_GetArraySize(arr);
         if (count > max) {
@@ -416,7 +440,12 @@ hy_err_t hy_meds_from_json(const char *json, hy_med_t *out, size_t max, size_t *
                 if (r != HY_OK) break;
                 i++;
             }
-            if (r == HY_OK) *n = count;
+            if (r == HY_OK) {
+                *n = count;
+                if (next_id) {
+                    *next_id = (nx && cJSON_IsNumber(nx)) ? (uint32_t)nx->valuedouble : default_next_id(out, count);
+                }
+            }
         }
     }
     cJSON_Delete(root);

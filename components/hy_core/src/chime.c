@@ -17,6 +17,13 @@ static size_t ms_to_samples(uint32_t ms, uint32_t rate)
     return (size_t)(((uint64_t)ms * rate + 500) / 1000);
 }
 
+bool hy_quiet_now(uint16_t from, uint16_t to, uint16_t local_min)
+{
+    if (from == to) return false;
+    if (from < to) return local_min >= from && local_min < to;
+    return local_min >= from || local_min < to;
+}
+
 size_t hy_chime_len(uint32_t rate)
 {
     return ms_to_samples(LEAD_MS, rate) + 3 * ms_to_samples(TONE_MS, rate) +

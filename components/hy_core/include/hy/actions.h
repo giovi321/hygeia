@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "hy/api.h"
 #include "hy/gap.h"
 #include "hy/occ.h"
 #include "hy/types.h"
@@ -22,6 +23,13 @@ typedef struct {
     hy_err_t (*append_gap)(void *ctx, const hy_gap_t *g, uint8_t reason);
     size_t   (*query_gaps)(void *ctx, int64_t from, int64_t to, hy_gap_t *out, uint8_t *reasons,
                            size_t max);
+    /* Optional (NULL keeps the plain behaviour). save_meds_next also stores the id the next new medicine
+     * takes; load_next_id returns the value stored with the medicines last loaded or saved (0 when unknown).
+     * purge_med removes every log entry of the medicine, rewriting each month file at most once, and returns
+     * the number removed. */
+    hy_err_t (*save_meds_next)(void *ctx, const hy_med_t *meds, size_t n, uint32_t next_id);
+    uint32_t (*load_next_id)(void *ctx);
+    size_t   (*purge_med)(void *ctx, uint32_t med_id);
 } hy_store_port_t;
 
 typedef struct {
@@ -73,6 +81,22 @@ hy_err_t hy_act_pills_set(uint32_t med_id, int16_t left);
  * or the save fails; medicines whose logs were all deleted are still removed in that case only if the
  * save works. Publishes HY_EV_MEDS_CHANGED. */
 hy_err_t hy_act_med_purge(const uint32_t *ids, size_t n_ids, size_t *n_removed, size_t *n_logs);
+/*
+ * One save, one HY_EV_MEDS_CHANGED: active medicines get order 0..n-1 in ids order, archived ones follow
+ * in their previous order. ids must hold every active medicine exactly once and nothing else, else
+ * HY_E_INVALID (nothing changes). HY_E_IO when the save fails (state unchanged).
+ */
+hy_err_t hy_act_med_reorder(const uint32_t *ids, size_t n);
+/*
+ * Archived medicines only (HY_E_INVALID for an active one, HY_E_NOT_FOUND for an unknown id). Removes its
+ * log entries (the port's purge_med when present, entry by entry otherwise), then the record, and saves.
+ * The id is never reused: the next new medicine takes the stored next id, which only grows. *n_deleted
+ * (may be NULL) gets the number of log entries removed. Publishes HY_EV_MEDS_CHANGED and HY_EV_LOG_EDITED.
+ * HY_E_IO when a log delete or the save fails.
+ */
+hy_err_t hy_act_med_delete(uint32_t id, size_t *n_deleted);
+/* Number of log entries of the medicine, for the confirmation. Read-only. */
+size_t   hy_act_med_log_count(uint32_t id);
 /* Unarchiving re-validates (code uniqueness) and gives HY_E_FULL when HY_MAX_MEDS medicines
  * are active. Same save and event rules as upsert. */
 hy_err_t hy_act_med_archive(uint32_t id, bool archived);
@@ -155,6 +179,15 @@ size_t hy_snoozes(const hy_snooze_t **out);
 
 /* Sets edited = true, update_log, publishes HY_EV_LOG_EDITED. No clock needed. */
 hy_err_t hy_act_log_edit(const hy_log_t *e);
+/*
+ * Web log edit. Finds the entry by id among the entries stored at req->orig_ts (HY_E_INVALID when orig_ts is 0,
+ * HY_E_NOT_FOUND when absent), applies the has_* fields (ts must not be later than now + 60 s while the clock
+ * is valid; note at most 63 bytes; an unknown medicine is HY_E_NOT_FOUND; HY_E_INVALID otherwise). When ts or
+ * the medicine changed, a fixed medicine with status taken or skipped gets its slot and delta_min recomputed
+ * with the look-back of hy_act_log_taken (the entry itself excluded); an as-needed medicine keeps slot 0.
+ * Then as hy_act_log_edit: edited set, update_log (moves months when ts moved), HY_EV_LOG_EDITED.
+ */
+hy_err_t hy_act_log_update(uint32_t id, const hy_api_logreq_t *req);
 /* delete_log, then publishes HY_EV_LOG_EDITED (there is no delete event). No clock needed. */
 hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts);
 

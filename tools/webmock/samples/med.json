@@ -1,0 +1,1 @@
+{"id":1,"code":"A","name":"Antibiotic","dose":"1 tab","color":1,"schedule":{"type":"fixed","times":["08:00","20:00"],"weekdays":127,"min_interval_min":0},"early_window_min":60,"late_after_min":30,"missed_after_min":120,"pill_count":{"enabled":false,"remaining":0,"alert":0},"archived":false,"order":0,"etag":"d860ccbe"}

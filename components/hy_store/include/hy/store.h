@@ -45,7 +45,7 @@ size_t   hy_store_skipped_lines(void);        /* corrupt lines skipped since ope
 /* Device only: mounts the LittleFS partition "storage" at "/data"; formats it only if the mount fails. */
 esp_err_t hy_store_mount(void);
 
-/* Settings in NVS namespace "settings" (keys sound, dnd, vol, bright, snooze). Needs nvs_flash_init first.
+/* Settings in NVS namespace "settings" (keys sound, dnd, vol, bright, snooze, dim_s, off_bat_s, off_usb_s, rot_lock, rot, q_from, q_to, wifi_batt). Needs nvs_flash_init first.
  * load: missing keys give defaults, then clamps, and refreshes the RAM copy. save: writes the given values as is. */
 esp_err_t hy_settings_load(hy_settings_t *s);
 esp_err_t hy_settings_save(const hy_settings_t *s);

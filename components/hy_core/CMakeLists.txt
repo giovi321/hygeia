@@ -28,6 +28,7 @@ idf_component_register(
         "src/api.c"
         "src/api_med.c"
         "src/api_log.c"
+        "src/api_set.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

@@ -4,6 +4,8 @@
 #include "unity.h"
 #include "hy/api.h"
 #include "hy/codec.h"
+#include "hy/events.h"
+#include "hy/settings.h"
 #include "hy/med.h"
 #include "hy/routes.h"
 
@@ -674,6 +676,303 @@ static void test_time_auto_small_diff(void)
     TEST_ASSERT_TRUE(hy_api_time_should_set(&t, t.utc_ms + 1, true));
 }
 
+/* ---- settings ---- */
+
+static hy_settings_t full_settings(void)
+{
+    hy_settings_t s;
+    hy_settings_defaults(&s);
+    s.sound = false; s.dnd = true; s.volume = 35; s.brightness = 80; s.snooze_min = 20;
+    s.dim_s = 45; s.off_bat_s = 300; s.off_usb_s = 900; s.rot_lock = true; s.rot = 2;
+    s.quiet_from = 22 * 60; s.quiet_to = 7 * 60 + 30; s.wifi_keep_batt = true;
+    return s;
+}
+
+static void test_settings_roundtrip(void)
+{
+    hy_settings_t s = full_settings(), cur, out;
+    hy_settings_defaults(&cur);
+    char *js = hy_api_settings_json(&s);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"quiet\":{\"from\":\"22:00\",\"to\":\"07:30\"}"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"rot_lock\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"wifi_keep_batt\":true"));
+    hy_api_err_t err;
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json(js, &cur, &out, &err));
+    TEST_ASSERT_EQUAL(s.sound, out.sound);
+    TEST_ASSERT_EQUAL(s.dnd, out.dnd);
+    TEST_ASSERT_EQUAL_UINT8(s.volume, out.volume);
+    TEST_ASSERT_EQUAL_UINT8(s.brightness, out.brightness);
+    TEST_ASSERT_EQUAL_UINT16(s.snooze_min, out.snooze_min);
+    TEST_ASSERT_EQUAL_UINT16(s.dim_s, out.dim_s);
+    TEST_ASSERT_EQUAL_UINT16(s.off_bat_s, out.off_bat_s);
+    TEST_ASSERT_EQUAL_UINT32(s.off_usb_s, out.off_usb_s);
+    TEST_ASSERT_EQUAL(s.rot_lock, out.rot_lock);
+    TEST_ASSERT_EQUAL_UINT16(s.quiet_from, out.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(s.quiet_to, out.quiet_to);
+    TEST_ASSERT_EQUAL(s.wifi_keep_batt, out.wifi_keep_batt);
+    /* the applied rotation is read-only: the body's "rot" never reaches the settings */
+    TEST_ASSERT_EQUAL_UINT8(cur.rot, out.rot);
+    free(js);
+}
+
+static void test_settings_merge_partial(void)
+{
+    hy_settings_t cur = full_settings(), out;
+    hy_api_err_t err;
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"volume\":30}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_UINT8(30, out.volume);
+    cur.volume = 30;
+    TEST_ASSERT_EQUAL_MEMORY(&cur, &out, sizeof cur);
+    /* null counts as absent */
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"volume\":null,\"dnd\":null}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_MEMORY(&cur, &out, sizeof cur);
+    /* unknown members are ignored */
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"nope\":1,\"rot\":3}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_MEMORY(&cur, &out, sizeof cur);
+}
+
+static void test_settings_quiet_null(void)
+{
+    hy_settings_t cur = full_settings(), out;
+    hy_api_err_t err;
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"quiet\":null}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_UINT16(0, out.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(0, out.quiet_to);
+    TEST_ASSERT_EQUAL_UINT8(cur.volume, out.volume);
+    char *js = hy_api_settings_json(&out);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"quiet\":null"));
+    free(js);
+    /* from == to is also no quiet hours and reads back as null */
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"quiet\":{\"from\":\"10:00\",\"to\":\"10:00\"}}", &cur, &out, &err));
+    js = hy_api_settings_json(&out);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"quiet\":null"));
+    free(js);
+    /* set */
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"quiet\":{\"from\":\"23:59\",\"to\":\"00:00\"}}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_UINT16(1439, out.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(0, out.quiet_to);
+}
+
+static void test_settings_bad_type(void)
+{
+    hy_settings_t cur = full_settings(), out, keep;
+    hy_api_err_t err;
+    keep = out = cur;
+    out.volume = 1;
+    keep = out;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json("{\"volume\":\"x\"}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("volume", err.field);
+    TEST_ASSERT_EQUAL_INT(400, err.http);
+    TEST_ASSERT_EQUAL_MEMORY(&keep, &out, sizeof out);   /* untouched on failure */
+    const char *bad[][2] = {
+        { "{\"sound\":1}", "sound" }, { "{\"dnd\":\"yes\"}", "dnd" }, { "{\"brightness\":1.5}", "brightness" },
+        { "{\"snooze_min\":-1}", "snooze_min" }, { "{\"dim_s\":[]}", "dim_s" }, { "{\"off_bat_s\":{}}", "off_bat_s" },
+        { "{\"off_usb_s\":true}", "off_usb_s" }, { "{\"rot_lock\":0}", "rot_lock" },
+        { "{\"wifi_keep_batt\":\"no\"}", "wifi_keep_batt" }, { "{\"quiet\":5}", "quiet" },
+        { "{\"quiet\":{\"from\":\"22:00\"}}", "quiet" }, { "{\"quiet\":{\"from\":\"24:00\",\"to\":\"01:00\"}}", "quiet" },
+        { "{\"quiet\":{\"from\":\"7:00\",\"to\":\"01:00\"}}", "quiet" }, { "{\"quiet\":{\"from\":1,\"to\":2}}", "quiet" },
+        { "{\"volume\":1,\"volume\":2}", "volume" },
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(HY_E_INVALID, hy_api_settings_from_json(bad[i][0], &cur, &out, &err), bad[i][0]);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(bad[i][1], err.field, bad[i][0]);
+    }
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json("[]", &cur, &out, &err));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json("nope", &cur, &out, &err));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json(NULL, &cur, &out, &err));
+}
+
+static void test_settings_clamped(void)
+{
+    hy_settings_t cur, out;
+    hy_settings_defaults(&cur);
+    hy_api_err_t err;
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"brightness\":3}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_UINT8(10, out.brightness);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"volume\":900,\"snooze_min\":99999,\"dim_s\":5}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_UINT8(100, out.volume);
+    TEST_ASSERT_EQUAL_UINT16(120, out.snooze_min);
+    TEST_ASSERT_EQUAL_UINT16(10, out.dim_s);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"off_usb_s\":5000000000}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_UINT32(86400, out.off_usb_s);
+}
+
+/* ---- state and events ---- */
+
+static void test_state_json_nulls(void)
+{
+    hy_api_state_t st;
+    memset(&st, 0, sizeof st);
+    st.batt_pct = -1;
+    strcpy(st.zone, "UTC");
+    char *js = hy_api_state_json(&st);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"api\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"utc_ms\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"clock_valid\":false"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"at\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"pct\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"tiles\":[]"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"due\":[]"));
+    free(js);
+
+    hy_api_tile_t tl[2];
+    memset(tl, 0, sizeof tl);
+    tl[0].id = 1; strcpy(tl[0].code, "A"); strcpy(tl[0].name, "Antibiotic"); tl[0].color = 2;
+    tl[0].kind = 2; tl[0].ring = 640; tl[0].last_taken = 1793181600LL; tl[0].next_due = 0; tl[0].pills = false;
+    tl[1].id = 2; strcpy(tl[1].code, "V"); strcpy(tl[1].name, "Vitamin D"); tl[1].kind = 3; tl[1].ring = 1000;
+    tl[1].next_due = 1793185200LL; tl[1].pills = true; tl[1].pills_left = 12;
+    hy_api_due_t du = { 2, 1793185200LL, HY_OCC_DUE, 0 };
+    st.utc_ms = 1793181600123LL; st.clock_valid = true; st.batt_pct = 80; st.usb = true;
+    strcpy(st.sync_src, "browser"); st.sync_at = 1793181000LL;
+    strcpy(st.estimate, "2 d");
+    st.net_mode = 1; st.net_state = 3; strcpy(st.ssid, "HomeNet"); st.rssi = -58; strcpy(st.ip, "192.168.1.23");
+    strcpy(st.host, "hygeia.local");
+    st.tiles = tl; st.n_tiles = 2; st.due = &du; st.n_due = 1;
+    js = hy_api_state_json(&st);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"utc_ms\":1793181600123"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"src\":\"browser\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"pct\":80"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"mode\":\"client\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"state\":\"connected\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"ssid\":\"HomeNet\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"kind\":\"since\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"kind\":\"due\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"next_due\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"last_taken\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"pills_left\":12"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"pills_left\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"state\":\"due\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"snoozed_until\":null"));
+    free(js);
+    TEST_ASSERT_NULL(hy_api_state_json(NULL));
+    st.tiles = NULL;   /* a count without an array is refused */
+    TEST_ASSERT_NULL(hy_api_state_json(&st));
+}
+
+static void test_event_json_names(void)
+{
+    static const char *const names[] = { "taken", "skipped", "missed", "due", "snoozed", "undone", "log_edited",
+                                         "meds_changed", "untracked", "battery_low", "battery_critical",
+                                         "clock_invalid" };
+    TEST_ASSERT_EQUAL(HY_EV_CLOCK_INVALID + 1, sizeof names / sizeof names[0]);
+    for (int t = HY_EV_TAKEN; t <= HY_EV_CLOCK_INVALID; t++) {
+        hy_event_t ev = { (hy_ev_type_t)t, 1793181600LL, 2, 42, 1793181000LL, -7 };
+        char buf[160], want[64];
+        int n = hy_api_event_json(&ev, buf, sizeof buf);
+        TEST_ASSERT_EQUAL((int)strlen(buf), n);
+        snprintf(want, sizeof want, "\"ev\":\"%s\"", names[t]);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, want), buf);
+        TEST_ASSERT_NOT_NULL(strstr(buf, "\"ts\":1793181600"));
+        TEST_ASSERT_NOT_NULL(strstr(buf, "\"med_id\":2"));
+        TEST_ASSERT_NOT_NULL(strstr(buf, "\"log_id\":42"));
+        TEST_ASSERT_NOT_NULL(strstr(buf, "\"slot\":1793181000"));
+        TEST_ASSERT_NOT_NULL(strstr(buf, "\"value\":-7"));
+    }
+    hy_event_t bad = { (hy_ev_type_t)99, 0, 0, 0, 0, 0 };
+    char buf[160];
+    TEST_ASSERT_EQUAL(-1, hy_api_event_json(&bad, buf, sizeof buf));
+    hy_event_t ok = { HY_EV_TAKEN, 1, 2, 3, 4, 5 };
+    TEST_ASSERT_EQUAL(-1, hy_api_event_json(&ok, buf, 10));
+    TEST_ASSERT_EQUAL(-1, hy_api_event_json(NULL, buf, sizeof buf));
+}
+
+/* ---- sample files for the web mock ---- */
+
+static void write_sample(const char *dir, const char *name, const char *text)
+{
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *f = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL_MESSAGE(f, path);
+    fputs(text, f);
+    fputc('\n', f);
+    fclose(f);
+}
+
+static void test_api_samples(void)
+{
+    const char *dir = getenv("HY_SAMPLES_DIR");
+    if (!dir || !*dir) TEST_IGNORE_MESSAGE("HY_SAMPLES_DIR not set");
+
+    hy_med_t m[3] = { mk(1, "A", "Antibiotic"), mk(2, "V", "Vitamin D"), mk(3, "M", "Magnesium") };
+    strcpy(m[0].dose, "1 tab"); m[0].color = 1; m[0].type = HY_SCHED_FIXED;
+    m[0].times[0] = 8 * 60; m[0].times[1] = 20 * 60; m[0].n_times = 2; m[0].weekdays = 127; m[0].order = 0;
+    strcpy(m[1].dose, "2 drops"); m[1].color = 4; m[1].type = HY_SCHED_FIXED;
+    m[1].times[0] = 9 * 60; m[1].n_times = 1; m[1].weekdays = 127; m[1].order = 1;
+    m[1].pills_enabled = true; m[1].pills_left = 12; m[1].pills_alert = 3;
+    strcpy(m[2].dose, "1 cap"); m[2].color = 6; m[2].type = HY_SCHED_AS_NEEDED; m[2].min_interval_min = 240;
+    m[2].order = 2;
+
+    char *js = hy_api_meds_json(m, 3);
+    TEST_ASSERT_NOT_NULL(js);
+    write_sample(dir, "meds.json", js);
+    free(js);
+    js = hy_api_med_json(&m[0]);
+    TEST_ASSERT_NOT_NULL(js);
+    write_sample(dir, "med.json", js);
+    free(js);
+
+    hy_log_t e[3];
+    memset(e, 0, sizeof e);
+    for (int i = 0; i < 3; i++) {
+        e[i].id = (uint32_t)(i + 1);
+        strcpy(e[i].tz, "CET-1CEST,M3.5.0,M10.5.0/3");
+        e[i].status = HY_TAKEN;
+        e[i].source = i == 1 ? HY_SRC_WEB : HY_SRC_SCREEN;
+    }
+    e[0].ts = 1793170800LL; e[0].med_id = 1; e[0].slot = 1793170800LL; e[0].delta_min = 0;     /* 08:00 */
+    e[1].ts = 1793174700LL; e[1].med_id = 2; e[1].slot = 1793174400LL; e[1].delta_min = 5;     /* 09:05 */
+    e[2].ts = 1793181600LL; e[2].med_id = 3; strcpy(e[2].note, "after lunch");
+    char lines[3][512], big[2048];
+    size_t off = (size_t)snprintf(big, sizeof big, "{\"log\":[");
+    for (int i = 0; i < 3; i++) {
+        TEST_ASSERT_TRUE(hy_api_log_json(&e[i], lines[i], sizeof lines[i]) > 0);
+        off += (size_t)snprintf(big + off, sizeof big - off, "%s%s", i ? "," : "", lines[i]);
+    }
+    snprintf(big + off, sizeof big - off, "],\"next\":null}");
+    write_sample(dir, "log.json", big);
+
+    hy_api_tile_t tl[3];
+    memset(tl, 0, sizeof tl);
+    tl[0].id = 1; strcpy(tl[0].code, "A"); strcpy(tl[0].name, "Antibiotic"); tl[0].color = 1;
+    tl[0].kind = 2 /* since */; tl[0].ring = 420; tl[0].last_taken = 1793170800LL; tl[0].next_due = 1793214000LL;
+    tl[1].id = 2; strcpy(tl[1].code, "V"); strcpy(tl[1].name, "Vitamin D"); tl[1].color = 4;
+    tl[1].kind = 3 /* due */; tl[1].ring = 1000; tl[1].last_taken = 1793088300LL; tl[1].next_due = 1793174400LL;
+    tl[1].pills = true; tl[1].pills_left = 12;
+    tl[2].id = 3; strcpy(tl[2].code, "M"); strcpy(tl[2].name, "Magnesium"); tl[2].color = 6;
+    tl[2].kind = 0 /* as_needed */; tl[2].ring = 1000; tl[2].last_taken = 1793181600LL;
+    hy_api_due_t du = { 2, 1793174400LL, HY_OCC_DUE, 0 };
+    hy_api_state_t st;
+    memset(&st, 0, sizeof st);
+    st.utc_ms = 1793181600123LL; st.clock_valid = true; strcpy(st.zone, "Europe/Zurich");
+    strcpy(st.sync_src, "browser"); st.sync_at = 1793181300LL;
+    st.batt_pct = 76; st.usb = false; st.charging = false; strcpy(st.estimate, "3 d");
+    st.net_mode = 1; st.net_state = 3; strcpy(st.ssid, "HomeNet"); st.rssi = -58;
+    strcpy(st.ip, "192.168.1.23"); strcpy(st.host, "hygeia.local");
+    st.tiles = tl; st.n_tiles = 3; st.due = &du; st.n_due = 1;
+    js = hy_api_state_json(&st);
+    TEST_ASSERT_NOT_NULL(js);
+    write_sample(dir, "state.json", js);
+    free(js);
+
+    hy_settings_t s;
+    hy_settings_defaults(&s);
+    s.quiet_from = 22 * 60; s.quiet_to = 7 * 60;
+    js = hy_api_settings_json(&s);
+    TEST_ASSERT_NOT_NULL(js);
+    write_sample(dir, "settings.json", js);
+    free(js);
+
+    hy_api_err_t err;
+    hy_api_err_from(HY_E_NAME, &err);
+    char eb[256];
+    TEST_ASSERT_TRUE(hy_api_err_json(&err, "The name is too long.", eb, sizeof eb) > 0);
+    write_sample(dir, "error.json", eb);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -702,5 +1001,13 @@ int main(void)
     RUN_TEST(test_time_unknown_zone);
     RUN_TEST(test_time_auto_drops_zone);
     RUN_TEST(test_time_auto_small_diff);
+    RUN_TEST(test_settings_roundtrip);
+    RUN_TEST(test_settings_merge_partial);
+    RUN_TEST(test_settings_quiet_null);
+    RUN_TEST(test_settings_bad_type);
+    RUN_TEST(test_settings_clamped);
+    RUN_TEST(test_state_json_nulls);
+    RUN_TEST(test_event_json_names);
+    RUN_TEST(test_api_samples);
     return UNITY_END();
 }

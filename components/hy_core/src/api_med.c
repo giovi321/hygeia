@@ -99,17 +99,6 @@ static hy_err_t check_string(const cJSON *it, size_t size, hy_err_t too_long, hy
     return HY_OK;
 }
 
-/* HY_E_INVALID with the member name when an object holds the same member name twice. */
-static hy_err_t reject_duplicates(const cJSON *obj, hy_api_err_t *err)
-{
-    for (const cJSON *a = obj->child; a; a = a->next) {
-        if (!a->string) continue;
-        for (const cJSON *b = a->next; b; b = b->next)
-            if (b->string && strcmp(a->string, b->string) == 0) return hy_api_fail(err, HY_E_INVALID, a->string);
-    }
-    return HY_OK;
-}
-
 /* Puts a copy of item into obj under its name, replacing a member of that name. */
 static bool put_copy(cJSON *obj, const cJSON *item)
 {
@@ -158,11 +147,11 @@ hy_err_t hy_api_med_from_json(const char *body, const hy_med_t *base, hy_med_t *
         b.code[0] = '\0';
         b.name[0] = '\0';
     }
-    hy_err_t r = reject_duplicates(in, err);
+    hy_err_t r = hy_api_reject_dups(in, err);
     for (const cJSON *it = in->child; r == HY_OK && it; it = it->next) {
         if (it->string && (strcmp(it->string, "schedule") == 0 || strcmp(it->string, "pill_count") == 0) &&
             cJSON_IsObject(it))
-            r = reject_duplicates(it, err);
+            r = hy_api_reject_dups(it, err);
     }
 
     cJSON *obj = NULL;

@@ -25,6 +25,7 @@ static uint64_t s_next_id = 1;   /* 64 bit: max id 0xFFFFFFFF must not wrap */
 static size_t s_skipped;
 static char s_line[LINE_MAX_];      /* single-threaded by contract */
 static char s_wbuf[LINE_MAX_];
+static uint32_t s_next_med_id;      /* "next_id" of meds.json as last loaded or saved, 0 = unknown */
 static size_t s_gap_lines;          /* non-blank lines in gaps.jsonl, corrupt ones included */
 static size_t count_lines(const char *path);
 
@@ -380,6 +381,7 @@ static hy_err_t st_load_meds(void *ctx, hy_med_t *out, size_t max, size_t *n)
     if (!s_open || !n) return HY_E_IO;
     char p[PATH_MAX_];
     if (!make_path(p, "meds.json")) return HY_E_IO;
+    s_next_med_id = 0;
     FILE *f = fopen(p, "rb");
     if (!f) {
         if (errno == ENOENT) {
@@ -396,8 +398,10 @@ static hy_err_t st_load_meds(void *ctx, hy_med_t *out, size_t max, size_t *n)
             buf = malloc((size_t)sz + 1);
             if (buf && fread(buf, 1, (size_t)sz, f) == (size_t)sz) {
                 buf[sz] = '\0';
-                hy_err_t d = hy_meds_from_json(buf, out, max, n);
+                uint32_t nx = 0;
+                hy_err_t d = hy_meds_from_json_next(buf, out, max, n, &nx);
                 r = (d == HY_OK || d == HY_E_FULL) ? d : HY_E_IO;
+                if (d == HY_OK) s_next_med_id = nx;
             }
         }
     }
@@ -406,14 +410,13 @@ static hy_err_t st_load_meds(void *ctx, hy_med_t *out, size_t max, size_t *n)
     return r;
 }
 
-static hy_err_t st_save_meds(void *ctx, const hy_med_t *meds, size_t n)
+static hy_err_t save_meds_file(const hy_med_t *meds, size_t n, bool with_next, uint32_t next_id)
 {
-    (void)ctx;
     if (!s_open) return HY_E_IO;
     char p[PATH_MAX_], tmp[PATH_MAX_ + 8];
     if (!make_path(p, "meds.json")) return HY_E_IO;
     snprintf(tmp, sizeof tmp, "%s.tmp", p);
-    char *js = hy_meds_to_json(meds, n);
+    char *js = with_next ? hy_meds_to_json_next(meds, n, next_id) : hy_meds_to_json(meds, n);
     if (!js) return HY_E_IO;
     FILE *f = fopen(tmp, "wb");
     if (!f) {
@@ -429,7 +432,26 @@ static hy_err_t st_save_meds(void *ctx, const hy_med_t *meds, size_t n)
         unlink(tmp);
         return HY_E_IO;
     }
+    s_next_med_id = with_next ? next_id : 0;
     return HY_OK;
+}
+
+static hy_err_t st_save_meds(void *ctx, const hy_med_t *meds, size_t n)
+{
+    (void)ctx;
+    return save_meds_file(meds, n, false, 0);
+}
+
+static hy_err_t st_save_meds_next(void *ctx, const hy_med_t *meds, size_t n, uint32_t next_id)
+{
+    (void)ctx;
+    return save_meds_file(meds, n, true, next_id);
+}
+
+static uint32_t st_load_next_id(void *ctx)
+{
+    (void)ctx;
+    return s_next_med_id;
 }
 
 /* ---- log ---- */
@@ -504,6 +526,57 @@ static hy_err_t st_delete_log(void *ctx, uint32_t id, int64_t ts)
     month_name(idx, rel, sizeof rel);
     if (!make_path(p, rel)) return HY_E_IO;
     return rewrite_month(p, id, RW_DELETE, NULL);
+}
+
+typedef struct {
+    FILE *tmp;
+    uint32_t med_id;
+    size_t removed;
+    bool io_err;
+} purge_ctx;
+
+static bool purge_cb(const hy_log_t *e, const char *raw, void *arg)
+{
+    purge_ctx *c = arg;
+    if (e->med_id == c->med_id) {
+        c->removed++;
+        return true;
+    }
+    if (fputs(raw, c->tmp) < 0 || fputc('\n', c->tmp) == EOF) {
+        c->io_err = true;
+        return false;
+    }
+    return true;
+}
+
+/* Removes every entry of one medicine, rewriting each month file that holds one exactly once. A month that
+ * fails to rewrite is left as it was; the count covers the months that did. */
+static size_t st_purge_med(void *ctx, uint32_t med_id)
+{
+    (void)ctx;
+    if (!s_open) return 0;
+    size_t total = 0;
+    for (size_t k = 0; k < s_n_months; k++) {
+        char rel[32], p[PATH_MAX_], tmp[PATH_MAX_ + 8];
+        month_name(s_months[k], rel, sizeof rel);
+        if (!make_path(p, rel) || snprintf(tmp, sizeof tmp, "%s.tmp", p) >= (int)sizeof tmp) continue;
+        purge_ctx c = { fopen(tmp, "wb"), med_id, 0, false };
+        if (!c.tmp) continue;
+        size_t skipped_before = s_skipped;
+        bool opened = scan_file(p, purge_cb, &c);
+        if (!opened || c.io_err || c.removed == 0) {
+            fclose(c.tmp);
+            unlink(tmp);
+            s_skipped = skipped_before;
+            continue;
+        }
+        if (!sync_close(c.tmp) || rename(tmp, p) != 0) {
+            unlink(tmp);
+            continue;
+        }
+        total += c.removed;
+    }
+    return total;
 }
 
 typedef struct {
@@ -723,6 +796,9 @@ static const hy_store_port_t PORT = {
     .query_log = st_query_log,
     .append_gap = st_append_gap,
     .query_gaps = st_query_gaps,
+    .save_meds_next = st_save_meds_next,
+    .load_next_id = st_load_next_id,
+    .purge_med = st_purge_med,
 };
 
 const hy_store_port_t *hy_store_port(void) { return &PORT; }

@@ -27,6 +27,30 @@ static void test_settings_defaults_and_clamp(void)
     TEST_ASSERT_EQUAL_UINT8(100, s.brightness);
 }
 
+static void test_quiet_defaults_clamp(void)
+{
+    hy_settings_t s;
+    hy_settings_defaults(&s);
+    TEST_ASSERT_EQUAL_UINT16(0, s.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(0, s.quiet_to);
+    s.quiet_from = 1440;
+    s.quiet_to = 1439;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT16(0, s.quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(1439, s.quiet_to);
+    s.quiet_to = 60000;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT16(0, s.quiet_to);
+}
+
+static void test_wifi_keep_default_false(void)
+{
+    hy_settings_t s;
+    s.wifi_keep_batt = true;
+    hy_settings_defaults(&s);
+    TEST_ASSERT_FALSE(s.wifi_keep_batt);
+}
+
 static void test_power_defaults(void)
 {
     hy_settings_t s;
@@ -98,6 +122,8 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_settings_defaults_and_clamp);
+    RUN_TEST(test_quiet_defaults_clamp);
+    RUN_TEST(test_wifi_keep_default_false);
     RUN_TEST(test_power_defaults);
     RUN_TEST(test_power_clamp);
     RUN_TEST(test_settings_rot_defaults);

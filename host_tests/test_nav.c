@@ -350,6 +350,46 @@ static void test_poweroff_rule(void)
     TEST_ASSERT_FALSE(n.poweroff);
 }
 
+static void test_pairing_blocks_gestures(void)
+{
+    for (int mode = 0; mode < 2; mode++) {          /* plain, due */
+        for (int g = HY_G_NONE; g <= HY_G_EDGE_RIGHT; g++) {
+            hy_nav_t n; hy_nav_init(&n);
+            hy_nav_push(&n, HY_V_SETTINGS);
+            n.pairing = true; n.due = (mode == 1);
+            TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, (hy_gesture_t)g));
+            TEST_ASSERT_EQUAL(2, n.depth);
+            TEST_ASSERT_EQUAL(HY_V_SETTINGS, hy_nav_view(&n));
+            TEST_ASSERT_EQUAL(mode == 1, n.due);
+            TEST_ASSERT_TRUE(n.pairing);
+        }
+    }
+    /* idle: the stroke only wakes, as for the power-off overlay */
+    hy_nav_t n; hy_nav_init(&n);
+    n.pairing = true; n.idle = true;
+    TEST_ASSERT_EQUAL(HY_FX_WAKE, hy_nav_gesture(&n, HY_G_TAP));
+    TEST_ASSERT_FALSE(n.idle);
+    TEST_ASSERT_EQUAL(HY_FX_NONE, hy_nav_gesture(&n, HY_G_TAP));
+    /* cleared: normal */
+    hy_nav_init(&n);
+    TEST_ASSERT_FALSE(n.pairing);
+    hy_nav_gesture(&n, HY_G_EDGE_DOWN);
+    TEST_ASSERT_EQUAL(HY_V_QS, hy_nav_view(&n));
+}
+
+static void test_new_views_default_rules(void)
+{
+    hy_view_t vs[3] = { HY_V_SET_WIFI, HY_V_AP_INFO, HY_V_WEB_QR };
+    for (int i = 0; i < 3; i++) {
+        hy_nav_t n; hy_nav_init(&n);
+        hy_nav_push(&n, vs[i]);
+        TEST_ASSERT_EQUAL(vs[i], hy_nav_view(&n));
+        hy_nav_gesture(&n, HY_G_EDGE_RIGHT);
+        TEST_ASSERT_EQUAL(1, n.depth);
+    }
+    TEST_ASSERT_TRUE(HY_V_COUNT > HY_V_WEB_QR);
+}
+
 static void test_due_swipe_down_prev(void)
 {
     hy_nav_t n; hy_nav_init(&n); n.due = true;
@@ -515,6 +555,8 @@ int main(void)
     RUN_TEST(test_classify_exact_boundaries);
     RUN_TEST(test_double_tap_exact_and_wrap);
     RUN_TEST(test_poweroff_rule);
+    RUN_TEST(test_pairing_blocks_gestures);
+    RUN_TEST(test_new_views_default_rules);
     RUN_TEST(test_off_counts_as_idle);
     RUN_TEST(test_due_swipe_down_prev);
     RUN_TEST(test_form_edge_right_back);

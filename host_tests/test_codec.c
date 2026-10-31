@@ -207,6 +207,49 @@ void test_meds_roundtrip(void)
     free(js);
 }
 
+void test_next_id_roundtrip(void)
+{
+    hy_med_t m[3], d[8];
+    size_t n = 0;
+    uint32_t next = 0;
+    make_meds(m);
+    char *js = hy_meds_to_json_next(m, 3, 42);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"next_id\":42"));
+    TEST_ASSERT_EQUAL(HY_OK, hy_meds_from_json_next(js, d, 8, &n, &next));
+    TEST_ASSERT_EQUAL(3, n);
+    TEST_ASSERT_EQUAL_UINT32(42, next);
+    free(js);
+    /* the plain encoder always writes it too, as max id + 1 */
+    uint32_t mx = 0;
+    for (int i = 0; i < 3; i++) if (m[i].id > mx) mx = m[i].id;
+    js = hy_meds_to_json(m, 3);
+    TEST_ASSERT_EQUAL(HY_OK, hy_meds_from_json_next(js, d, 8, &n, &next));
+    TEST_ASSERT_EQUAL_UINT32(mx + 1, next);
+    free(js);
+    /* wrong type */
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_meds_from_json_next("{\"v\":1,\"meds\":[],\"next_id\":\"x\"}", d, 8, &n, &next));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_meds_from_json_next("{\"v\":1,\"meds\":[],\"next_id\":-1}", d, 8, &n, &next));
+}
+
+void test_next_id_absent_default(void)
+{
+    hy_med_t d[4];
+    size_t n = 0;
+    uint32_t next = 0;
+    TEST_ASSERT_EQUAL(HY_OK, hy_meds_from_json_next(
+        "{\"v\":1,\"meds\":[{\"id\":3,\"code\":\"A\",\"name\":\"a\"},{\"id\":7,\"code\":\"B\",\"name\":\"b\"}]}",
+        d, 4, &n, &next));
+    TEST_ASSERT_EQUAL(2, n);
+    TEST_ASSERT_EQUAL_UINT32(8, next);
+    TEST_ASSERT_EQUAL(HY_OK, hy_meds_from_json_next("{\"v\":1,\"meds\":[]}", d, 4, &n, &next));
+    TEST_ASSERT_EQUAL_UINT32(1, next);
+    /* next_id may be NULL */
+    TEST_ASSERT_EQUAL(HY_OK, hy_meds_from_json_next("{\"v\":1,\"meds\":[]}", d, 4, &n, NULL));
+    /* the wrapper ignores it */
+    TEST_ASSERT_EQUAL(HY_OK, hy_meds_from_json("{\"v\":1,\"meds\":[],\"next_id\":9}", d, 4, &n));
+}
+
 void test_meds_defaults_and_unknown_fields(void)
 {
     hy_med_t d[2];
@@ -376,6 +419,8 @@ int main(void)
     RUN_TEST(test_unknown_fields_ignored);
     RUN_TEST(test_log_invalid);
     RUN_TEST(test_meds_roundtrip);
+    RUN_TEST(test_next_id_roundtrip);
+    RUN_TEST(test_next_id_absent_default);
     RUN_TEST(test_meds_defaults_and_unknown_fields);
     RUN_TEST(test_meds_invalid);
     RUN_TEST(test_meds_full);
