@@ -284,6 +284,82 @@ static void test_guard_odd_origins(void)
     TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(NULL));
 }
 
+static void test_gate_gap(void)
+{
+    hy_pair_gate_t g;
+    int64_t w = -1;
+    hy_pair_gate_init(&g);
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 100, &w));
+    TEST_ASSERT_EQUAL_INT64(0, w);
+    hy_pair_gate_started(&g, 100);
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_GAP, hy_pair_gate_check(&g, 105, &w));
+    TEST_ASSERT_EQUAL_INT64(5, w);
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 110, &w));
+}
+
+static void test_gate_cancel_cooldown(void)
+{
+    hy_pair_gate_t g;
+    int64_t w;
+    hy_pair_gate_init(&g);
+    hy_pair_gate_started(&g, 100);
+    hy_pair_gate_ended(&g, 120, true);   /* Cancel on the device */
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_COOLDOWN, hy_pair_gate_check(&g, 150, &w));
+    TEST_ASSERT_EQUAL_INT64(30, w);
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_COOLDOWN, hy_pair_gate_check(&g, 179, &w));
+    TEST_ASSERT_EQUAL_INT64(1, w);
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 180, &w));
+}
+
+static void test_gate_unused_expiry(void)
+{
+    hy_pair_gate_t g;
+    int64_t w;
+    hy_pair_gate_init(&g);
+    hy_pair_gate_started(&g, 100);
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 219, &w));   /* still running: a new start replaces it */
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_COOLDOWN, hy_pair_gate_check(&g, 220, &w));
+    TEST_ASSERT_EQUAL_INT64(60, w);
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_COOLDOWN, hy_pair_gate_check(&g, 250, &w));   /* counted from the expiry */
+    TEST_ASSERT_EQUAL_INT64(30, w);
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 280, &w));
+}
+
+static void test_gate_used_no_cooldown(void)
+{
+    hy_pair_gate_t g;
+    int64_t w;
+    hy_pair_gate_init(&g);
+    hy_pair_gate_started(&g, 100);
+    hy_pair_gate_ended(&g, 130, false);   /* paired */
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 130, &w));
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 400, &w));   /* no late cool-down from the old expiry */
+    hy_pair_gate_ended(&g, 401, true);   /* nothing running: a Cancel does not start a cool-down */
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 402, &w));
+}
+
+static void test_gate_cap(void)
+{
+    hy_pair_gate_t g;
+    int64_t w;
+    hy_pair_gate_init(&g);
+    for (int i = 0; i < HY_PAIR_STARTS_MAX; i++) {
+        int64_t t = 1000 + 20 * i;
+        TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, t, &w));
+        hy_pair_gate_started(&g, t);
+        hy_pair_gate_ended(&g, t + 5, false);
+    }
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_CAP, hy_pair_gate_check(&g, 1060, &w));
+    TEST_ASSERT_EQUAL_INT64(540, w);
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_CAP, hy_pair_gate_check(&g, 1599, &w));
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 1600, &w));
+    hy_pair_gate_started(&g, 1600);   /* the oldest start drops out of the window */
+    hy_pair_gate_ended(&g, 1601, false);
+    TEST_ASSERT_EQUAL(HY_PAIR_WAIT_CAP, hy_pair_gate_check(&g, 1611, &w));
+    TEST_ASSERT_EQUAL_INT64(1020 + 600 - 1611, w);
+    TEST_ASSERT_EQUAL(HY_PAIR_GO, hy_pair_gate_check(&g, 1620, &w));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -305,5 +381,10 @@ int main(void)
     RUN_TEST(test_guard_odd_origins);
     RUN_TEST(test_host_first_label);
     RUN_TEST(test_host_bracket_rejected);
+    RUN_TEST(test_gate_gap);
+    RUN_TEST(test_gate_cancel_cooldown);
+    RUN_TEST(test_gate_unused_expiry);
+    RUN_TEST(test_gate_used_no_cooldown);
+    RUN_TEST(test_gate_cap);
     return UNITY_END();
 }

@@ -51,9 +51,12 @@ $(BUILD)/obj/unity.o: $(UNITY_DIR)/unity.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TP_CFLAGS) -I$(UNITY_DIR) -c -o $@ $<
 
-$(BUILD)/obj/cJSON.o: $(CJSON_DIR)/cJSON.c
+# Same nesting limit as the device (CONFIG_CJSON_NESTING_LIMIT in sdkconfig.defaults).
+CJSON_DEFS := -DCJSON_NESTING_LIMIT=16
+
+$(BUILD)/obj/cJSON.o: $(CJSON_DIR)/cJSON.c $(HERE)/Makefile
 	@mkdir -p $(dir $@)
-	$(CC) $(TP_CFLAGS) -I$(CJSON_DIR) -c -o $@ $<
+	$(CC) $(TP_CFLAGS) $(CJSON_DEFS) -I$(CJSON_DIR) -c -o $@ $<
 
 -include $(PROJ_OBJS:.o=.d)
 

@@ -2,8 +2,10 @@
  *
  * Pairing: a browser asked for a code, the overlay shows it ("482 913") with the seconds left and a Cancel button, on
  * lv_layer_top above everything (as the power-off confirmation). It sets the nav pairing flag (gestures do nothing),
- * wakes the screen and holds it on while it shows. It hides when the server says so (paired, expired, five wrong
- * codes, a failed save) or on Cancel. The code is kept only while the overlay shows and is never logged.
+ * wakes the screen and holds it on while it shows. It never covers a reminder: the server does not start a code while
+ * a due card or the power-off countdown shows, and one that appears while the overlay is up closes it as a Cancel. It
+ * hides when the server says so (paired, five wrong codes, a failed save), when the code expires, or on Cancel. The
+ * code is kept only while the overlay shows and is never logged.
  *
  * The other callbacks of hy_web_ui_t are the web UI's reach into the screen: toasts, the views that show a setting,
  * the power-off path and the clock. They run in the LVGL task. Everything here runs in the LVGL task. */
@@ -54,10 +56,29 @@ static void left_render(void)
     lv_label_set_text_fmt(s_left, HY_S_PAIR_LEFT, (unsigned)left);
 }
 
+static void close_overlay(void);
+
+/* hy_web_ui_t.pair_busy: LVGL task */
+static bool pair_busy(void)
+{
+    return due_visible() || poweroff_countdown_visible();
+}
+
 static void tmr_cb(lv_timer_t *t)
 {
     (void)t;
-    if (s_shown) {
+    if (!s_shown) {
+        return;
+    }
+    if (pair_busy()) {   /* a reminder or the power-off countdown came up: it is not covered */
+        hy_web_pair_cancel();
+        close_overlay();
+        ESP_LOGI(TAG, "pairing closed for a reminder");
+    } else if (seconds_left() == 0) {   /* the server lets the code lapse on its own */
+        close_overlay();
+        toast_show_info(HY_S_PAIR_EXPIRED);
+        ESP_LOGI(TAG, "pairing code expired");
+    } else {
         left_render();
     }
 }
@@ -225,6 +246,7 @@ void pair_register(void)
     lv_timer_pause(s_tmr);
 
     static const hy_web_ui_t web_ui = {.pair_show = pair_show,
+                                       .pair_busy = pair_busy,
                                        .pair_hide = pair_hide,
                                        .toast_ok = toast_show_ok,
                                        .toast_info = toast_show_info,

@@ -24,7 +24,7 @@ IPv6 literals are refused. Change the host name in the web UI under Settings, Wi
 
 No route except pairing and `GET /api/info` answers an unpaired browser: they get `401` and the error `unpaired`. A browser pairs once, with a 6-digit code shown on the device:
 
-1. `POST /api/pair/start` makes the device show a code on its screen. The code is valid for 120 seconds. A second start within 10 seconds answers `429` and keeps the running code
+1. `POST /api/pair/start` makes the device show a code on its screen. The code is valid for 120 seconds. A start answers `429`, error `too_many`, with `Retry-After`, and keeps any running code when it comes within 10 seconds of the previous start, within 60 seconds of a Cancel on the device or of a code that expired unused, or as the fourth start within 10 minutes. While a reminder or the battery power-off countdown is on the screen a start answers `409`, error `busy`, and no code runs
 2. `POST /api/pair` with `{"code":"123456"}` checks the code. A right code sets the cookie `hy_s` (64 hex characters, `HttpOnly`, `SameSite=Strict`) and answers `{"paired":true}`
 3. Five wrong codes stop pairing for 60 seconds (`429`, error `blocked`, with `Retry-After`)
 
@@ -55,7 +55,7 @@ Every error has this shape:
 | 403 | `forbidden` |
 | 404 | `not_found` |
 | 408 | `timeout` |
-| 409 | `busy`, `battery`, `confirm`, `full`, `changed`, `code_dup`, `clock_invalid` (the clock is not set), `too_soon` (a dose within the minimum interval) |
+| 409 | `busy` (also pairing while a reminder shows), `battery`, `confirm`, `full`, `changed`, `code_dup`, `clock_invalid` (the clock is not set), `too_soon` (a dose within the minimum interval) |
 | 412, 428 | `stale`, `precondition_required` (a medicine is written with `If-Match` and the `etag` of the last read) |
 | 410 | `undo_expired` |
 | 413 | `too_large` |

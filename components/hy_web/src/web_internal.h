@@ -98,7 +98,6 @@ void web_net_now(web_net_t *out);
 /* ---- UI side (server.c) ---- */
 
 /* Runs the registered callback in the LVGL task. Text arguments must be static. */
-void web_ui_pair_show(void);
 void web_ui_pair_hide(int reason);
 void web_ui_toast_ok(const char *text);
 void web_ui_toast_info(const char *text);

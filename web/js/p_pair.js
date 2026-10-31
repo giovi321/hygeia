@@ -21,7 +21,7 @@ HY.route("/pair", function (params, view) {
       }, function (e) {
         btn.disabled = false;
         if (!HY.alive(token)) { return; }
-        say(e.status === 429 ? "Too many tries. Wait a minute and ask for a new code" : HY.errText(e), true);
+        say(e.error === "blocked" ? "Too many tries. Wait a minute and ask for a new code" : HY.errText(e), true);
       });
     } }, "Show a code on the device");
     box.appendChild(HY.h("p", null,

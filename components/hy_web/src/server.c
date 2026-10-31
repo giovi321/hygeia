@@ -137,8 +137,8 @@ void web_net_now(web_net_t *out)
     strlcpy(out->host, st.host, sizeof out->host);
 }
 
-/* DNS rebinding defence, on every request before the auth guard: the device's IP literals, <host>, <host>.local and
- * any name whose first label is <host>. */
+/* DNS rebinding defence, on every request before the auth guard: the device's IP, the access point address while the
+ * access point runs, <host>, <host>.local and any name whose first label is <host>. */
 bool web_host_check(httpd_req_t *req, const web_net_t *net, bool api)
 {
     char host[WEB_HDR_HOST];
@@ -151,7 +151,9 @@ bool web_host_check(httpd_req_t *req, const web_net_t *net, bool api)
         if (net->ip[0]) {
             allowed[n++] = net->ip;
         }
-        allowed[n++] = AP_IP;
+        if (net->ap) {
+            allowed[n++] = AP_IP;
+        }
         allowed[n++] = net->host;
         allowed[n++] = local;
         ok = hy_host_allowed(host, allowed, n) || hy_host_first_label_is(host, net->host);
@@ -570,17 +572,6 @@ static bool ui_post(void (*fn)(void *), void *arg)
     return ok;
 }
 
-static void a_pair_show(void *arg)
-{
-    (void)arg;
-    char code[7];
-    int64_t exp;
-    if (s_ui && s_ui->pair_show && web_pair_peek(code, &exp)) {
-        s_ui->pair_show(code, exp);
-    }
-    memset(code, 0, sizeof code);
-}
-
 static void a_pair_hide(void *arg)
 {
     if (s_ui && s_ui->pair_hide) {
@@ -621,7 +612,6 @@ static void a_restart(void *arg)
 const hy_web_ui_t *web_ui(void) { return s_ui; }
 bool web_ui_restart(void) { return ui_post(a_restart, NULL); }
 bool web_ui_power_off(void) { return ui_post(a_power_off, NULL); }
-void web_ui_pair_show(void) { ui_post(a_pair_show, NULL); }
 void web_ui_pair_hide(int reason) { ui_post(a_pair_hide, (void *)(intptr_t)reason); }
 void web_ui_toast_ok(const char *text) { ui_post(a_toast_ok, (void *)text); }
 void web_ui_toast_info(const char *text) { ui_post(a_toast_info, (void *)text); }

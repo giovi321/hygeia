@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "unity.h"
+#include "cJSON.h"
 #include "hy/api.h"
 #include "hy/codec.h"
 #include "hy/events.h"
@@ -996,10 +997,65 @@ static void test_api_samples(void)
     write_sample(dir, "error.json", eb);
 }
 
+/* ---- JSON nesting limit (CJSON_NESTING_LIMIT 16, as on the device) ---- */
+
+/* {"<key>":[[...]]} nested `levels` deep in total (the outer object counts as one level). */
+static char *deep_body(const char *key, int levels)
+{
+    size_t klen = strlen(key);
+    char *b = malloc(klen + 5 + 2 * (size_t)levels + 2);
+    TEST_ASSERT_NOT_NULL(b);
+    size_t k = (size_t)sprintf(b, "{\"%s\":", key);
+    for (int i = 1; i < levels; i++) {
+        b[k++] = '[';
+    }
+    for (int i = 1; i < levels; i++) {
+        b[k++] = ']';
+    }
+    b[k++] = '}';
+    b[k] = '\0';
+    return b;
+}
+
+static void test_json_nesting_limit(void)
+{
+    char *ok = deep_body("x", 16), *deep = deep_body("x", 17), *huge = deep_body("code", 1000);
+    cJSON *o = cJSON_Parse(ok);
+    TEST_ASSERT_NOT_NULL(o);
+    cJSON_Delete(o);
+    TEST_ASSERT_NULL(cJSON_Parse(deep));
+    TEST_ASSERT_NULL(cJSON_Parse(huge));   /* the shape of a hostile POST /api/pair body */
+
+    /* settings ignore unknown members: 16 levels pass, 17 are refused and leave *out untouched */
+    hy_settings_t cur, out;
+    hy_api_err_t err;
+    hy_settings_defaults(&cur);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json(ok, &cur, &out, &err));
+    memset(&out, 0xA5, sizeof out);
+    hy_settings_t before;
+    memcpy(&before, &out, sizeof out);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json(deep, &cur, &out, &err));
+    TEST_ASSERT_EQUAL_MEMORY(&before, &out, sizeof out);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json(huge, &cur, &out, &err));
+
+    hy_med_t m;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json(deep, NULL, &m, &err));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json(huge, NULL, &m, &err));
+    hy_api_logreq_t r;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_logreq_from_json(deep, &r, &err));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_logreq_from_json(huge, &r, &err));
+    hy_api_time_t t;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_time_from_json(deep, 1700000000LL, &t, &err));
+    free(ok);
+    free(deep);
+    free(huge);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_route_ids);
+    RUN_TEST(test_json_nesting_limit);
     RUN_TEST(test_route_table_complete);
     RUN_TEST(test_err_map);
     RUN_TEST(test_err_json);

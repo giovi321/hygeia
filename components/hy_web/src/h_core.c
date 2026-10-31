@@ -27,9 +27,7 @@ static const char *TAG = "web_core";
 
 static portMUX_TYPE s_pmux = portMUX_INITIALIZER_UNLOCKED;
 static hy_pair_t s_pair;
-static int64_t s_last_start;   /* monotonic s of the last successful start */
-static bool s_last_start_set;
-#define PAIR_START_GAP_S 10    /* a start within 10 s of the previous one answers 429 and keeps the code */
+static hy_pair_gate_t s_gate;   /* start gap, cool-down after a Cancel or an unused code, starts per 10 minutes */
 
 static int64_t mono_s(void)
 {
@@ -40,6 +38,7 @@ void web_pair_init(void)
 {
     portENTER_CRITICAL(&s_pmux);
     hy_pair_init(&s_pair);
+    hy_pair_gate_init(&s_gate);
     portEXIT_CRITICAL(&s_pmux);
 }
 
@@ -60,6 +59,7 @@ void hy_web_pair_cancel(void)
     portENTER_CRITICAL(&s_pmux);
     memset(s_pair.code, 0, sizeof s_pair.code);   /* the fail count and any block stay */
     s_pair.expires = 0;
+    hy_pair_gate_ended(&s_gate, mono_s(), true);   /* starts wait a minute */
     portEXIT_CRITICAL(&s_pmux);
     ESP_LOGI(TAG, "pairing cancelled on the screen");
 }
@@ -243,32 +243,82 @@ static esp_err_t h_state(web_req_t *r)
 
 /* ---------------------------------------------------------------- POST /api/pair/start (open, X-Hygeia) */
 
+/* LVGL task: the overlay shows the running code, unless a due card or the battery power-off countdown is on the screen
+ * (the overlay never covers a reminder). */
+typedef struct {
+    bool busy;
+} pair_show_ctx_t;
+
+static void job_pair_show(void *ctx)
+{
+    pair_show_ctx_t *c = ctx;
+    const hy_web_ui_t *ui = web_ui();
+    if (ui && ui->pair_busy && ui->pair_busy()) {
+        c->busy = true;
+        return;
+    }
+    char code[7];
+    int64_t exp;
+    if (ui && ui->pair_show && web_pair_peek(code, &exp)) {
+        ui->pair_show(code, exp);
+    }
+    memset(code, 0, sizeof code);
+}
+
+/* The code just started is withdrawn without a cool-down (the screen could not show it). */
+static void pair_withdraw(void)
+{
+    portENTER_CRITICAL(&s_pmux);
+    memset(s_pair.code, 0, sizeof s_pair.code);
+    s_pair.expires = 0;
+    hy_pair_gate_ended(&s_gate, mono_s(), false);
+    portEXIT_CRITICAL(&s_pmux);
+}
+
 static esp_err_t h_pair_start(web_req_t *r)
 {
     int64_t now = mono_s();
+    int64_t wait = 0;
     portENTER_CRITICAL(&s_pmux);
-    bool too_soon = s_last_start_set && now - s_last_start < PAIR_START_GAP_S;
-    int64_t wait = too_soon ? PAIR_START_GAP_S - (now - s_last_start) : 0;
-    hy_err_t e = too_soon ? HY_E_FULL : hy_pair_start(&s_pair, esp_random(), now);
+    hy_pair_wait_t why = hy_pair_gate_check(&s_gate, now, &wait);
+    hy_err_t e = why != HY_PAIR_GO ? HY_E_FULL : hy_pair_start(&s_pair, esp_random(), now);
     if (e == HY_OK) {
-        s_last_start = now;
-        s_last_start_set = true;
+        hy_pair_gate_started(&s_gate, now);
     }
     int64_t blocked = s_pair.blocked_until;
     portEXIT_CRITICAL(&s_pmux);
     char ra[24];
-    if (too_soon) {   /* the running code stays: another browser on the LAN cannot keep replacing it */
-        snprintf(ra, sizeof ra, "%lld", (long long)(wait > 0 ? wait : 1));
+    if (why != HY_PAIR_GO) {   /* a running code stays: another browser on the LAN cannot keep replacing it */
+        snprintf(ra, sizeof ra, "%lld", (long long)wait);
         httpd_resp_set_hdr(r->req, "Retry-After", ra);
-        return web_send_err(r, 429, "too_many", NULL, "Pairing was started a moment ago, use the code on the screen");
+        const char *msg = why == HY_PAIR_WAIT_GAP ? "Pairing was started a moment ago, use the code on the screen"
+                          : why == HY_PAIR_WAIT_COOLDOWN ? "Pairing was cancelled or the code expired, try again in a minute"
+                                                         : "Pairing was started too often, try again later";
+        return web_send_err(r, 429, "too_many", NULL, msg);
     }
     if (e != HY_OK) {
         snprintf(ra, sizeof ra, "%lld", (long long)(blocked > now ? blocked - now : 1));
         httpd_resp_set_hdr(r->req, "Retry-After", ra);
         return web_send_err(r, 429, "blocked", NULL, "Too many wrong codes, try again in a minute");
     }
+    hy_job_t *j = hy_job_new(job_pair_show, sizeof(pair_show_ctx_t));
+    if (!j) {
+        pair_withdraw();
+        return web_send_err(r, 500, "internal", NULL, "Out of memory");
+    }
+    esp_err_t res = hy_job_run(j, HY_JOB_TIMEOUT_MS);
+    bool busy = res == ESP_OK && ((pair_show_ctx_t *)hy_job_ctx(j))->busy;
+    hy_job_put(j);
+    if (res != ESP_OK) {   /* a job that ran late may have shown the code: the overlay closes */
+        pair_withdraw();
+        web_ui_pair_hide(HY_WEB_PAIR_CANCEL);
+        return web_send_busy(r);
+    }
+    if (busy) {
+        pair_withdraw();
+        return web_send_err(r, 409, "busy", NULL, "The device is showing a reminder, try again when it closes");
+    }
     ESP_LOGI(TAG, "pairing code shown on the screen for %d s", HY_PAIR_TTL_S);
-    web_ui_pair_show();
     char buf[48];
     snprintf(buf, sizeof buf, "{\"expires_in\":%d}", HY_PAIR_TTL_S);
     return web_send_json(r, 200, buf);
@@ -294,6 +344,9 @@ static esp_err_t h_pair(web_req_t *r)
     portENTER_CRITICAL(&s_pmux);
     hy_err_t e = hy_pair_try(&s_pair, code->valuestring, now);
     bool blocked = s_pair.blocked_until > now;
+    if (e == HY_OK || blocked) {   /* used, or ended by the fifth wrong code (which has its own block) */
+        hy_pair_gate_ended(&s_gate, now, false);
+    }
     portEXIT_CRITICAL(&s_pmux);
     cJSON_Delete(o);
 

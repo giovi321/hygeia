@@ -18,7 +18,7 @@ The web UI has no TLS. Use it on your home network or on the device's own access
 5. Open Settings, Wi-Fi in the web UI. Under "Add a network", enter the name and password of your home network and tap Save network. The device keeps at most 5 networks
 6. Choose Wi-Fi as the mode. The page warns that it will lose its connection. Confirm, reconnect your phone or computer to your home network and open `http://hygeia.local`
 
-The access point password can be changed in the web UI under Access point, and the host name under Host name. The access point name is fixed.
+The access point password can be changed in the web UI under Access point, and the host name under Host name. The access point name is fixed. A new access point password restarts the access point: join it again with the new password. After a host name change the web UI answers at the new name, and a browser that used the old name may have to pair again there.
 
 ## Open the web UI later
 
@@ -36,7 +36,7 @@ The web UI shows data and changes it, so each browser pairs once:
 2. The device wakes its screen and shows a 6-digit code for 120 seconds
 3. Type the code in the browser and tap Pair
 
-Five wrong codes stop pairing for a minute. The device keeps 4 browsers and forgets the oldest when a fifth pairs. Forget browsers in the web UI under Settings, Paired browsers, or on the device under Settings, Wi-Fi.
+Five wrong codes stop pairing for a minute. After Cancel on the device, or a code that ran out unused, a new code can be asked for after a minute, and at most 3 codes every 10 minutes. The code never covers a reminder: while a dose is due or the battery power-off countdown shows, pairing waits. The device keeps 4 browsers and forgets the oldest when a fifth pairs. Forget browsers in the web UI under Settings, Paired browsers, or on the device under Settings, Wi-Fi.
 
 ## The battery and the radio
 

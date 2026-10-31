@@ -52,6 +52,52 @@ bool hy_pair_active(const hy_pair_t *p, int64_t now)
     return p->code[0] != '\0' && now < p->expires;
 }
 
+void hy_pair_gate_init(hy_pair_gate_t *g) { memset(g, 0, sizeof *g); }
+
+hy_pair_wait_t hy_pair_gate_check(hy_pair_gate_t *g, int64_t now, int64_t *wait)
+{
+    if (g->open && now >= g->open_until) { /* expired unused */
+        g->open = false;
+        if (g->open_until + HY_PAIR_COOLDOWN_S > g->cool_until)
+            g->cool_until = g->open_until + HY_PAIR_COOLDOWN_S;
+    }
+    hy_pair_wait_t why = HY_PAIR_GO;
+    int64_t until = 0;
+    if (g->n_starts > 0 && now < g->starts[g->n_starts - 1] + HY_PAIR_START_GAP_S) {
+        why = HY_PAIR_WAIT_GAP;
+        until = g->starts[g->n_starts - 1] + HY_PAIR_START_GAP_S;
+    } else if (now < g->cool_until) {
+        why = HY_PAIR_WAIT_COOLDOWN;
+        until = g->cool_until;
+    } else if (g->n_starts == HY_PAIR_STARTS_MAX && now < g->starts[0] + HY_PAIR_STARTS_WINDOW_S) {
+        why = HY_PAIR_WAIT_CAP;
+        until = g->starts[0] + HY_PAIR_STARTS_WINDOW_S;
+    }
+    if (wait != NULL)
+        *wait = why == HY_PAIR_GO ? 0 : (until - now > 0 ? until - now : 1);
+    return why;
+}
+
+void hy_pair_gate_started(hy_pair_gate_t *g, int64_t now)
+{
+    if (g->n_starts == HY_PAIR_STARTS_MAX) {
+        memmove(&g->starts[0], &g->starts[1], (HY_PAIR_STARTS_MAX - 1) * sizeof g->starts[0]);
+        g->n_starts--;
+    }
+    g->starts[g->n_starts++] = now;
+    g->open = true;
+    g->open_until = now + HY_PAIR_TTL_S;
+}
+
+void hy_pair_gate_ended(hy_pair_gate_t *g, int64_t now, bool cancelled)
+{
+    if (!g->open)
+        return;
+    g->open = false;
+    if (cancelled && now + HY_PAIR_COOLDOWN_S > g->cool_until)
+        g->cool_until = now + HY_PAIR_COOLDOWN_S;
+}
+
 hy_err_t hy_pair_try(hy_pair_t *p, const char *code, int64_t now)
 {
     if (!hy_pair_active(p, now)) {

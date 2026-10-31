@@ -38,6 +38,37 @@ hy_err_t hy_pair_try(hy_pair_t *p, const char *code, int64_t now);
 
 bool hy_pair_active(const hy_pair_t *p, int64_t now);
 
+/* Limits on starting pairing, so a browser that was never paired cannot keep the code on the screen: a start within
+ * 10 s of the previous one, within 60 s of a Cancel on the device or of a code that expired unused, or a fourth start
+ * within 10 minutes waits. Times are monotonic seconds. */
+#define HY_PAIR_START_GAP_S     10
+#define HY_PAIR_COOLDOWN_S      60
+#define HY_PAIR_STARTS_MAX      3
+#define HY_PAIR_STARTS_WINDOW_S 600
+
+typedef enum { HY_PAIR_GO = 0, HY_PAIR_WAIT_GAP, HY_PAIR_WAIT_COOLDOWN, HY_PAIR_WAIT_CAP } hy_pair_wait_t;
+
+typedef struct {
+    int64_t starts[HY_PAIR_STARTS_MAX]; /* the latest starts, oldest first */
+    uint8_t n_starts;
+    bool open;                          /* a started code has not been used, cancelled or withdrawn yet */
+    int64_t open_until;                 /* its expiry */
+    int64_t cool_until;
+} hy_pair_gate_t;
+
+void hy_pair_gate_init(hy_pair_gate_t *g);
+
+/* HY_PAIR_GO when a start may go ahead now; otherwise the reason, with the seconds to wait (at least 1) in *wait.
+ * A code that expired unused is settled here first: the cool-down runs from its expiry. */
+hy_pair_wait_t hy_pair_gate_check(hy_pair_gate_t *g, int64_t now, int64_t *wait);
+
+/* A code was started at `now` and runs until now + HY_PAIR_TTL_S. */
+void hy_pair_gate_started(hy_pair_gate_t *g, int64_t now);
+
+/* The running code ended before its expiry. cancelled: the person cancelled it on the device, and starts wait
+ * HY_PAIR_COOLDOWN_S from now. Otherwise (paired, blocked by wrong codes, or withdrawn by the server) no cool-down. */
+void hy_pair_gate_ended(hy_pair_gate_t *g, int64_t now, bool cancelled);
+
 bool hy_ct_equal(const uint8_t *a, const uint8_t *b, size_t n);
 
 /* Value of cookie `name` in a Cookie header ("a=1; hy_s=abc"). The name must match exactly. False when
