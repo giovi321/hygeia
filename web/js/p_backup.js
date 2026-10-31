@@ -91,7 +91,8 @@ HY.settingsLinks.push({ href: "#/settings/backup", text: "Backup", note: "Export
 
     function fail(e) {
       if (!HY.alive(token)) { return; }
-      var t = HY.errText(e);
+      // the device's own text first: a 503 for an import that stopped partway says what was added
+      var t = (e && e.data && e.data.message) || HY.errText(e);
       if (!t && e && e.handled) { t = "The device was busy. Check the result before trying again"; }
       show((e && e.field ? "(" + e.field + ") " : "") + (t || "The import failed") +
         (e && e.error === "changed" ? ". Run the preview and import again" : ""), true);

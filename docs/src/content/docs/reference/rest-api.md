@@ -11,7 +11,7 @@ The device has no TLS. Requests, the session cookie and exported files travel un
 
 ## Host names
 
-The device answers a request only when the `Host` header names the device. Any other name gets `421` and the error `host`. This blocks DNS rebinding. The device answers to:
+The device answers a request only when the `Host` header names the device. Any other name gets `421` and the error `host`, which blocks DNS rebinding. In access point mode the device is a captive portal instead: a request for another name, and any unknown path, gets `302` to `http://192.168.4.1/`. The device answers to:
 
 - its IPv4 address, for example `192.168.1.23` (or `192.168.4.1` in access point mode)
 - `<host>`, the host name, `hygeia` by default
@@ -36,7 +36,7 @@ The device keeps at most 4 paired browsers and forgets the oldest when a fifth p
 - When a request carries an `Origin` header, it has to be `http://` plus the same host as the `Host` header, else `403`
 - Bodies are JSON (`Content-Type: application/json`) up to 16 KB. `POST /api/import` takes a file up to 4 MB and `POST /api/ota` a firmware image up to 3 MB, both as the raw body
 - Times are Unix seconds in UTC. The medicine and log objects carry the wall-clock strings of the device zone where a person reads them
-- One request runs at a time per job. The device answers `503` with the error `busy` and `Retry-After: 2` when it cannot take a request. A write that got `503` may still have been applied: read the data again before repeating it
+- The device serves few requests at once and does the work of a request one step at a time. It answers `503` with the error `busy` and `Retry-After: 2` when it cannot take a request. A write that got `503` may still have been applied: read the data again before repeating it
 
 ## Errors
 
@@ -55,12 +55,14 @@ Every error has this shape:
 | 403 | `forbidden` |
 | 404 | `not_found` |
 | 408 | `timeout` |
-| 409 | `busy`, `battery`, `confirm`, `full`, `changed`, `code_dup` |
+| 409 | `busy`, `battery`, `confirm`, `full`, `changed`, `code_dup`, `clock_invalid` (the clock is not set), `too_soon` (a dose within the minimum interval) |
 | 412, 428 | `stale`, `precondition_required` (a medicine is written with `If-Match` and the `etag` of the last read) |
+| 410 | `undo_expired` |
 | 413 | `too_large` |
 | 421 | `host` |
-| 422 | the medicine rules, `not_hygeia` and `corrupt` for a bad firmware image |
+| 422 | the medicine rules `code`, `name`, `dose`, `times` and `interval` (each names its `field`); `not_hygeia` and `corrupt` for a bad firmware image |
 | 429 | `blocked`, `too_many` |
+| 500 | `internal`, `flash` (a firmware write failed) |
 | 503 | `busy`, `storage` |
 
 ## Version rule
@@ -139,13 +141,13 @@ curl -s -b "$C" http://192.168.1.23/api/medicines
 curl -s -b "$C" "http://192.168.1.23/api/history?days=30"
 ```
 
-Log a dose with a note, and read the answer's error shape on a bad request:
+Log a dose with a note. The second call names a medicine that does not exist and fails with `404` and the error shape:
 
 ```bash
 curl -s -b "$C" -X POST -H "X-Hygeia: 1" -H "Content-Type: application/json" \
   -d '{"note":"with food"}' http://192.168.1.23/api/medicines/1/log
-curl -s -b "$C" -X PUT -H "X-Hygeia: 1" -H "Content-Type: application/json" \
-  -d '{"volume":500}' http://192.168.1.23/api/settings
+curl -s -b "$C" -X POST -H "X-Hygeia: 1" -H "Content-Type: application/json" \
+  -d '{}' http://192.168.1.23/api/medicines/99/log
 ```
 
 Save a Wi-Fi network and switch the device to it:
@@ -183,41 +185,41 @@ Every action on the screen has a route. The table lists each route, the web UI p
 |---|---|---|
 | `GET /api/info` | Every page (version, pairing state), Firmware | Settings > About |
 | `GET /api/state` | Dashboard | Home tile |
-| `POST /api/pair/start` | Pair this browser | Settings > Network |
+| `POST /api/pair/start` | Pair this browser | Pairing code overlay |
 | `POST /api/pair` | Pair this browser | web only |
-| `GET /api/browsers` | Settings | Settings > Network |
-| `DELETE /api/browsers` | Settings | Settings > Network |
-| `GET /api/medicines` | Medicines | Medicines list |
+| `GET /api/browsers` | Settings | Settings > Wi-Fi |
+| `DELETE /api/browsers` | Settings | Settings > Wi-Fi (Forget all) |
+| `GET /api/medicines` | Medicines | Home |
 | `POST /api/medicines` | Medicines | Medicine form |
 | `GET /api/medicines/{id}` | Medicines | Medicine detail |
 | `PUT /api/medicines/{id}` | Medicines | Medicine form |
-| `DELETE /api/medicines/{id}` | Medicines | Medicine detail |
+| `DELETE /api/medicines/{id}` | Medicines | web only |
 | `POST /api/medicines/{id}/archive` | Medicines | Medicine detail |
-| `POST /api/medicines/{id}/unarchive` | Medicines | Medicine detail |
-| `PUT /api/medicines/order` | Medicines | Medicines list |
-| `POST /api/medicines/{id}/pills` | Medicines | Medicine detail |
-| `POST /api/medicines/{id}/log` | Dashboard | Due card |
+| `POST /api/medicines/{id}/unarchive` | Medicines | web only |
+| `PUT /api/medicines/order` | Medicines | web only |
+| `POST /api/medicines/{id}/pills` | Medicines | web only |
+| `POST /api/medicines/{id}/log` | Dashboard | Home tile, due card, Medicine detail |
 | `POST /api/medicines/{id}/skip` | Dashboard | Due card |
 | `POST /api/medicines/{id}/snooze` | Dashboard | Due card |
-| `GET /api/log` | Log | History |
-| `POST /api/log` | Log | History |
-| `PUT /api/log/{id}` | Log | History > Entry |
-| `DELETE /api/log/{id}` | Log | History > Entry |
-| `POST /api/log/{id}/undo` | Dashboard | Home tile |
+| `GET /api/log` | Log | Medicine detail, History |
+| `POST /api/log` | Log | Medicine detail > Log earlier |
+| `PUT /api/log/{id}` | Log | web only |
+| `DELETE /api/log/{id}` | Log | web only |
+| `POST /api/log/{id}/undo` | Dashboard | Logged toast |
 | `GET /api/history` | History | History |
-| `GET /api/schedule` | Schedule | Schedule |
+| `GET /api/schedule` | Schedule | Overview |
 | `GET /api/export.csv` | Backup | web only |
 | `GET /api/export.json` | Backup | web only |
 | `POST /api/import` | Backup | web only |
-| `GET /api/settings` | Settings, Wi-Fi | Settings |
-| `PUT /api/settings` | Settings, Wi-Fi | Settings |
-| `POST /api/time` | Settings | Settings > Time |
-| `GET /api/wifi` | Wi-Fi | Settings > Network |
-| `POST /api/wifi/mode` | Wi-Fi | Settings > Network |
+| `GET /api/settings` | Settings, Wi-Fi | Settings, quick settings |
+| `PUT /api/settings` | Settings, Wi-Fi | Settings, quick settings |
+| `POST /api/time` | Settings | Settings > Time zone, Date and time |
+| `GET /api/wifi` | Wi-Fi | Settings > Wi-Fi |
+| `POST /api/wifi/mode` | Wi-Fi | Quick settings, Settings > Wi-Fi |
 | `POST /api/wifi/networks` | Wi-Fi | web only |
-| `DELETE /api/wifi/networks` | Wi-Fi | Settings > Network |
+| `DELETE /api/wifi/networks` | Wi-Fi | web only |
 | `PUT /api/wifi/ap` | Wi-Fi | web only |
 | `POST /api/chime/test` | Settings | Settings > Sound |
-| `POST /api/power/off` | Settings | Power menu |
+| `POST /api/power/off` | Settings | Power off screen |
 | `POST /api/ota` | Firmware | web only |
 <!-- parity:end -->

@@ -63,11 +63,17 @@ HY.settingsLinks.push({ href: "#/settings/firmware", text: "Firmware", note: "Ve
     function waitForDevice() {
       var t0 = Date.now();
       var gone = false;
+      var same = "";   // a version equal to the old one, seen before any failed poll
       say("The device restarts. This page reconnects when it is back");
       function again() {
         if (!HY.alive(token)) { return; }
         if (Date.now() - t0 >= POLL_LIMIT_MS) {
-          lock(false);
+          lock(false); bar.hidden = true;
+          if (same) {
+            say("The device still reports version " + same + ", the version it had before. If you uploaded a file with the same version, " +
+              "the update is done. Otherwise the restart did not happen: upload again", true);
+            return;
+          }
           say("The device did not answer within 60 seconds. If the new firmware fails, the device may come back on the previous version " +
             "after up to " + ROLLBACK_S + " seconds. Reload this page in a minute", true);
           return;
@@ -83,14 +89,14 @@ HY.settingsLinks.push({ href: "#/settings/firmware", text: "Firmware", note: "Ve
           .then(function (i) {
             clearTimeout(cut);
             if (!HY.alive(token)) { return; }
-            if (!gone && i.fw === oldFw) { again(); return; }   // not restarted yet
+            if (!gone && (!oldFw || i.fw === oldFw)) { same = i.fw || ""; again(); return; }   // not restarted yet
             HY.info = i;
             lock(false); pick.value = ""; file = null; go.disabled = true;
             bar.hidden = true;
             cur.textContent = "Version " + i.fw + (i.api ? " (API " + i.api + ")" : "");
             if (i.fw === oldFw) {
-              say("The device is back on version " + i.fw + ", the version it had before. The new firmware may not have started, " +
-                "and the device may have returned to the previous version", true);
+              say("The device is back on version " + i.fw + ", the same as before the update. If the new file has the same version, " +
+                "the update is done. Otherwise the new firmware did not start and the device returned to the previous version", true);
             } else {
               say("The device is back on version " + i.fw);
             }

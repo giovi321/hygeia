@@ -24,7 +24,7 @@ The access point password can be changed in the web UI under Access point, and t
 
 With the device on your home network, tap the Web UI QR button in quick settings. The screen shows a QR code for `http://<ip>/` and the address in text, for example `http://192.168.1.23` and `hygeia.local`. In access point mode the button shows the address `http://192.168.4.1/`.
 
-The device answers to its IP address, to `hygeia` (or the host name you set), to `hygeia.local` and to a name that starts with `hygeia.`. Other names get an error. See [Host names](../../reference/rest-api/#host-names).
+The device answers to its IP address, to `hygeia` (or the host name you set), to `hygeia.local` and to a name that starts with `hygeia.`. On Wi-Fi client mode other names get an error; in access point mode they are sent to the web UI. See [Host names](../../reference/rest-api/#host-names).
 
 `hygeia.local` works through mDNS in Wi-Fi client mode. Some networks and some Android versions do not resolve `.local` names: use the IP address from the Web UI QR button then. Give the device a fixed address in your router if you want a bookmark that does not change.
 

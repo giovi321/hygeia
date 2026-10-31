@@ -15,6 +15,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROUTES = os.path.join(ROOT, "components", "hy_core", "src", "routes.c")
+ROUTES_H = os.path.join(ROOT, "components", "hy_core", "include", "hy", "routes.h")
 DOC = os.path.join(ROOT, "docs", "src", "content", "docs", "reference", "rest-api.md")
 START = "<!-- parity:start -->"
 END = "<!-- parity:end -->"
@@ -71,6 +72,15 @@ def routes():
     rows = ROW.findall(src)
     if not rows:
         sys.exit("gen_parity: no routes found in " + ROUTES)
+    # every table row has to be parsed: compare with the row starts and with the route ids of the enum
+    starts = len(re.findall(r"^\s*\{\s*HY_M_", src, re.M))
+    with open(ROUTES_H, "r", encoding="utf-8") as f:
+        head = f.read()
+    enum = re.search(r"typedef enum \{(.*?)HY_R_COUNT", head, re.S)
+    ids = len(re.findall(r"HY_R_[A-Z0-9_]+", enum.group(1))) if enum else -1
+    if len(rows) != starts or len(rows) != ids:
+        sys.exit("gen_parity: parsed %d rows, the table has %d and the enum %d route ids; a row did not parse"
+                 % (len(rows), starts, ids))
     return rows
 
 

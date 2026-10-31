@@ -5,7 +5,7 @@ HY.api = function (method, path, body, headers) {
   var opts = { method: method, credentials: "same-origin", cache: "no-store", headers: {} };
   var k;
   if (isWrite) { opts.headers["X-Hygeia"] = "1"; }
-  if (body instanceof Blob) {
+  if (typeof Blob !== "undefined" && body instanceof Blob) {
     // a file is sent as it is
     opts.headers["Content-Type"] = "application/octet-stream";
     opts.body = body;
