@@ -8,6 +8,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
@@ -57,6 +58,7 @@ const char *web_status_line(int status)
     case 403: return "403 Forbidden";
     case 404: return "404 Not Found";
     case 405: return "405 Method Not Allowed";
+    case 408: return "408 Request Timeout";
     case 409: return "409 Conflict";
     case 410: return "410 Gone";
     case 412: return "412 Precondition Failed";
@@ -127,7 +129,7 @@ void web_net_now(web_net_t *out)
  * any name whose first label is <host>. */
 bool web_host_check(httpd_req_t *req, const web_net_t *net, bool api)
 {
-    char host[72];
+    char host[WEB_HDR_HOST];
     bool ok = false;
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof host) == ESP_OK) {
         char local[40];
@@ -186,30 +188,46 @@ static bool method_of(int http, hy_method_t *m)
     }
 }
 
-/* Reads the whole body into PSRAM. false: the socket failed (the handler closes it). */
-static bool read_body(web_req_t *r, size_t *consumed)
+/* Reads the whole body into PSRAM, within BODY_DEADLINE_US and at most BODY_MAX_TIMEOUTS consecutive receive timeouts
+ * (5 s each): a client that announces a body and never sends it cannot hold the single httpd task. */
+#define BODY_DEADLINE_US (10 * 1000000LL)
+#define BODY_MAX_TIMEOUTS 2
+typedef enum { BODY_OK = 0, BODY_NOMEM, BODY_TIMEOUT, BODY_SOCK } body_res_t;
+
+static body_res_t read_body(web_req_t *r, size_t *consumed)
 {
     size_t len = r->req->content_len;
     r->body = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!r->body) {
-        return false;
+        return BODY_NOMEM;
     }
     size_t got = 0;
+    int timeouts = 0;
+    int64_t deadline = esp_timer_get_time() + BODY_DEADLINE_US;
     while (got < len) {
+        if (esp_timer_get_time() > deadline) {
+            *consumed = got;
+            return BODY_TIMEOUT;
+        }
         int n = httpd_req_recv(r->req, r->body + got, len - got);
         if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++timeouts >= BODY_MAX_TIMEOUTS) {
+                *consumed = got;
+                return BODY_TIMEOUT;
+            }
             continue;
         }
         if (n <= 0) {
             *consumed = got;
-            return false;
+            return BODY_SOCK;
         }
+        timeouts = 0;
         got += (size_t)n;
     }
     r->body[len] = 0;
     r->body_len = len;
     *consumed = len;
-    return true;
+    return BODY_OK;
 }
 
 /* Order: Host, route, guard (X-Hygeia and Origin on writes, then the session), activity, body (16 KB), handler. The
@@ -240,7 +258,7 @@ static esp_err_t api_handler(httpd_req_t *req)
     r.route = rt;
     r.id = id;
 
-    char host[72] = "", xh[8] = "", origin[128] = "", cookie[512] = "";
+    char host[WEB_HDR_HOST] = "", xh[8] = "", origin[WEB_HDR_ORIGIN] = "", cookie[WEB_HDR_COOKIE] = "";
     httpd_req_get_hdr_value_str(req, "Host", host, sizeof host);
     bool has_xh = httpd_req_get_hdr_value_str(req, "X-Hygeia", xh, sizeof xh) == ESP_OK;
     bool has_origin = httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof origin) == ESP_OK;
@@ -272,11 +290,18 @@ static esp_err_t api_handler(httpd_req_t *req)
             web_send_err(&r, 413, "too_large", NULL, "Request body above 16 KB");
             goto done;
         }
-        if (!read_body(&r, &consumed)) {
-            ESP_LOGW(TAG, "body read failed on %s", req->uri);
+        body_res_t br = read_body(&r, &consumed);
+        if (br != BODY_OK) {
+            ESP_LOGW(TAG, "body read failed on %s (%s)", req->uri,
+                     br == BODY_NOMEM ? "no memory" : br == BODY_TIMEOUT ? "timeout" : "socket");
             heap_caps_free(r.body);
-            reqlog(req, route, 0);
-            return ESP_FAIL;
+            if (br == BODY_NOMEM) {
+                web_send_busy(&r);
+            } else if (br == BODY_TIMEOUT) {
+                web_send_err(&r, 408, "timeout", NULL, "The request body did not arrive in time");
+            }
+            reqlog(req, route, r.status);
+            return ESP_FAIL;   /* closes the socket */
         }
     } else {
         r.body = NULL;

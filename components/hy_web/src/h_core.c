@@ -27,6 +27,9 @@ static const char *TAG = "web_core";
 
 static portMUX_TYPE s_pmux = portMUX_INITIALIZER_UNLOCKED;
 static hy_pair_t s_pair;
+static int64_t s_last_start;   /* monotonic s of the last successful start */
+static bool s_last_start_set;
+#define PAIR_START_GAP_S 10    /* a start within 10 s of the previous one answers 429 and keeps the code */
 
 static int64_t mono_s(void)
 {
@@ -244,11 +247,22 @@ static esp_err_t h_pair_start(web_req_t *r)
 {
     int64_t now = mono_s();
     portENTER_CRITICAL(&s_pmux);
-    hy_err_t e = hy_pair_start(&s_pair, esp_random(), now);
+    bool too_soon = s_last_start_set && now - s_last_start < PAIR_START_GAP_S;
+    int64_t wait = too_soon ? PAIR_START_GAP_S - (now - s_last_start) : 0;
+    hy_err_t e = too_soon ? HY_E_FULL : hy_pair_start(&s_pair, esp_random(), now);
+    if (e == HY_OK) {
+        s_last_start = now;
+        s_last_start_set = true;
+    }
     int64_t blocked = s_pair.blocked_until;
     portEXIT_CRITICAL(&s_pmux);
+    char ra[24];
+    if (too_soon) {   /* the running code stays: another browser on the LAN cannot keep replacing it */
+        snprintf(ra, sizeof ra, "%lld", (long long)(wait > 0 ? wait : 1));
+        httpd_resp_set_hdr(r->req, "Retry-After", ra);
+        return web_send_err(r, 429, "too_many", NULL, "Pairing was started a moment ago, use the code on the screen");
+    }
     if (e != HY_OK) {
-        char ra[12];
         snprintf(ra, sizeof ra, "%lld", (long long)(blocked > now ? blocked - now : 1));
         httpd_resp_set_hdr(r->req, "Retry-After", ra);
         return web_send_err(r, 429, "blocked", NULL, "Too many wrong codes, try again in a minute");
@@ -262,6 +276,8 @@ static esp_err_t h_pair_start(web_req_t *r)
 
 /* ---------------------------------------------------------------- POST /api/pair {"code":"482913"} (open) */
 
+#define PAIR_CODE_MAX 16   /* longer strings are refused before the spinlock (the code walk skips spaces) */
+
 static esp_err_t h_pair(web_req_t *r)
 {
     cJSON *o = cJSON_Parse(r->body);
@@ -269,6 +285,10 @@ static esp_err_t h_pair(web_req_t *r)
     if (!cJSON_IsString(code)) {
         cJSON_Delete(o);
         return web_send_err(r, 400, "invalid", "code", "Send {\"code\":\"123456\"}");
+    }
+    if (strnlen(code->valuestring, PAIR_CODE_MAX + 1) > PAIR_CODE_MAX) {
+        cJSON_Delete(o);
+        return web_send_err(r, 400, "invalid", "code", "The code has 6 digits");
     }
     int64_t now = mono_s();
     portENTER_CRITICAL(&s_pmux);
@@ -293,6 +313,11 @@ static esp_err_t h_pair(web_req_t *r)
     char ua[160] = "";
     httpd_req_get_hdr_value_str(r->req, "User-Agent", ua, sizeof ua);
     esp_err_t err = web_sess_add(tok, ua, NULL);
+    if (err != ESP_OK) {   /* the code is used up: the overlay closes as failed and the browser starts again */
+        memset(tok, 0, sizeof tok);
+        web_ui_pair_hide(HY_WEB_PAIR_FAILED);
+        return web_send_hy_err(r, HY_E_IO, "The pairing could not be saved");
+    }
     char cookie[128];
     int k = snprintf(cookie, sizeof cookie, "hy_s=");
     for (int i = 0; i < 32; i++) {
@@ -301,10 +326,6 @@ static esp_err_t h_pair(web_req_t *r)
     memset(tok, 0, sizeof tok);
     snprintf(cookie + k, sizeof cookie - k, "; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000");
     web_ui_pair_hide(HY_WEB_PAIR_DONE);
-    if (err != ESP_OK) {
-        memset(cookie, 0, sizeof cookie);
-        return web_send_hy_err(r, HY_E_IO, "The pairing could not be saved");
-    }
     web_ui_toast_ok("Browser paired");
     httpd_resp_set_hdr(r->req, "Set-Cookie", cookie);
     esp_err_t se = web_send_json(r, 200, "{\"paired\":true}");

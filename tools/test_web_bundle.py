@@ -90,6 +90,14 @@ class WebBundleTest(unittest.TestCase):
         with self.assertRaises(web_bundle.BundleError):
             web_bundle.check_size(fake, limit)
 
+    def test_entries_outside_the_folder_fail(self):
+        for bad in ("../secret.js", "js/../../secret.js", "/etc/passwd", "C:/x.js", "js\\..\\..\\x.js"):
+            with tempfile.TemporaryDirectory() as d:
+                make_src(d)
+                write(d, "bundle.txt", "js/boot.js\n%s\n" % bad)
+                with self.assertRaises(web_bundle.BundleError, msg=bad):
+                    web_bundle.build(d)
+
     def test_missing_listed_file_fails(self):
         with tempfile.TemporaryDirectory() as d:
             make_src(d)

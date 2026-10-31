@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "hy/board.h"
 #include "hy/events.h"
 #include "web_internal.h"
 
@@ -186,7 +187,7 @@ static esp_err_t ws_pre(httpd_req_t *req)
     if (!web_host_check(req, &net, true)) {
         return ESP_FAIL;
     }
-    char host[64] = "", origin[96] = "", cookie[256] = "";
+    char host[WEB_HDR_HOST] = "", origin[WEB_HDR_ORIGIN] = "", cookie[WEB_HDR_COOKIE] = "";
     bool has_origin = httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof origin) == ESP_OK;
     httpd_req_get_hdr_value_str(req, "Host", host, sizeof host);
     bool has_cookie = httpd_req_get_hdr_value_str(req, "Cookie", cookie, sizeof cookie) == ESP_OK;
@@ -279,7 +280,13 @@ void web_ws_init(void)
     for (int i = 0; i < WS_MAX_CLIENTS; i++) {
         s_cli[i].fd = -1;
     }
-    if (hy_ev_subscribe(on_event, NULL) < 0) {
+    /* The bus belongs to the LVGL task, which publishes on it: subscribe under its lock (as the UI does) */
+    bool locked = hy_board_display() && hy_board_lock(1000);
+    int sub = hy_ev_subscribe(on_event, NULL);
+    if (locked) {
+        hy_board_unlock();
+    }
+    if (sub < 0) {
         ESP_LOGE(TAG, "event subscribe failed: no live events");
     }
     const esp_timer_create_args_t a = {.callback = ping_timer, .name = "ws_ping"};

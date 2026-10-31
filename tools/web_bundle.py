@@ -49,8 +49,13 @@ def bundle_list(src):
     names = []
     for line in _read(os.path.join(src, "bundle.txt")).decode("utf-8").splitlines():
         line = line.split("#", 1)[0].strip()
-        if line:
-            names.append(line)
+        if not line:
+            continue
+        parts = line.replace("\\", "/").split("/")
+        if os.path.isabs(line) or line.startswith(("/", "\\")) or (len(line) > 1 and line[1] == ":") \
+                or ".." in parts:
+            raise BundleError("bundle.txt entry outside the web folder: %s" % line)
+        names.append(line)
     if not names:
         raise BundleError("bundle.txt names no script")
     return names

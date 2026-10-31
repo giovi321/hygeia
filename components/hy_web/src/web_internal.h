@@ -28,6 +28,11 @@ extern const size_t hy_web_assets_bytes;
 
 #define WEB_BODY_MAX (16 * 1024)
 
+/* Header buffers, shared by /api and /ws so both accept the same requests. A longer value is treated as absent. */
+#define WEB_HDR_HOST   72
+#define WEB_HDR_ORIGIN 128
+#define WEB_HDR_COOKIE 512
+
 typedef struct {
     httpd_req_t *req;
     const hy_route_t *route;

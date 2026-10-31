@@ -234,6 +234,9 @@ esp_err_t web_sess_add(const uint8_t token[32], const char *user_agent, int *slo
         ESP_LOGE(TAG, "save: %s", esp_err_to_name(err));
         return err;
     }
+    if (old_used) {
+        web_ws_sessions_changed();   /* the replaced browser's live-event socket closes */
+    }
     if (slot) {
         *slot = pick;
     }
@@ -262,33 +265,46 @@ esp_err_t web_sess_forget(int slot)
     if (slot < -1 || slot >= WEB_SESS_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NS, NVS_READWRITE, &h);
-    if (err != ESP_OK) {
-        return err;
+    if (!s_mx) {
+        return ESP_ERR_INVALID_STATE;   /* before hy_web_start: nothing is loaded yet */
     }
+    bool clear[WEB_SESS_MAX] = {false};
+    bool any = false;
     lock();
-    if (slot >= 0 && !s_slot[slot].used) {
-        err = ESP_ERR_NOT_FOUND;
-    }
-    for (int i = 0; i < WEB_SESS_MAX && err == ESP_OK; i++) {
+    /* RAM first, every slot: the sessions end now even when an NVS erase below fails (until the next boot) */
+    for (int i = 0; i < WEB_SESS_MAX; i++) {
         if ((slot < 0 || i == slot) && s_slot[i].used) {
-            /* RAM first: a failed erase still ends the session until the next boot */
             s_slot[i].used = false;
             memset(&s_slot[i].b, 0, sizeof s_slot[i].b);
             s_slot[i].gen++;
-            esp_err_t e = save_slot(h, i);
-            if (e != ESP_OK && e != ESP_ERR_NVS_NOT_FOUND) {
-                err = e;
-            }
+            clear[i] = true;
+            any = true;
         }
     }
-    if (err == ESP_OK) {
-        err = nvs_commit(h);
+    esp_err_t err = ESP_OK;
+    if (!any) {
+        err = slot >= 0 ? ESP_ERR_NOT_FOUND : ESP_OK;
+    } else {
+        nvs_handle_t h;
+        err = nvs_open(NS, NVS_READWRITE, &h);
+        if (err == ESP_OK) {
+            for (int i = 0; i < WEB_SESS_MAX; i++) {
+                if (clear[i]) {
+                    esp_err_t e = save_slot(h, i);
+                    if (e != ESP_OK && e != ESP_ERR_NVS_NOT_FOUND && err == ESP_OK) {
+                        err = e;
+                    }
+                }
+            }
+            esp_err_t e = nvs_commit(h);
+            if (err == ESP_OK) {
+                err = e;
+            }
+            nvs_close(h);
+        }
     }
     unlock();
-    nvs_close(h);
-    if (err != ESP_ERR_NOT_FOUND) {
+    if (any) {
         web_ws_sessions_changed();
     }
     if (err == ESP_OK) {
