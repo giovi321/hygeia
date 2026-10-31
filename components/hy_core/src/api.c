@@ -9,7 +9,6 @@
 #include "hy/tzdb.h"
 #include "hy/tzlock.h"
 
-#define MAX_SAFE_INT 999999999999999.0 /* cJSON prints and parses numbers through a double: 15 digits are exact */
 
 static const struct { hy_err_t e; int http; const char *code; const char *field; } ERR_MAP[] = {
     { HY_E_INVALID,      400, "invalid",       "" },

@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 #include "cJSON.h"
+#include "codec_obj.h"
 #include "hy/api.h"
 
 /* Strict UTF-8: no overlong forms, no surrogates, nothing above U+10FFFF. */

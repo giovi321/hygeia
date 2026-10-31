@@ -8,7 +8,6 @@
 #include "hy/gap.h"
 #include "hy/med.h"
 
-#define MAX_SAFE_INT 999999999999999.0 /* 15 digits: cJSON prints numbers with %1.15g, so these round-trip exactly */
 #define MAX_SAFE_I64 999999999999999LL
 
 static const char *const STATUS_NAMES[] = { "taken", "skipped", "missed" };
@@ -176,40 +175,38 @@ hy_err_t hy_codec_log_from_obj(const cJSON *o, hy_log_t *out)
 {
     if (!o || !out || !cJSON_IsObject(o)) return HY_E_INVALID;
     hy_err_t r;
-    {
-        hy_log_t e;
-        memset(&e, 0, sizeof e);
-        double d = 0;
-        int en;
-        r = get_int(o, "id", 0, 4294967295.0, true, &d);
-        if (r == HY_OK) { e.id = (uint32_t)d; r = get_int(o, "ts", -MAX_SAFE_INT, MAX_SAFE_INT, true, &d); }
-        if (r == HY_OK) { e.ts = (int64_t)d; r = get_str(o, "tz", e.tz, sizeof e.tz, false); }
-        if (r == HY_OK) r = get_int(o, "med_id", 0, 4294967295.0, true, &d);
-        if (r == HY_OK) {
-            e.med_id = (uint32_t)d;
-            en = 0;
-            r = get_enum(o, "status", STATUS_NAMES, 3, true, &en);
-            e.status = (hy_status_t)en;
-        }
-        if (r == HY_OK) {
-            d = 0;
-            r = get_int(o, "slot", -MAX_SAFE_INT, MAX_SAFE_INT, false, &d);
-            e.slot = (int64_t)d;
-        }
-        if (r == HY_OK) {
-            d = 0;
-            r = get_int(o, "delta_min", -2147483648.0, 2147483647.0, false, &d);
-            e.delta_min = (int32_t)d;
-        }
-        if (r == HY_OK) r = get_str(o, "note", e.note, sizeof e.note, false);
-        if (r == HY_OK) {
-            en = 0;
-            r = get_enum(o, "source", SOURCE_NAMES, 4, false, &en);
-            e.source = (hy_source_t)en;
-        }
-        if (r == HY_OK) r = get_bool(o, "edited", &e.edited);
-        if (r == HY_OK) *out = e;
+    hy_log_t e;
+    memset(&e, 0, sizeof e);
+    double d = 0;
+    int en;
+    r = get_int(o, "id", 0, 4294967295.0, true, &d);
+    if (r == HY_OK) { e.id = (uint32_t)d; r = get_int(o, "ts", -MAX_SAFE_INT, MAX_SAFE_INT, true, &d); }
+    if (r == HY_OK) { e.ts = (int64_t)d; r = get_str(o, "tz", e.tz, sizeof e.tz, false); }
+    if (r == HY_OK) r = get_int(o, "med_id", 0, 4294967295.0, true, &d);
+    if (r == HY_OK) {
+        e.med_id = (uint32_t)d;
+        en = 0;
+        r = get_enum(o, "status", STATUS_NAMES, 3, true, &en);
+        e.status = (hy_status_t)en;
     }
+    if (r == HY_OK) {
+        d = 0;
+        r = get_int(o, "slot", -MAX_SAFE_INT, MAX_SAFE_INT, false, &d);
+        e.slot = (int64_t)d;
+    }
+    if (r == HY_OK) {
+        d = 0;
+        r = get_int(o, "delta_min", -2147483648.0, 2147483647.0, false, &d);
+        e.delta_min = (int32_t)d;
+    }
+    if (r == HY_OK) r = get_str(o, "note", e.note, sizeof e.note, false);
+    if (r == HY_OK) {
+        en = 0;
+        r = get_enum(o, "source", SOURCE_NAMES, 4, false, &en);
+        e.source = (hy_source_t)en;
+    }
+    if (r == HY_OK) r = get_bool(o, "edited", &e.edited);
+    if (r == HY_OK) *out = e;
     return r;
 }
 

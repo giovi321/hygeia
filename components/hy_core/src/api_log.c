@@ -6,7 +6,6 @@
 #include "codec_obj.h"
 #include "hy/api.h"
 
-#define MAX_SAFE_INT 999999999999999.0
 #define DEFAULT_SPAN_S (30LL * 86400)
 
 /* ---- query ---- */

@@ -288,6 +288,30 @@ static void test_med_bad_utf8(void)
     TEST_ASSERT_EQUAL_STRING("code", err.field);
 }
 
+static void test_med_duplicate_members(void)
+{
+    hy_med_t out;
+    hy_api_err_t err;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json(
+        "{\"code\":\"A\",\"name\":\"ok\",\"name\":\"\xC3\"}", NULL, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("name", err.field);
+    TEST_ASSERT_EQUAL_INT(400, err.http);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json(
+        "{\"dose\":\"1\",\"dose\":\"12345678901234567\"}", NULL, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("dose", err.field);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json(
+        "{\"schedule\":{\"weekdays\":1,\"weekdays\":2}}", NULL, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("weekdays", err.field);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json(
+        "{\"pill_count\":{\"alert\":1,\"alert\":2}}", NULL, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("alert", err.field);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json("{\"color\":1,\"color\":2}", NULL, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("color", err.field);
+    /* a bad string is caught whichever position it has */
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_med_from_json("{\"name\":\"\xC3\",\"dose\":\"1\"}", NULL, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("name", err.field);
+}
+
 static void test_etag_changes_with_any_field(void)
 {
     hy_med_t base = full_med();
@@ -662,6 +686,7 @@ int main(void)
     RUN_TEST(test_med_merge_partial);
     RUN_TEST(test_med_ignores_protected);
     RUN_TEST(test_med_bad_utf8);
+    RUN_TEST(test_med_duplicate_members);
     RUN_TEST(test_etag_changes_with_any_field);
     RUN_TEST(test_meds_json);
     RUN_TEST(test_order_rules);

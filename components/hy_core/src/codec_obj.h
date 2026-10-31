@@ -6,6 +6,9 @@
 #include "cJSON.h"
 #include "hy/types.h"
 
+/* 15 digits: cJSON prints numbers with %1.15g, so integers up to here round-trip exactly. */
+#define MAX_SAFE_INT 999999999999999.0
+
 /* Medicine object as stored. NULL when the record is out of range. Caller frees with cJSON_Delete. */
 cJSON *hy_codec_med_obj(const hy_med_t *m);
 /* Defaults, then the object's fields; id, code and name are required. */

@@ -63,14 +63,18 @@ char *hy_api_meds_json(const hy_med_t *m, size_t n)
         cJSON_Delete(arr);
         return NULL;
     }
-    cJSON_AddItemToObject(root, "meds", arr);
+    if (!cJSON_AddItemToObject(root, "meds", arr)) {
+        cJSON_Delete(root);
+        cJSON_Delete(arr);
+        return NULL;
+    }
     for (size_t i = 0; i < n; i++) {
         cJSON *o = med_obj_with_etag(&m[i]);
-        if (!o) {
+        if (!o || !cJSON_AddItemToArray(arr, o)) {
+            cJSON_Delete(o);
             cJSON_Delete(root);
             return NULL;
         }
-        cJSON_AddItemToArray(arr, o);
     }
     char *s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -86,15 +90,23 @@ static bool protected_key(const char *k)
            strcmp(k, "order") == 0;
 }
 
-/* Checks one string member of the body: type, UTF-8, length (size includes the NUL). */
-static hy_err_t check_string(const cJSON *body, const char *key, size_t size, hy_err_t too_long,
-                             hy_api_err_t *err)
+/* Checks one string member: type, UTF-8, length (size includes the NUL). */
+static hy_err_t check_string(const cJSON *it, size_t size, hy_err_t too_long, hy_api_err_t *err)
 {
-    cJSON *it = cJSON_GetObjectItemCaseSensitive(body, key);
-    if (!it || cJSON_IsNull(it)) return HY_OK;
-    if (!cJSON_IsString(it) || it->valuestring == NULL) return hy_api_fail(err, HY_E_INVALID, key);
-    if (!hy_api_utf8_valid(it->valuestring)) return hy_api_fail(err, HY_E_INVALID, key);
-    if (strlen(it->valuestring) >= size) return hy_api_fail(err, too_long, key);
+    if (!cJSON_IsString(it) || it->valuestring == NULL) return hy_api_fail(err, HY_E_INVALID, it->string);
+    if (!hy_api_utf8_valid(it->valuestring)) return hy_api_fail(err, HY_E_INVALID, it->string);
+    if (strlen(it->valuestring) >= size) return hy_api_fail(err, too_long, it->string);
+    return HY_OK;
+}
+
+/* HY_E_INVALID with the member name when an object holds the same member name twice. */
+static hy_err_t reject_duplicates(const cJSON *obj, hy_api_err_t *err)
+{
+    for (const cJSON *a = obj->child; a; a = a->next) {
+        if (!a->string) continue;
+        for (const cJSON *b = a->next; b; b = b->next)
+            if (b->string && strcmp(a->string, b->string) == 0) return hy_api_fail(err, HY_E_INVALID, a->string);
+    }
     return HY_OK;
 }
 
@@ -146,9 +158,12 @@ hy_err_t hy_api_med_from_json(const char *body, const hy_med_t *base, hy_med_t *
         b.code[0] = '\0';
         b.name[0] = '\0';
     }
-    hy_err_t r = check_string(in, "code", sizeof b.code, HY_E_CODE, err);
-    if (r == HY_OK) r = check_string(in, "name", sizeof b.name, HY_E_NAME, err);
-    if (r == HY_OK) r = check_string(in, "dose", sizeof b.dose, HY_E_DOSE, err);
+    hy_err_t r = reject_duplicates(in, err);
+    for (const cJSON *it = in->child; r == HY_OK && it; it = it->next) {
+        if (it->string && (strcmp(it->string, "schedule") == 0 || strcmp(it->string, "pill_count") == 0) &&
+            cJSON_IsObject(it))
+            r = reject_duplicates(it, err);
+    }
 
     cJSON *obj = NULL;
     if (r == HY_OK) {
@@ -157,6 +172,10 @@ hy_err_t hy_api_med_from_json(const char *body, const hy_med_t *base, hy_med_t *
     }
     for (const cJSON *it = in->child; r == HY_OK && it; it = it->next) {
         if (!it->string || cJSON_IsNull(it) || protected_key(it->string)) continue;
+        if (strcmp(it->string, "code") == 0) r = check_string(it, sizeof b.code, HY_E_CODE, err);
+        else if (strcmp(it->string, "name") == 0) r = check_string(it, sizeof b.name, HY_E_NAME, err);
+        else if (strcmp(it->string, "dose") == 0) r = check_string(it, sizeof b.dose, HY_E_DOSE, err);
+        if (r != HY_OK) break;
         if (strcmp(it->string, "schedule") == 0 || strcmp(it->string, "pill_count") == 0) {
             if (!cJSON_IsObject(it)) r = hy_api_fail(err, HY_E_INVALID, it->string);
             else r = overlay_nested(obj, it, it->string, err);
