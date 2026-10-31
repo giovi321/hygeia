@@ -66,30 +66,56 @@ static void unload(rec_t *r)
 #define LOAD_OR_IGNORE(name, r) \
     do { if (!load(name, &(r))) TEST_IGNORE_MESSAGE("missing data/motion/" name); } while (0)
 
-/* Number of detections over the whole file; the detector is reset at the first sample. Prints one margin line:
-   shakes, the largest peak count reached (a detection counts as HY_SHK_PEAKS) and the largest |hp| on any axis,
-   hp = sample - base taken from the detector state just before the feed (0 on the first sample). */
-static int shake_count(const char *name, const rec_t *r)
+/* Number of detections over the whole file, the samples scaled by num/den; the detector is reset at the first sample.
+   Prints one margin line: shakes, the largest stroke count reached (a detection counts as HY_SHK_STROKES) and the
+   largest stroke swing that took at most HY_SHK_STROKE_MS (a stroke is the change between two successive turning
+   points on one axis; HY_SHK_SWING_MG is the threshold). Scaling the signal by k moves the swing threshold by 1/k,
+   so a run at 100/115 shows the count with the threshold 15 % higher. */
+static int shake_count_scaled(const char *name, const rec_t *r, int num, int den)
 {
     hy_shake_t s;
     hy_shake_reset(&s, r->s[0].t);
-    int n = 0, max_count = 0, max_hp = 0;
+    int n = 0, max_count = 0;
+    int32_t max_swing = 0;
     for (int i = 0; i < r->n; i++) {
+        hy_accel_t a;
         int32_t v[3] = {r->s[i].a.x, r->s[i].a.y, r->s[i].a.z};
+        int16_t *w[3] = {&a.x, &a.y, &a.z};
         for (int k = 0; k < 3; k++) {
-            int hp = s.primed ? (int)(v[k] - s.base[k]) : 0;
-            if (hp < 0) hp = -hp;
-            if (hp > max_hp) max_hp = hp;
+            int32_t sv = v[k] * num / den;
+            TEST_ASSERT_TRUE_MESSAGE(sv >= INT16_MIN && sv <= INT16_MAX, "scaled value outside int16 range");
+            *w[k] = (int16_t)sv;
         }
-        if (hy_shake_feed(&s, r->s[i].t, r->s[i].a)) {
+        bool had[3];
+        int32_t pv[3];
+        uint32_t pt[3];
+        for (int k = 0; k < 3; k++) {
+            had[k] = s.ax[k].have_prev;
+            pv[k] = s.ax[k].prev_v;
+            pt[k] = s.ax[k].prev_ms;
+        }
+        if (hy_shake_feed(&s, r->s[i].t, a)) {
             n++;
-            max_count = HY_SHK_PEAKS;
-        } else if (s.count > max_count) {
-            max_count = s.count;
+            max_count = HY_SHK_STROKES;
+        }
+        for (int k = 0; k < 3; k++) {
+            if (s.ax[k].count > max_count) max_count = s.ax[k].count;
+            if (had[k] && (s.ax[k].prev_ms != pt[k] || s.ax[k].prev_v != pv[k]) &&
+                s.ax[k].prev_ms - pt[k] <= HY_SHK_STROKE_MS) {
+                int32_t sw = s.ax[k].prev_v - pv[k];
+                if (sw < 0) sw = -sw;
+                if (sw > max_swing) max_swing = sw;
+            }
         }
     }
-    printf("motion rec %s: shakes %d, max count %d, max hp %d mg\n", name, n, max_count, max_hp);
+    printf("motion rec %s x%d/%d: shakes %d, max count %d, max stroke %d mg\n", name, num, den, n,
+           max_count, (int)max_swing);
     return n;
+}
+
+static int shake_count(const char *name, const rec_t *r)
+{
+    return shake_count_scaled(name, r, 1, 1);
 }
 
 /* Init orientation: the candidate that holds on every sample of the first second if there is one, else 0. */
@@ -127,8 +153,10 @@ static void check_no_shake(const char *name)
     rec_t r;
     if (!load(name, &r)) TEST_IGNORE_MESSAGE(name);
     int n = shake_count(name, &r);
+    int n2 = shake_count_scaled(name, &r, 2, 1);   /* margin: twice the motion is still not a shake */
     unload(&r);
     TEST_ASSERT_EQUAL_MESSAGE(0, n, name);
+    TEST_ASSERT_EQUAL_MESSAGE(0, n2, name);
 }
 
 static void check_no_switch(const char *name)
@@ -142,13 +170,41 @@ static void check_no_switch(const char *name)
     TEST_ASSERT_EQUAL_MESSAGE(0, w.n, name);
 }
 
+/* Each shake is one burst of strokes; shake_firm holds three (the first is a fragment, the recording starts in it),
+   and each gives exactly one detection. */
 static void test_shake_firm(void)
 {
     rec_t r;
     LOAD_OR_IGNORE("shake_firm.csv", r);
     int n = shake_count("shake_firm.csv", &r);
+    int n_weak = shake_count_scaled("shake_firm.csv", &r, 100, 115);   /* threshold 15 % higher */
     unload(&r);
     TEST_ASSERT_EQUAL(3, n);
+    TEST_ASSERT_EQUAL(3, n_weak);
+}
+
+/* A live recording made with the detector armed: two bursts (about 3.2 to 4.7 s and 6.8 to 8.7 s) and a 0.9 g
+   bump at 10.8 s. The detector built before this one fired twice, both times in the second burst. */
+static void test_shake_live_combo(void)
+{
+    rec_t r;
+    LOAD_OR_IGNORE("shake_live_combo.csv", r);
+    int n = shake_count("shake_live_combo.csv", &r);
+    int n_weak = shake_count_scaled("shake_live_combo.csv", &r, 100, 115);
+    unload(&r);
+    TEST_ASSERT_EQUAL(2, n);
+    TEST_ASSERT_EQUAL(2, n_weak);
+}
+
+/* A recording made right after arming the detector: the board lay still for the whole 30 s (every axis stays within
+   46 mg), so it holds no shake. */
+static void test_shake_live_arm(void)
+{
+    rec_t r;
+    LOAD_OR_IGNORE("shake_live_arm.csv", r);
+    int n = shake_count("shake_live_arm.csv", &r);
+    unload(&r);
+    TEST_ASSERT_EQUAL(0, n);
 }
 
 static void test_shake_light(void)
@@ -161,13 +217,16 @@ static void test_shake_light(void)
 
 static void test_tap_desk(void)     { check_no_shake("tap_desk.csv"); }
 static void test_tap_held(void)     { check_no_shake("tap_held.csv"); }
+static void test_tap_double(void)   { check_no_shake("tap_double.csv"); }
 static void test_carry_walk(void)   { check_no_shake("carry_walk.csv"); }
 static void test_putdown_pickup(void) { check_no_shake("putdown_pickup.csv"); }
 static void test_table_knock(void)  { check_no_shake("table_knock.csv"); }
 
 static void test_rotate_cycle(void)
 {
-    static const hy_rot_t want[] = {HY_ROT_90, HY_ROT_180, HY_ROT_270, HY_ROT_0};
+    /* The recording turns the board left edge up, bottom edge up, right edge up, top edge up (accel x -962 at the
+       first switch: -x up is 270). */
+    static const hy_rot_t want[] = {HY_ROT_270, HY_ROT_180, HY_ROT_90, HY_ROT_0};
     rec_t r;
     sw_t w;
     LOAD_OR_IGNORE("rotate_cycle.csv", r);
@@ -192,21 +251,49 @@ static void test_rotate_cycle(void)
     unload(&r);
 }
 
-static void test_tilt_diagonal(void) { check_no_switch("tilt_diagonal.csv"); }
+/* Wobbling around the diagonal between two edges: three switches, 270, 0 and 270 degrees. Each one is a real
+   tilt under the rule: the pose sat inside the 30 degree cone of the new edge for HY_OR_DWELL_MS without a sample
+   leaving it (the 0 switch at the rim of the cone, 27 to 30 degrees, the other two 8 to 29 degrees from their
+   edge). Times are from the first sample. */
+static void test_tilt_diagonal_real_tilts(void)
+{
+    static const hy_rot_t want[] = {HY_ROT_270, HY_ROT_0, HY_ROT_270};
+    static const uint32_t at_ms[] = {14680, 17340, 19280};
+    rec_t r;
+    sw_t w;
+    LOAD_OR_IGNORE("tilt_diagonal.csv", r);
+    (void)shake_count("tilt_diagonal.csv", &r);
+    orient_run(&r, &w);
+    TEST_ASSERT_EQUAL(HY_ROT_0, w.init);
+    TEST_ASSERT_EQUAL(3, w.n);
+    for (int k = 0; k < w.n; k++) {
+        TEST_ASSERT_EQUAL(want[k], w.rot[k]);
+        TEST_ASSERT_EQUAL_UINT32(at_ms[k], r.s[w.idx[k]].t);
+        /* the candidate held on every sample of the dwell before the switch */
+        int j = w.idx[k];
+        for (hy_rot_t c; j > 0 && hy_orient_candidate(r.s[j - 1].a, &c) && c == w.rot[k]; j--) {}
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT32(HY_OR_DWELL_MS, r.s[w.idx[k]].t - r.s[j].t);
+    }
+    unload(&r);
+}
+
 static void test_flat_spin(void)     { check_no_switch("flat_spin.csv"); }
 
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_shake_firm);
+    RUN_TEST(test_shake_live_combo);
+    RUN_TEST(test_shake_live_arm);
     RUN_TEST(test_shake_light);
     RUN_TEST(test_tap_desk);
     RUN_TEST(test_tap_held);
+    RUN_TEST(test_tap_double);
     RUN_TEST(test_carry_walk);
     RUN_TEST(test_putdown_pickup);
     RUN_TEST(test_table_knock);
     RUN_TEST(test_rotate_cycle);
-    RUN_TEST(test_tilt_diagonal);
+    RUN_TEST(test_tilt_diagonal_real_tilts);
     RUN_TEST(test_flat_spin);
     return UNITY_END();
 }

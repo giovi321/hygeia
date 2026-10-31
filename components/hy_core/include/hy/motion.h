@@ -43,26 +43,31 @@ bool     hy_orient_feed(hy_orient_t *o, uint32_t t_ms, hy_accel_t a);
 hy_rot_t hy_orient_current(const hy_orient_t *o);
 void     hy_orient_set(hy_orient_t *o, hy_rot_t r);   /* forced (lock, debug): cur = r, candidate cleared */
 
-#define HY_SHK_PEAK_MG     1300  /* high-passed value on one axis that counts as a peak */
-#define HY_SHK_REARM_MG     600  /* the axis must fall below this before the next peak counts */
-#define HY_SHK_PEAKS          4  /* alternating-sign peaks on the same axis */
-#define HY_SHK_MIN_GAP_MS    60  /* closer peaks are a rebound, not a new peak */
-#define HY_SHK_MAX_GAP_MS   400  /* a longer pause restarts the count */
-#define HY_SHK_WINDOW_MS   1500  /* first to last counted peak */
-#define HY_SHK_SETTLE_MS    200  /* after reset: samples only train the baseline */
-#define HY_SHK_COOLDOWN_MS 1000  /* after a detection */
+#define HY_SHK_SWING_MG    3000  /* a stroke: the change between two successive turning points on one axis */
+#define HY_SHK_REVERSAL_MG  500  /* the signal must back off this far from its extreme to confirm a turning point */
+#define HY_SHK_STROKES        3  /* consecutive strokes on one axis that make a shake */
+#define HY_SHK_STROKE_MS    200  /* a stroke longer than this is slow motion, not a shake */
+#define HY_SHK_SETTLE_MS    200  /* after reset: strokes are tracked but not counted */
+#define HY_SHK_COOLDOWN_MS 1000  /* after a detection, at least this long without detections */
+#define HY_SHK_CALM_MS      400  /* and until this long has passed since the last stroke */
 
-/* lat_axis is the axis that latched the last peak; cooling is true from a detection until the cooldown ends. */
-typedef struct { int32_t base[3]; uint32_t start_ms, first_ms, last_ms, cool_until_ms; int8_t axis, sign, lat_axis;
-                 uint8_t count; bool latched, primed, cooling; } hy_shake_t;
+/* Per axis: hi and lo are the extremes since the last turning point (t_hi, t_lo their times), dir is 1 while rising,
+   -1 while falling, 0 before the first turning point; prev_v and prev_ms are the last confirmed turning point, valid
+   when have_prev; count is the run of consecutive strokes. cooling is true from a detection until the cooldown ends. */
+typedef struct { int32_t hi, lo, prev_v; uint32_t t_hi, t_lo, prev_ms; int8_t dir; bool have_prev; uint8_t count; }
+    hy_shake_axis_t;
+typedef struct { hy_shake_axis_t ax[3]; uint32_t start_ms, cool_until_ms, last_stroke_ms; bool primed, cooling; }
+    hy_shake_t;
 
 void hy_shake_reset(hy_shake_t *s, uint32_t now_ms);
-/* Per axis: hp = a - base, then base += (a - base) / 16 (the first sample after reset sets base = a and hp = 0).
-   A peak is the axis with the largest |hp| when |hp| >= HY_SHK_PEAK_MG and the detector is not latched; it latches
-   until that axis' |hp| < HY_SHK_REARM_MG. A peak on the counting axis with the opposite sign, HY_SHK_MIN_GAP_MS to
-   HY_SHK_MAX_GAP_MS after the last one, counts; a peak closer than HY_SHK_MIN_GAP_MS is ignored; anything else
-   (same sign, other axis, longer gap, outside the window) starts a new count of 1 with this peak. The count
-   reaching HY_SHK_PEAKS returns true once, then cooldown. */
+/* The raw acceleration of each axis (gravity included, no filter) is followed for turning points: a maximum is
+   confirmed when the value falls HY_SHK_REVERSAL_MG below it, a minimum when it rises that far above it. The
+   change from the previous turning point to a new one is a stroke when it is at least HY_SHK_SWING_MG and took at
+   most HY_SHK_STROKE_MS; the first turning point after reset only starts the chain. A stroke that does not qualify
+   sets that axis' count to 0; a qualifying one adds 1 to it. A count reaching HY_SHK_STROKES on any axis returns
+   true once; every count is cleared and nothing is counted until HY_SHK_COOLDOWN_MS have passed since the
+   detection and HY_SHK_CALM_MS since the last qualifying stroke on any axis (so one long shake gives one
+   detection). Within HY_SHK_SETTLE_MS of the reset nothing is counted (a stroke there clears the count). */
 bool hy_shake_feed(hy_shake_t *s, uint32_t t_ms, hy_accel_t a);
 
 #endif
