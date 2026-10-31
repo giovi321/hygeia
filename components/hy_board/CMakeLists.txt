@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/board.c"
+        "src/lv_mem_psram.c"
         "src/qmi8658.c"
     INCLUDE_DIRS
         "include"
@@ -15,3 +16,7 @@ idf_component_register(
         esp_timer
         esp_pm
 )
+
+# Nothing in this component references the LVGL memory backend; only liblvgl does.
+# Force the object out of the archive so the linker resolves lv_malloc_core.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,-u,lv_malloc_core")

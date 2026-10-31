@@ -8,6 +8,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "cJSON.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "hy/audio.h"
@@ -240,8 +242,22 @@ static void seed_example_meds(void)
     }
 }
 
+/* JSON trees (store saves, API bodies) live in PSRAM; internal RAM stays free for Wi-Fi and DMA. */
+static void *json_malloc(size_t size)
+{
+    return heap_caps_malloc_prefer(size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+static void json_free(void *p)
+{
+    heap_caps_free(p);
+}
+
 static void init_storage(void)
 {
+    cJSON_Hooks hooks = {.malloc_fn = json_malloc, .free_fn = json_free};
+    cJSON_InitHooks(&hooks);
     esp_err_t err = hy_store_mount();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storage unavailable, no persistence: %s", esp_err_to_name(err));

@@ -455,9 +455,11 @@ static void job_perf(void)
     ESP_LOGI(TAG, "perf: home_refresh split: tile views %u.%03u ms, LVGL updates %u.%03u ms",
              (unsigned)(view_us / 1000), (unsigned)(view_us % 1000), (unsigned)(lvgl_us / 1000),
              (unsigned)(lvgl_us % 1000));
-    ESP_LOGI(TAG, "perf: heap internal free %u (min %u), PSRAM free %u",
+    ESP_LOGI(TAG, "perf: heap internal free %u (min %u, largest block %u), DMA free %u, PSRAM free %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
