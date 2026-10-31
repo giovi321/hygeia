@@ -9,7 +9,8 @@ description: Repository layout, host tests and the serial debug console.
 |---|---|
 | `main/` | `app_main.c`, the debug console, Kconfig |
 | `components/hy_core` | pure logic with no hardware: types, medicines, occurrences, scheduler rules, actions, navigation and gestures, settings, time zone table, summaries |
-| `components/hy_board` | display, touch, PMU, brightness |
+| `components/hy_board` | display, touch, PMU, brightness, IMU driver |
+| `components/hy_motion` | the motion task: reads the IMU while the screen is on or dimmed, orientation and shake |
 | `components/hy_clock` | RTC driver, time zone, clock validity |
 | `components/hy_sched` | runs the scheduler with the real clock and store |
 | `components/hy_store` | LittleFS mount, medicine and log files, NVS settings |
@@ -31,7 +32,7 @@ make -C host_tests test
 
 ## Debug console
 
-The default build has a serial console on the USB Serial/JTAG port with line commands. It is for development; the release build turns it off. Commands include `time <epoch> [posix_tz]`, `zone <iana> <posix_tz>`, `clock`, `tap <code>`, `undo`, `logs`, `alarm <seconds>`, `chime`, `shot`, `nav`, `idle`, `gesture`, `remindtest`, `due`, `history`, `detail`, `note`, `earlier`, `qs`, `settings`, `settz <iana>`, `perf`, `powerstat` and `seed4`. The set changes as the firmware changes; the source is `main/console.c` and `main/app_main.c`.
+The default build has a serial console on the USB Serial/JTAG port with line commands. It is for development; the release build turns it off. Commands include `time <epoch> [posix_tz]`, `zone <iana> <posix_tz>`, `clock`, `tap <code>`, `undo`, `logs`, `alarm <seconds>`, `chime`, `shot`, `nav`, `idle`, `gesture`, `remindtest`, `due`, `history`, `detail`, `note`, `earlier`, `qs`, `settings`, `settz <iana>`, `perf`, `powerstat`, `seed4`, `imu`, `motion`, `rot`, `madctl` and `shake`. The set changes as the firmware changes; the source is `main/console.c` and `main/app_main.c`.
 
 ## Docs site
 

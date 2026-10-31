@@ -20,7 +20,7 @@ description: Every touch gesture, with the thresholds the firmware uses.
 | Swipe down on the due card | shows the previous due dose |
 | Double tap on History | switches between 7 and 30 days |
 | Turn the device | the screen follows in all four orientations after about 1 second still in the new position, unless Rotation lock is on |
-| Shake the device while the Undo toast shows | undoes the dose, the same as tapping Undo |
+| Shake the device while the Undo toast shows | undoes the dose or skip, the same as tapping Undo |
 | Any touch while the screen is dimmed | wakes the screen; nothing else happens |
 
 ## Turning and shaking
