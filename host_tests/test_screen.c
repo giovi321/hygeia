@@ -93,7 +93,9 @@ static void test_unplug_restarts_timer(void)
    unplug test starts from DIM; this one starts from ON.) */
 static void test_battery_off_after_usb_out_ticks(void)
 {
-    hy_screen_t s; hy_screen_init(&s, true, 0);
+    hy_screen_t s; hy_screen_init(&s, false, 0);
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_USB_IN, S(5), &CFG));
+    TEST_ASSERT_TRUE(s.usb);
     TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(10), &CFG));
     TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_USB_OUT, S(10), &CFG));
     TEST_ASSERT_FALSE(s.usb);

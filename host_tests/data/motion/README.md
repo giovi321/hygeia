@@ -8,7 +8,7 @@ All recorded on the board at 50 Hz after the IMU mount correction, 25 to 30 s lo
 
 | File | What it is |
 | --- | --- |
-| shake_firm.csv | Three firm shakes. The first is a fragment (the recording starts inside it), the other two last about 1.5 s and 2.3 s. Expected: 3 detections |
+| shake_firm.csv | Three firm shakes. The first is a fragment (the recording starts inside it), the other two last about 1.5 s and 2.3 s. Expected: 2 detections (the 3-stroke fragment at t = 0 is not counted at 4 strokes) |
 | shake_light.csv | Two light shakes (about 1.1 s and 1.4 s). Informative: the test prints the count and asserts nothing |
 | shake_live_combo.csv | Recorded while the detector was armed in debug mode. Two shake bursts (about 3.2 to 4.7 s and 6.8 to 8.7 s) and a 0.9 g bump at 10.8 s. The previous detector fired twice, both in the second burst. Expected: 2 detections |
 | shake_live_arm.csv | Recorded in a debug run of the detector, from a window that ends about 40 s before the detector was armed. The board lay still (every axis within 46 mg), so there is no shake. Expected: 0 detections |
