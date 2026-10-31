@@ -1,5 +1,7 @@
 /* The orientation follows the device. The motion task decides, this file applies in the LVGL task: never while the
-   splash runs, a finger is down or the screen is off. The latest request wins. */
+   splash runs, a finger is down or the screen is off. The latest request wins. When a deferred rotation is finally
+   applied (the stroke ended), the pose the device holds by then replaces it if that pose has held for the wake dwell,
+   so two quarter turns during one stroke show as one step. */
 #include <stdbool.h>
 
 #include "esp_log.h"
@@ -71,10 +73,21 @@ void rotate_poll(void)
     }
     hy_rot_t r = s_pending;
     s_has_pending = false;
+    /* The request was made while the stroke ran, so it may be a pose the device has left since. If the device holds
+       another pose now (a quarter turn further, for at least the wake dwell), go straight to it. */
+    hy_rot_t held;
+    bool moved_on = hy_motion_pose_held(&held) && held != r;
+    if (moved_on) {
+        ESP_LOGI(TAG, "pending %u replaced by the held pose %u", (unsigned)r * 90, (unsigned)held * 90);
+        r = held;
+    }
     if ((uint8_t)r == hy_board_rotation()) {
+        if (moved_on) {
+            hy_motion_set_current(r);   /* the motion task's state is ahead of the panel: bring it back */
+        }
         return;
     }
-    apply(r, "auto");
+    apply(r, moved_on ? "auto, held pose" : "auto");
 }
 
 static void poll_cb(lv_timer_t *t)

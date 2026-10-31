@@ -243,6 +243,53 @@ static void test_orient_plane_threshold(void)
     TEST_ASSERT_EQUAL(HY_ROT_0, hy_orient_current(&o));
 }
 
+/* The deferred-rotation case: during a hold the device passes 90 long enough to switch (the UI queues 90), then moves
+   on to 180. At the release the state is cur = 90, and 180 has not held the full dwell. */
+static void test_held_pose_after_two_quarters(void)
+{
+    hy_orient_t o;
+    hy_orient_init(&o, HY_ROT_0);
+    uint32_t t = 1000;
+    TEST_ASSERT_EQUAL(1, run(&o, &t, 1500, A90));
+    TEST_ASSERT_EQUAL(HY_ROT_90, hy_orient_current(&o));
+    TEST_ASSERT_EQUAL(0, run(&o, &t, 300, A180));   /* 16 samples, 300 ms from the first to the last */
+    TEST_ASSERT_EQUAL(HY_ROT_90, hy_orient_current(&o));   /* this is why the screen stepped through 90 */
+    uint32_t now = t - STEP;
+    hy_rot_t r = HY_ROT_0;
+    TEST_ASSERT_TRUE(hy_orient_held(&o, now, HY_OR_WAKE_DWELL_MS, &r));
+    TEST_ASSERT_EQUAL(HY_ROT_180, r);
+    TEST_ASSERT_EQUAL(HY_ROT_90, hy_orient_current(&o));   /* the query changes nothing */
+}
+
+static void test_held_pose_under_wake_dwell(void)
+{
+    hy_orient_t o;
+    hy_orient_init(&o, HY_ROT_0);
+    uint32_t t = 1000;
+    run(&o, &t, 1500, A90);
+    run(&o, &t, 220, A180);   /* 220 ms from the first sample to the last */
+    hy_rot_t r = HY_ROT_0;
+    TEST_ASSERT_FALSE(hy_orient_held(&o, t - STEP, HY_OR_WAKE_DWELL_MS, &r));
+    TEST_ASSERT_EQUAL(HY_ROT_0, r);
+}
+
+static void test_held_pose_none_cases(void)
+{
+    hy_orient_t o;
+    hy_orient_init(&o, HY_ROT_0);
+    uint32_t t = 1000;
+    hy_rot_t r = HY_ROT_270;
+    TEST_ASSERT_FALSE(hy_orient_held(&o, t, HY_OR_WAKE_DWELL_MS, &r));   /* no samples */
+    run(&o, &t, 1500, A90);   /* switched: the pose equals cur, no candidate */
+    TEST_ASSERT_FALSE(hy_orient_held(&o, t - STEP, HY_OR_WAKE_DWELL_MS, &r));
+    run(&o, &t, 600, A180);
+    uint32_t last = t - STEP;
+    TEST_ASSERT_TRUE(hy_orient_held(&o, last + HY_OR_GAP_MS, HY_OR_WAKE_DWELL_MS, &r));
+    TEST_ASSERT_FALSE(hy_orient_held(&o, last + HY_OR_GAP_MS + 1, HY_OR_WAKE_DWELL_MS, &r));   /* sampling stopped */
+    run(&o, &t, 100, FLAT);   /* moving or flat: the candidate is gone */
+    TEST_ASSERT_FALSE(hy_orient_held(&o, t - STEP, HY_OR_WAKE_DWELL_MS, &r));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -261,5 +308,8 @@ int main(void)
     RUN_TEST(test_orient_set);
     RUN_TEST(test_orient_slow_turn);
     RUN_TEST(test_orient_plane_threshold);
+    RUN_TEST(test_held_pose_after_two_quarters);
+    RUN_TEST(test_held_pose_under_wake_dwell);
+    RUN_TEST(test_held_pose_none_cases);
     return UNITY_END();
 }

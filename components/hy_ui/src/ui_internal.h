@@ -296,11 +296,14 @@ void screen_debug(const char *arg);              /* `scr [off|nousb|usb]` */
 #endif
 
 /* rotate.c: the orientation follows the device. The motion task asks through rotate_request; a rotation applies only
- * when the splash is over, the touch is released and the screen is not OFF. */
+ * when the splash is over, the touch is released and the screen is not OFF. A rotation that waited for the release
+ * goes to the pose the device holds then, not to a stale intermediate one. After a screen-off nothing is deferred:
+ * the orientation state restarts with the wake dwell and posts the pose the device holds. */
 void rotate_init(void);                          /* after screen_init: starts the motion task with the applied rotation */
 void rotate_screen_state(hy_scr_t st);           /* idle.c apply(): ON and DIM enable the motion task, OFF disables it */
 void rotate_request(hy_rot_t r);                 /* motion callback: pending = r; rotate_poll applies it */
-void rotate_poll(void);                          /* LVGL timer, 50 ms: applies the pending rotation when allowed */
+void rotate_poll(void);                          /* LVGL timer, 50 ms: applies the pending rotation when allowed; if the device
+                                                    holds another pose by then (hy_motion_pose_held), that pose is applied instead */
 void rotate_set_lock(bool on);                   /* saves rot_lock and rot, tells the motion task */
 bool rotate_locked(void);
 void shake_event(void);                          /* motion callback and debug: undoes the dose while the Undo toast shows */
