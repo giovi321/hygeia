@@ -156,16 +156,40 @@ esp_err_t net_nvs_save_list(const net_cfg_t *c)
     if (err != ESP_OK) {
         return err;
     }
-    err = nvs_set_u8(h, "n", c->n);
+    /* Safe on power loss at any point: a shrinking list writes "n" first and a growing one last, so "n" never
+     * covers an entry that is not written yet; an entry's SSID is erased before its password changes and written
+     * after it, so an SSID never pairs with another network's password (the load drops an entry without SSID). */
+    uint8_t old_n = 0;
+    if (nvs_get_u8(h, "n", &old_n) != ESP_OK) {
+        old_n = 0;
+    }
+    err = ESP_OK;
+    if (c->n < old_n) {
+        err = nvs_set_u8(h, "n", c->n);
+        if (err == ESP_OK) err = nvs_commit(h);
+    }
     for (uint8_t i = 0; i < HY_NET_MAX_KNOWN && err == ESP_OK; i++) {
         char ks[8], kp[8], ko[8];
         snprintf(ks, sizeof ks, "s%u", (unsigned)i);
         snprintf(kp, sizeof kp, "p%u", (unsigned)i);
         snprintf(ko, sizeof ko, "ok%u", (unsigned)i);
         if (i < c->n) {
-            err = nvs_set_str(h, ks, c->e[i].ssid);
-            if (err == ESP_OK) err = nvs_set_str(h, kp, c->e[i].pass);
-            if (err == ESP_OK) err = nvs_set_u32(h, ko, c->e[i].ok);
+            char cur_s[33], cur_p[64];
+            get_str(h, ks, cur_s, sizeof cur_s);
+            get_str(h, kp, cur_p, sizeof cur_p);
+            bool same = strcmp(cur_s, c->e[i].ssid) == 0 && strcmp(cur_p, c->e[i].pass) == 0;
+            memset(cur_p, 0, sizeof cur_p);
+            if (!same) {
+                esp_err_t e = nvs_erase_key(h, ks);
+                err = (e == ESP_OK || e == ESP_ERR_NVS_NOT_FOUND) ? ESP_OK : e;
+                if (err == ESP_OK) err = nvs_commit(h);
+                if (err == ESP_OK) err = nvs_set_str(h, kp, c->e[i].pass);
+                if (err == ESP_OK) err = nvs_set_u32(h, ko, c->e[i].ok);
+                if (err == ESP_OK) err = nvs_commit(h);
+                if (err == ESP_OK) err = nvs_set_str(h, ks, c->e[i].ssid);
+            } else {
+                err = nvs_set_u32(h, ko, c->e[i].ok);
+            }
         } else {
             const char *keys[3] = {ks, kp, ko};
             for (int k = 0; k < 3 && err == ESP_OK; k++) {
@@ -175,6 +199,9 @@ esp_err_t net_nvs_save_list(const net_cfg_t *c)
                 }
             }
         }
+    }
+    if (err == ESP_OK && c->n >= old_n) {
+        err = nvs_set_u8(h, "n", c->n);
     }
     return finish(h, err, "networks");
 }

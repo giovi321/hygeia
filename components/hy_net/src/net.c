@@ -2,11 +2,13 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 
 #include "dhcpserver/dhcpserver.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -35,6 +37,8 @@
 #define RSSI_EVERY_S 5
 #define USB_WAIT_S  5          /* the first radio decision waits this long for a PMU reading */
 #define NTP_SERVER  "pool.ntp.org"
+#define START_RETRY_S 30       /* a radio that failed to start is tried again after this */
+#define DISC_SWALLOW_MS 1500   /* a disconnect event this soon after our own call is ours */
 
 static const char *TAG = "net";
 static const char *TAG_NTP = "ntp";
@@ -53,7 +57,8 @@ typedef struct {
 } msg_t;
 
 /* ---- shared state ---- */
-static SemaphoreHandle_t s_mu;   /* s_cfg, s_pin, s_st, s_subs */
+static SemaphoreHandle_t s_mu;   /* s_cfg, s_pin, s_st, s_subs; never held across an NVS write */
+static SemaphoreHandle_t s_save_mu;   /* orders NVS writes: taken before s_mu, held across the write */
 static net_cfg_t s_cfg;
 static char s_pin[33];           /* the SSID hy_net_set_mode asked for first, "" none */
 static hy_net_status_t s_st;
@@ -73,6 +78,7 @@ static int64_t s_activity_s = INT64_MIN / 2;
 static bool s_keep_batt;
 static bool s_start_req;          /* hy_net_set_mode ran: counts as started on battery */
 static int64_t s_ntp_utc;         /* the latest SNTP time, read by the LVGL job */
+static int64_t s_ntp_mono_us;     /* esp_timer time when s_ntp_utc was received */
 
 /* ---- net task state ---- */
 static struct {
@@ -84,6 +90,7 @@ static struct {
     int64_t t_start;
     /* client */
     bool sta_started, got_ip, waiting, link_down, expect_disc;
+    int64_t disc_ms;              /* when expect_disc was set (esp_timer ms) */
     uint8_t order[HY_NET_MAX_KNOWN], order_n, idx;
     int64_t slot_t0, last_connect, wait_until, stretch_t0, last_rssi;
     uint32_t passes;
@@ -92,6 +99,9 @@ static struct {
     char cur[33];                 /* SSID of the slot or of the connection */
     uint8_t last_reason;
     bool sntp_on, mdns_on;
+    bool ntp_pending;             /* an SNTP time waits for the LVGL job to be queued */
+    int64_t retry_at;             /* a failed radio start is retried from this time (mono s); 0 = none */
+    bool start_failed;            /* the last radio start failed; logged once until a start works */
     /* access point */
     uint8_t ap_clients;
     hy_net_state_t last_state;
@@ -113,15 +123,30 @@ static void unlock(void)
     xSemaphoreGive(s_mu);
 }
 
-static void post_msg(msg_kind_t kind, uint8_t reason, int64_t val)
+static bool post_msg(msg_kind_t kind, uint8_t reason, int64_t val)
 {
     if (!s_q) {
-        return;
+        return false;
     }
     msg_t m = {.kind = (uint8_t)kind, .reason = reason, .val = val};
     if (xQueueSend(s_q, &m, 0) != pdTRUE) {
         ESP_LOGW(TAG, "queue full, message %u dropped", (unsigned)kind);
+        return false;
     }
+    return true;
+}
+
+static int64_t mono_ms(void)
+{
+    return esp_timer_get_time() / 1000;
+}
+
+/* Our own esp_wifi_disconnect: the DISCONNECTED event it causes is not a failure */
+static void own_disconnect(void)
+{
+    r.expect_disc = true;
+    r.disc_ms = mono_ms();
+    esp_wifi_disconnect();
 }
 
 static const char *mode_name(hy_net_mode_t m)
@@ -169,18 +194,19 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
  * hy_clock_set in the LVGL task instead (RTC write, sync sequence, scheduler). Runs in the tcpip task. */
 void sntp_sync_time(struct timeval *tv)
 {
-    if (tv) {
-        post_msg(M_NTP, 0, (int64_t)tv->tv_sec);
+    if (tv && post_msg(M_NTP, 0, (int64_t)tv->tv_sec)) {
+        sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
     }
-    sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
 }
 
+/* LVGL task (or the net task when there is no display). The time elapsed since the SNTP reply is added. */
 static void ntp_apply(void *arg)
 {
     (void)arg;
     portENTER_CRITICAL(&s_mux);
-    int64_t utc = s_ntp_utc;
+    int64_t utc = s_ntp_utc, at = s_ntp_mono_us;
     portEXIT_CRITICAL(&s_mux);
+    utc += (esp_timer_get_time() - at) / 1000000;
     esp_err_t err = hy_clock_set(utc, NULL, "ntp");
     if (err == ESP_OK) {
         hy_sched_run_invalidate();
@@ -189,21 +215,33 @@ static void ntp_apply(void *arg)
     }
 }
 
+/* Queues the clock set to the LVGL task, the only writer of the clock and the scheduler. Without a display there is
+ * no LVGL task and the net task sets it. false: not queued, the next tick tries again. */
+static bool ntp_post(void)
+{
+    if (!hy_board_display()) {
+        ntp_apply(NULL);
+        return true;
+    }
+    if (!hy_board_lock(1000)) {
+        return false;
+    }
+    lv_result_t res = lv_async_call(ntp_apply, NULL);
+    hy_board_unlock();
+    return res == LV_RESULT_OK;
+}
+
 static void ntp_received(int64_t utc)
 {
     ESP_LOGI(TAG_NTP, "synced, utc %lld", (long long)utc);
     portENTER_CRITICAL(&s_mux);
     s_ntp_utc = utc;
+    s_ntp_mono_us = esp_timer_get_time();
     portEXIT_CRITICAL(&s_mux);
-    if (hy_board_display() && hy_board_lock(1000)) {
-        lv_result_t res = lv_async_call(ntp_apply, NULL);
-        hy_board_unlock();
-        if (res == LV_RESULT_OK) {
-            return;
-        }
-        ESP_LOGE(TAG_NTP, "lv_async_call failed");
+    r.ntp_pending = !ntp_post();
+    if (r.ntp_pending) {
+        ESP_LOGW(TAG_NTP, "ui busy, clock set retried on the next tick");
     }
-    ntp_apply(NULL);   /* no LVGL task: set it here */
 }
 
 static void sntp_on(void)
@@ -276,13 +314,14 @@ static esp_err_t wifi_up(wifi_mode_t mode)
     esp_err_t err = ESP_OK;
     if (!r.wifi_init) {
         wifi_init_config_t c = WIFI_INIT_CONFIG_DEFAULT();
+        c.nvs_enable = 0;   /* NVS namespace "wifi" is the only copy of the credentials */
         err = esp_wifi_init(&c);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "wifi init: %s", esp_err_to_name(err));
             return err;
         }
         r.wifi_init = true;
-        esp_wifi_set_storage(WIFI_STORAGE_RAM);   /* NVS namespace "wifi" is the only copy of the credentials */
+        esp_wifi_set_storage(WIFI_STORAGE_RAM);
     }
     err = esp_wifi_set_mode(mode);
     if (err != ESP_OK) {
@@ -410,8 +449,7 @@ static void restart_client(int64_t now)
         r.ip = 0;
     }
     if (r.sta_started) {
-        r.expect_disc = true;
-        esp_wifi_disconnect();
+        own_disconnect();
         r.passes = 0;
         r.stretch_t0 = now;
         begin_pass(now);
@@ -440,8 +478,7 @@ static void client_tick(int64_t now)
         return;
     }
     if (now - r.slot_t0 >= SLOT_S) {
-        r.expect_disc = true;
-        esp_wifi_disconnect();
+        own_disconnect();
         next_slot(now);
         return;
     }
@@ -456,18 +493,28 @@ static void on_got_ip(uint32_t ip, int64_t now)
 {
     r.got_ip = true;
     r.waiting = false;
+    r.expect_disc = false;
     r.ip = ip;
     r.passes = 0;
     r.last_rssi = now - RSSI_EVERY_S;
+    int idx = -1;
+    uint32_t ok = 0, seq = 0;
+    xSemaphoreTake(s_save_mu, portMAX_DELAY);
     lock();
     for (uint8_t i = 0; i < s_cfg.n; i++) {
         if (strcmp(s_cfg.e[i].ssid, r.cur) == 0) {
             s_cfg.e[i].ok = ++s_cfg.okseq;
-            net_nvs_save_ok(i, s_cfg.e[i].ok, s_cfg.okseq);
+            idx = i;
+            ok = s_cfg.e[i].ok;
+            seq = s_cfg.okseq;
             break;
         }
     }
     unlock();
+    if (idx >= 0) {
+        net_nvs_save_ok((uint8_t)idx, ok, seq);
+    }
+    xSemaphoreGive(s_save_mu);
     sntp_on();
     set_ps();
 }
@@ -477,7 +524,9 @@ static void on_disconnect(uint8_t reason, int64_t now)
     r.last_reason = reason;
     if (r.expect_disc) {
         r.expect_disc = false;
-        return;
+        if (mono_ms() - r.disc_ms <= DISC_SWALLOW_MS) {
+            return;
+        }
     }
     if (r.got_ip) {
         ESP_LOGW(TAG, "disconnected from %s, reason %u", r.cur, (unsigned)reason);
@@ -495,10 +544,10 @@ static void on_disconnect(uint8_t reason, int64_t now)
 
 /* ---- access point ---- */
 
-static void ap_start(void)
+static bool ap_start(void)
 {
     if (wifi_up(WIFI_MODE_AP) != ESP_OK) {
-        return;
+        return false;
     }
     wifi_config_t c;
     memset(&c, 0, sizeof c);
@@ -518,7 +567,7 @@ static void ap_start(void)
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "access point start: %s", esp_err_to_name(err));
-        return;
+        return false;
     }
     esp_netif_ip_info_t ip = {0};
     esp_netif_get_ip_info(s_ap, &ip);
@@ -537,7 +586,10 @@ static void ap_start(void)
     }
     esp_netif_dhcps_start(s_ap);
     r.ip = ip.ip.addr;
-    net_captive_start(ip.ip.addr);
+    if (net_captive_start(ip.ip.addr) != ESP_OK) {
+        ESP_LOGE(TAG, "captive dns not started");
+    }
+    return true;
 }
 
 static void ap_count(void)
@@ -550,32 +602,62 @@ static void ap_count(void)
 
 /* ---- mode changes ---- */
 
+static bool client_start(int64_t now)
+{
+    r.stretch_t0 = now;
+    r.passes = 0;
+    if (wifi_up(WIFI_MODE_STA) != ESP_OK) {
+        return false;
+    }
+    set_ps();
+    esp_err_t err = esp_wifi_start();   /* WIFI_EVENT_STA_START begins the first pass */
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "client start: %s", esp_err_to_name(err));
+        return false;
+    }
+    mdns_on();   /* a failure here leaves the client without mDNS, not without a network */
+    return true;
+}
+
+/* A start failed: everything down, the hold released, another try after START_RETRY_S */
+static void start_failed(hy_net_mode_t want, int64_t now)
+{
+    radio_down();
+    r.applied = HY_NET_OFF;
+    hold(false);
+    r.retry_at = now + START_RETRY_S;
+    if (!r.start_failed) {
+        ESP_LOGE(TAG, "%s did not start, retry every %d s", mode_name(want), START_RETRY_S);
+    }
+    r.start_failed = true;
+}
+
 static void apply(hy_net_mode_t want, int64_t now)
 {
     if (want == r.applied) {
         return;
     }
-    radio_down();
-    r.applied = want;
     if (want == HY_NET_OFF) {
+        radio_down();
+        r.applied = HY_NET_OFF;
         hold(false);
+        r.retry_at = 0;
+        r.start_failed = false;
         return;
     }
-    hold(true);   /* before the radio starts: the sleep mode ends and is not entered while the radio runs */
-    if (want == HY_NET_CLIENT) {
-        r.stretch_t0 = now;
-        r.passes = 0;
-        if (wifi_up(WIFI_MODE_STA) == ESP_OK) {
-            set_ps();
-            esp_err_t err = esp_wifi_start();   /* WIFI_EVENT_STA_START begins the first pass */
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "client start: %s", esp_err_to_name(err));
-            }
-            mdns_on();
-        }
-    } else {
-        ap_start();
+    if (r.applied == HY_NET_OFF && r.retry_at && now < r.retry_at) {
+        return;
     }
+    radio_down();
+    hold(true);   /* before the radio starts: the sleep mode ends and is not entered while the radio runs */
+    r.applied = want;
+    bool ok = want == HY_NET_CLIENT ? client_start(now) : ap_start();
+    if (!ok) {
+        start_failed(want, now);
+        return;
+    }
+    r.retry_at = 0;
+    r.start_failed = false;
 }
 
 /* ---- status ---- */
@@ -587,7 +669,9 @@ static hy_net_state_t state_now(hy_net_mode_t saved, int64_t now)
     case HY_NET_CLIENT:
         if (r.got_ip) return HY_NS_CONNECTED;
         return now - r.stretch_t0 >= HY_NET_HINT_S ? HY_NS_FAILING : HY_NS_CONNECTING;
-    default: return saved == HY_NET_OFF ? HY_NS_OFF : HY_NS_PAUSED;
+    default:
+        if (saved == HY_NET_OFF) return HY_NS_OFF;
+        return r.start_failed ? HY_NS_FAILING : HY_NS_PAUSED;
     }
 }
 
@@ -617,7 +701,13 @@ static void publish(int64_t now)
         switch (st.state) {
         case HY_NS_CONNECTED: ESP_LOGI(TAG, "connected to %s, ip " IPSTR, st.ssid, IP2STR(&a)); break;
         case HY_NS_AP: ESP_LOGI(TAG, "access point %s, ip " IPSTR, st.ap_ssid, IP2STR(&a)); break;
-        case HY_NS_FAILING: ESP_LOGW(TAG, "failing: no connection for %d s, mode stays client", HY_NET_HINT_S); break;
+        case HY_NS_FAILING:
+            if (r.start_failed) {
+                ESP_LOGW(TAG, "failing: the radio did not start");
+            } else {
+                ESP_LOGW(TAG, "failing: no connection for %d s, mode stays client", HY_NET_HINT_S);
+            }
+            break;
         default: ESP_LOGI(TAG, "%s", state_name(st.state)); break;
         }
     }
@@ -685,9 +775,18 @@ static void tick(int64_t now)
     unlock();
     r.in.idle_s = HY_NET_BATT_IDLE_S;
 
-    apply(hy_net_radio(&r.in), now);
+    hy_net_mode_t want = hy_net_radio(&r.in);
+    if (want == HY_NET_OFF && !usb && r.in.started_on_battery) {
+        /* The idle rule ended the battery run: a later touch or web request does not bring the radio back, only
+         * hy_net_set_mode or USB does */
+        r.in.started_on_battery = false;
+    }
+    apply(want, now);
     if (r.applied == HY_NET_CLIENT) {
         client_tick(now);
+    }
+    if (r.ntp_pending) {
+        r.ntp_pending = !ntp_post();
     }
     publish(now);
 }
@@ -722,7 +821,9 @@ static void handle(const msg_t *m, int64_t now)
     case M_AP_RESTART:
         if (r.applied == HY_NET_AP) {
             radio_down();
-            ap_start();
+            if (!ap_start()) {
+                start_failed(HY_NET_AP, now);
+            }
         }
         break;
     case M_HOST: {
@@ -747,6 +848,7 @@ static void handle(const msg_t *m, int64_t now)
     case M_STA_CONN:
         if (r.applied == HY_NET_CLIENT) {
             r.link_down = false;
+            r.expect_disc = false;
         }
         break;
     case M_STA_DISC:
@@ -762,8 +864,8 @@ static void handle(const msg_t *m, int64_t now)
     case M_LOST_IP:
         if (r.applied == HY_NET_CLIENT && r.got_ip) {
             ESP_LOGW(TAG, "ip lost");
-            r.expect_disc = false;
-            on_disconnect(0, now);
+            r.stretch_t0 = now;
+            restart_client(now);   /* still associated: disconnect first, then a new pass */
         }
         break;
     case M_AP_STA:
@@ -808,12 +910,18 @@ esp_err_t hy_net_init(void)
     if (s_inited) {
         return ESP_OK;
     }
-    s_mu = xSemaphoreCreateMutex();
-    s_q = xQueueCreate(QUEUE_LEN, sizeof(msg_t));
-    if (!s_mu || !s_q) {
+    /* A retry after a failed call reuses what the first call created */
+    if (!s_mu) s_mu = xSemaphoreCreateMutex();
+    if (!s_save_mu) s_save_mu = xSemaphoreCreateMutex();
+    if (!s_q) s_q = xQueueCreate(QUEUE_LEN, sizeof(msg_t));
+    if (!s_mu || !s_save_mu || !s_q) {
         return ESP_ERR_NO_MEM;
     }
-    net_nvs_load(&s_cfg);
+    static bool loaded, handlers;
+    if (!loaded) {
+        net_nvs_load(&s_cfg);
+        loaded = true;
+    }
 
     esp_err_t err = esp_netif_init();
     if (err != ESP_OK) {
@@ -825,8 +933,8 @@ esp_err_t hy_net_init(void)
         ESP_LOGE(TAG, "event loop: %s", esp_err_to_name(err));
         return err;
     }
-    s_sta = esp_netif_create_default_wifi_sta();
-    s_ap = esp_netif_create_default_wifi_ap();
+    if (!s_sta) s_sta = esp_netif_create_default_wifi_sta();
+    if (!s_ap) s_ap = esp_netif_create_default_wifi_ap();
     if (!s_sta || !s_ap) {
         ESP_LOGE(TAG, "netif create failed");
         return ESP_FAIL;
@@ -836,9 +944,12 @@ esp_err_t hy_net_init(void)
     uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     hy_net_ap_ssid(mac, s_ap_ssid);
-    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
-    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
-    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, on_event, NULL);
+    if (!handlers) {
+        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
+        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
+        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, on_event, NULL);
+        handlers = true;
+    }
 
     s_st.saved = s_cfg.mode;
     s_st.state = s_cfg.mode == HY_NET_OFF ? HY_NS_OFF : HY_NS_PAUSED;
@@ -875,6 +986,21 @@ void hy_net_status(hy_net_status_t *out)
     unlock();
 }
 
+/* A copy of the configuration for an NVS write outside s_mu; PSRAM when there is some */
+static net_cfg_t *snap_alloc(void)
+{
+    net_cfg_t *c = heap_caps_malloc(sizeof *c, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return c ? c : malloc(sizeof *c);
+}
+
+static void snap_free(net_cfg_t *c)
+{
+    if (c) {
+        memset(c, 0, sizeof *c);
+        free(c);
+    }
+}
+
 static int find(const char *ssid)
 {
     for (uint8_t i = 0; i < s_cfg.n; i++) {
@@ -894,17 +1020,21 @@ esp_err_t hy_net_set_mode(hy_net_mode_t m, const char *ssid)
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t err = ESP_OK;
+    xSemaphoreTake(s_save_mu, portMAX_DELAY);
     lock();
     if (m == HY_NET_CLIENT && ssid && ssid[0] && find(ssid) < 0) {
         unlock();
+        xSemaphoreGive(s_save_mu);
         return ESP_ERR_NOT_FOUND;
     }
     strlcpy(s_pin, (m == HY_NET_CLIENT && ssid) ? ssid : "", sizeof s_pin);
-    if (s_cfg.mode != m) {
-        s_cfg.mode = m;
+    bool changed = s_cfg.mode != m;
+    s_cfg.mode = m;
+    unlock();
+    if (changed) {
         err = net_nvs_save_mode(m);
     }
-    unlock();
+    xSemaphoreGive(s_save_mu);
     portENTER_CRITICAL(&s_mux);
     s_start_req = true;
     s_activity_s = mono_s();
@@ -938,11 +1068,18 @@ esp_err_t hy_net_add(const char *ssid, const char *pass)
     if (!ssid || !pass || hy_net_check_ssid(ssid) != HY_OK || hy_net_check_pass(pass, false) != HY_OK) {
         return ESP_ERR_INVALID_ARG;
     }
+    net_cfg_t *snap = snap_alloc();
+    if (!snap) {
+        return ESP_ERR_NO_MEM;
+    }
+    xSemaphoreTake(s_save_mu, portMAX_DELAY);
     lock();
     int i = find(ssid);
     if (i < 0) {
         if (s_cfg.n >= HY_NET_MAX_KNOWN) {
             unlock();
+            xSemaphoreGive(s_save_mu);
+            snap_free(snap);
             return ESP_ERR_NO_MEM;
         }
         i = s_cfg.n++;
@@ -950,8 +1087,11 @@ esp_err_t hy_net_add(const char *ssid, const char *pass)
         strlcpy(s_cfg.e[i].ssid, ssid, sizeof s_cfg.e[i].ssid);
     }
     strlcpy(s_cfg.e[i].pass, pass, sizeof s_cfg.e[i].pass);
-    esp_err_t err = net_nvs_save_list(&s_cfg);
+    *snap = s_cfg;
     unlock();
+    esp_err_t err = net_nvs_save_list(snap);
+    xSemaphoreGive(s_save_mu);
+    snap_free(snap);
     ESP_LOGI(TAG, "network %s saved", ssid);
     post_msg(M_LIST, 0, 0);
     return err;
@@ -965,10 +1105,17 @@ esp_err_t hy_net_forget(const char *ssid)
     if (!ssid) {
         return ESP_ERR_INVALID_ARG;
     }
+    net_cfg_t *snap = snap_alloc();
+    if (!snap) {
+        return ESP_ERR_NO_MEM;
+    }
+    xSemaphoreTake(s_save_mu, portMAX_DELAY);
     lock();
     int i = find(ssid);
     if (i < 0) {
         unlock();
+        xSemaphoreGive(s_save_mu);
+        snap_free(snap);
         return ESP_ERR_NOT_FOUND;
     }
     memmove(&s_cfg.e[i], &s_cfg.e[i + 1], (size_t)(s_cfg.n - i - 1) * sizeof s_cfg.e[0]);
@@ -977,8 +1124,11 @@ esp_err_t hy_net_forget(const char *ssid)
     if (strcmp(s_pin, ssid) == 0) {
         s_pin[0] = 0;
     }
-    esp_err_t err = net_nvs_save_list(&s_cfg);
+    *snap = s_cfg;
     unlock();
+    esp_err_t err = net_nvs_save_list(snap);
+    xSemaphoreGive(s_save_mu);
+    snap_free(snap);
     ESP_LOGI(TAG, "network %s forgotten", ssid);
     post_msg(M_LIST, 0, 0);
     return err;
@@ -1004,10 +1154,12 @@ esp_err_t hy_net_ap_pass_set(const char *pass)
     if (!pass || hy_net_check_pass(pass, true) != HY_OK) {
         return ESP_ERR_INVALID_ARG;
     }
+    xSemaphoreTake(s_save_mu, portMAX_DELAY);
     lock();
     strlcpy(s_cfg.ap_pass, pass, sizeof s_cfg.ap_pass);
-    esp_err_t err = net_nvs_save_str("ap_pass", s_cfg.ap_pass);
     unlock();
+    esp_err_t err = net_nvs_save_str("ap_pass", pass);
+    xSemaphoreGive(s_save_mu);
     ESP_LOGI(TAG, "access point password changed");
     post_msg(M_AP_RESTART, 0, 0);
     return err;
@@ -1021,10 +1173,12 @@ esp_err_t hy_net_host_set(const char *host)
     if (!net_host_valid(host)) {
         return ESP_ERR_INVALID_ARG;
     }
+    xSemaphoreTake(s_save_mu, portMAX_DELAY);
     lock();
     strlcpy(s_cfg.host, host, sizeof s_cfg.host);
-    esp_err_t err = net_nvs_save_str("host", s_cfg.host);
     unlock();
+    esp_err_t err = net_nvs_save_str("host", host);
+    xSemaphoreGive(s_save_mu);
     ESP_LOGI(TAG, "host %s", host);
     post_msg(M_HOST, 0, 0);
     return err;

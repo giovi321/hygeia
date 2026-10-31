@@ -13,7 +13,12 @@ extern "C" {
 #endif
 
 /* PAUSED: a mode is saved but the battery rule keeps the radio off. FAILING: the client has been connecting for
- * HY_NET_HINT_S or more (the access point hint); the mode stays client. */
+ * HY_NET_HINT_S or more (the access point hint; the mode stays client), or the radio failed to start (retried every
+ * 30 s).
+ * Battery rule: on USB, or with keep on battery, the saved mode runs. On battery the radio runs only after
+ * hy_net_set_mode (or after USB was unplugged while it ran), until HY_NET_BATT_IDLE_S after the last
+ * hy_net_activity. Once that idle time has turned it off, activity does not bring it back: only hy_net_set_mode or
+ * USB does. */
 typedef enum { HY_NS_OFF = 0, HY_NS_PAUSED, HY_NS_CONNECTING, HY_NS_CONNECTED, HY_NS_FAILING, HY_NS_AP } hy_net_state_t;
 
 /* ssid: the network connected to (client), "" otherwise. rssi: dBm while connected, else 0. ip: network order, the
