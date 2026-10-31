@@ -92,7 +92,7 @@ esp_err_t hy_board_imu_power(bool on);
 esp_err_t hy_board_imu_read(int16_t mg[3]);
 /* The same read before the axis map and the mount rotation (sensor frame), for the bring-up commands */
 esp_err_t hy_board_imu_read_raw(int16_t mg[3]);
-/* After hy_board_imu_power(true): polls STATUS0 (0x2E) bit 0 (accel data available) every 5 ms until it is set.
+/* After hy_board_imu_power(true): polls STATUS0 (0x2E) bit 0 (accel data available) once per tick (10 ms) until it is set.
    ESP_OK when set, ESP_ERR_TIMEOUT after timeout_ms, the bus error when the last read failed. */
 esp_err_t hy_board_imu_wait_ready(int timeout_ms);
 /* One sample at boot for the boot orientation: power up, wait for the first sample, drop it, wait for and read the

@@ -43,7 +43,7 @@ The images are design mockups, not photos of the board.
 
 ## What does not exist yet
 
-Wi-Fi and access point mode, the web UI, MQTT with Home Assistant discovery, webhooks are planned and not built. Log entries cannot be edited or deleted on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
+Wi-Fi and access point mode, the web UI, MQTT with Home Assistant discovery, and webhooks are planned and not built. Log entries cannot be edited or deleted on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
 
 ## Quick start
 
