@@ -71,7 +71,7 @@ Decided:
 - LVGL 9.x through the managed component and `esp_lvgl_port`
 - Board support from the registry component `waveshare/esp32_s3_touch_amoled_2_16` (v2.0.1 at time of writing). If its display init is unsuitable, fall back to the approach in thejimoneil/ESP32-Tetris: custom CO5300 init for the full 480×480, `esp_lcd_touch_cst9220`, double-buffered DMA, rounder callback forcing even x1/y1 and odd x2/y2, software rotation
 - UI written by hand in LVGL C on one shared theme; no generated-code tools
-- Web UI as a small single-page app built at compile time, gzipped, served from flash
+- Web UI in plain JavaScript and CSS with no framework, concatenated and gzipped by a Python script at build time, embedded in the app image
 - Storage on LittleFS; settings in NVS
 
 Reference projects (study, do not copy wholesale, check their licenses before reusing code):
@@ -107,7 +107,7 @@ Components (one ESP-IDF component each):
 | `events` | in-process publish/subscribe of state changes |
 | `power` | battery state, charging, sleep, wake sources, power-off |
 | `net` | Wi-Fi client / AP / off, known networks, mDNS, captive DNS in AP mode |
-| `web` | HTTP server, REST API, WebSocket, static web UI, optional password |
+| `web` | HTTP server, REST API, WebSocket, static web UI, browser pairing |
 | `mqtt` | publish state and events, receive commands, Home Assistant discovery |
 | `webhook` | HTTP POST of events with retry |
 | `outbox` | persistent queue of events not yet delivered to MQTT or webhooks |
@@ -162,7 +162,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - Medicines: one JSON file, written atomically (write temp, fsync, rename)
 - Log: append-only JSON Lines, one file per month. Edits and deletes rewrite the month file atomically. Each line about 150 bytes; 10 doses a day is about 0.5 MB a year, so the storage partition holds many years. Retention default: keep everything until the partition is 80% full, then drop the oldest month after warning on screen and in the web UI. Minimum guaranteed retention: 1 year
 - Settings: NVS
-- Secrets (Wi-Fi passwords, MQTT password, webhook secret, web UI password hash): NVS, never included in export unless the user ticks "include secrets"
+- Secrets (Wi-Fi passwords, MQTT password, webhook secret, paired-browser session tokens): NVS, never included in export unless the user ticks "include secrets"
 - Export: CSV (log only) and JSON (medicines, log, settings). Import: JSON, with a preview of what changes and a choice of merge or replace
 - Backup/restore in the web UI uses the JSON export
 
@@ -184,6 +184,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - The PCF85063 is the time source. On boot, read it; if its oscillator-stop flag is set or the time is before the firmware build date, the clock is invalid
 - Invalid clock: the device shows a "Set the time" screen with a QR code to the web UI. Reminders are paused and logging is disabled until the time is set, because a log with a wrong time is worse than no log
 - Sync sources, in priority: browser sync (manual button, and automatically when the web UI is opened and differs by more than 2 s), NTP when in client mode (on connect and every 6 h), manual set on the device
+- The web UI never changes the time zone on its own: when the browser's zone differs from the device's, it offers the change with one tap
 - Each sync writes the RTC and records the source and time; the web UI shows "synced X ago via Y"
 
 ## Power
@@ -191,7 +192,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - On USB: screen dims to the idle clock after 30 s, never turns off unless the user sets it
 - On battery: dims after 30 s, screen off after 2 min, CPU in light sleep. Wake sources: touch interrupt, RTC alarm (next due occurrence), AXP2101 interrupt (PWR key, USB plugged), user key
 - The motion sensor (QMI8658) is read only while the screen is on or dimmed and powered down while the screen is off; it is not a wake source
-- Wi-Fi defaults to off on battery; toggle on the screen and in the web UI. Events produced while offline go to the outbox
+- On battery the saved Wi-Fi mode does not start by itself. Turning on Wi-Fi or the access point from the screen or the web UI starts it; it stops after 10 minutes with no web request and no touch. Plugging in USB starts the saved mode. A setting keeps Wi-Fi on while on battery. While the radio is on the CPU does not enter light sleep. Events produced while offline go to the outbox
 - PWR key: short press toggles the screen; long press (about 2 s) opens a power-off confirmation slider that warns "Reminders will not fire while off" if any occurrence is due in the next 24 h; confirming powers off through the AXP2101. Pressing PWR while off turns the device on (AXP2101 hardware behaviour)
 - The device turns on only with the PWR key (maintainer requirement, 2026-10-28). Plugging in USB or connecting the battery must not leave it running. Early in boot, before the display is initialised, firmware reads the AXP2101 power-on source; if the source is USB insertion or battery insertion rather than the PWR key, it powers off through the AXP2101 at once. The battery still charges while off. A software restart (OTA, crash, watchdog) is not a power-on event and keeps running. The exact register and whether the cold-boot source is reported reliably are verified on the board
 - Battery shown as a percentage only in the top bar; red below 15%, USB power indicated by a small bolt next to the number. Low battery (15%) and critical (5%) produce events
@@ -275,7 +276,7 @@ A time added or changed so that today's occurrence is already inside its dose wi
 
 - Modes: client, access point, off. Selected on the device (quick settings) and in the web UI; persisted
 - Networks are added only in the web UI (decided: no on-device keyboard for network credentials, and no scan). On the device you pick client, AP or off, and choose among saved networks. On a trip, a new network is added by turning on AP mode and opening the web UI from a phone
-- Client mode: list of known networks, tries them in order of last success; on failure for 2 min, stays in client mode retrying with backoff (never silently switches to AP). The device shows a hint to start AP mode
+- Client mode: list of known networks, tries them in order of last success; on failure for 2 min, stays in client mode retrying with backoff (never silently switches to AP). The device shows a hint to start AP mode (quick settings tile and Settings › Wi-Fi)
 - AP mode: SSID `hygeia-XXXX` (last 4 hex of the MAC), WPA2 with a random 10-character password generated on first boot, changeable. Device shows a Wi-Fi QR code that includes the password, then a QR to `http://192.168.4.1`. Captive-portal DNS redirects to the web UI
 - mDNS name `hygeia.local` in client mode (configurable)
 
@@ -283,27 +284,44 @@ A time added or changed so that today's occurrence is already inside its dose wi
 
 Mockups: `design/mockups/webui.html`.
 
-- Pages: Dashboard, Medicines (list, add, edit, reorder, archive), History (30-day grid, log table with edit, delete, add, export CSV/JSON, import), Schedule (week view of all occurrences), Settings (Wi-Fi, MQTT, Home Assistant discovery, webhooks, clock, screen and sound, quiet hours, web UI password, backup/restore, firmware update)
+- Pages: Dashboard, Medicines (list, add, edit, reorder, archive), History (30-day grid, log table with edit, delete, add, export CSV/JSON, import), Schedule (week view of all occurrences), Settings (Wi-Fi, MQTT, Home Assistant discovery, webhooks, clock, screen and sound, quiet hours, paired browsers, backup/restore, firmware update)
 - Responsive: sidebar on desktop, top menu on a phone
 - Live updates over WebSocket from the event bus
-- Optional password (off by default): session cookie after login. No TLS on the device; the docs say to keep it on a trusted LAN
+- No open access. A browser is paired once with a 6-digit code shown on the device screen; the device then keeps a session token for that browser (at most 4 browsers, the oldest is forgotten). Paired browsers can be forgotten on the device and in the web UI. No TLS on the device; the docs say to keep it on a trusted LAN
 - Firmware update: upload of a `.bin` to the inactive OTA slot, verified, then reboot; rollback on failed boot
+
+API: JSON, paths as listed, no version in the path. `GET /api/info` and `GET /api/state` carry `"api": 1`; adding fields does not change it, removing or changing one does. Clients ignore unknown fields. Errors are `{"error": "<code>", "field": "<name or null>", "message": "<text>"}`
 
 REST API (JSON):
 
 | Method and path | Action |
 |---|---|
+| `GET /api/info` | device name, firmware version, API version (open, no pairing needed) |
+| `POST /api/pair/start` | show a pairing code on the device screen (open) |
+| `POST /api/pair` | pair this browser with the code shown on the device (open) |
+| `GET/DELETE /api/browsers` | list or forget paired browsers |
 | `GET /api/state` | everything the dashboard needs |
-| `GET/POST /api/medicines`, `GET/PUT/DELETE /api/medicines/{id}` | medicines |
+| `GET/POST /api/medicines`, `GET/PUT /api/medicines/{id}` | medicines |
+| `DELETE /api/medicines/{id}` | archived medicines only; deletes the medicine and its log entries after a confirmation that shows the count |
+| `POST /api/medicines/{id}/archive`, `/unarchive` | archive or restore a medicine |
+| `PUT /api/medicines/order` | reorder medicines |
+| `POST /api/medicines/{id}/pills` | set or add to the pill count |
 | `POST /api/medicines/{id}/log` | log taken, optional `ts`, `note` |
 | `POST /api/medicines/{id}/skip`, `/snooze` | due-card actions |
 | `GET /api/log?from&to&med`, `POST /api/log`, `PUT/DELETE /api/log/{id}` | log |
 | `POST /api/log/{id}/undo` | undo within 5 s (also used by the device toast) |
+| `GET /api/history?days=7\|30` | per-medicine daily grid for 7 or 30 days |
+| `GET /api/schedule?from&to` | all occurrences in a time range |
 | `GET /api/export.csv`, `GET /api/export.json`, `POST /api/import` | export and import |
 | `GET/PUT /api/settings` | settings (secrets write-only) |
 | `POST /api/time` | set time and zone from the browser |
+| `GET /api/wifi` | mode, status, saved networks, AP settings (no passwords) |
 | `POST /api/wifi/mode` | client, ap, off |
+| `POST/DELETE /api/wifi/networks` | add or remove a saved network |
+| `PUT /api/wifi/ap` | access point SSID and password |
 | `POST /api/webhook/test` | send a test event |
+| `POST /api/chime/test` | play the chime |
+| `POST /api/power/off` | power off the device |
 | `POST /api/ota` | firmware upload |
 | `GET /ws` | WebSocket event stream |
 
@@ -362,7 +380,6 @@ Release artefacts:
 ## Left to the builder
 
 - Internal module APIs, task layout, stack sizes, LVGL buffer sizes
-- The SPA framework for the web UI (small and dependency-light; Preact or vanilla) and its build tooling
 - Exact partition table, JSON schema versions and migration code
 - Chime sound design, within "short, gentle, three tones"
 - Exact colour palette values for medicines, within the rules above
