@@ -48,7 +48,11 @@ idf.py -B build-rel -p <port> flash
 
 ## Flash layout
 
-The 16 MB flash holds NVS (64 KB), otadata, phy_init, two 3 MB app slots (`ota_0`, `ota_1`) and a LittleFS `storage` partition of 0x9E0000 bytes (about 9.9 MB) that holds the medicines and the log. Over-the-air update is not implemented; the second app slot is laid out for it.
+The 16 MB flash holds NVS (64 KB), otadata, phy_init, two 3 MB app slots (`ota_0`, `ota_1`) and a LittleFS `storage` partition of 0x9E0000 bytes (about 9.9 MB) that holds the medicines and the log. The second app slot receives firmware updates from the web UI (see [Web UI](../../user-guide/web-ui/#firmware)).
+
+:::caution[First install by USB]
+The bootloader of this firmware has rollback enabled: a new image that does not confirm itself is replaced by the previous one. A device that still runs an older bootloader cannot get it over the air. Flash the first build with this feature by USB, with `idf.py flash`, which writes the bootloader, the partition table, the other data and the app. Later builds can go through the web UI or `POST /api/ota`.
+:::
 
 `idf.py flash` writes the bootloader, partition table and app. It does not erase the storage partition, so the log survives a reflash. `idf.py erase-flash` wipes everything, including the log.
 

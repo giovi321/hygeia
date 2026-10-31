@@ -3,7 +3,7 @@ title: Add, edit and archive medicines
 description: Manage medicines on the device with the step-by-step form and the archive confirmation.
 ---
 
-The device can add, edit and archive medicines without a network. Weekdays, the early, late and missed windows, active dates, pill count and order are not editable on the device. The web UI would set them; it is not built (see [Roadmap](../../roadmap/)). A medicine keeps its current values for these fields when you edit it.
+The device can add, edit and archive medicines without a network. Weekdays, the early, late and missed windows, active dates, pill count and order are not editable on the device. The [web UI](../web-ui/#medicines) sets them. A medicine keeps its current values for these fields when you edit it.
 
 ## Add a medicine
 
@@ -34,7 +34,7 @@ Open the medicine detail with a long press on its tile and tap Edit. The same fo
 
 On the detail page, tap Archive. A confirmation page asks "Archive Antibiotic?" and says that the medicine leaves the home screen and stops reminding, and that its history is kept. If a dose is due, it adds that the dose will not be logged. Only the Archive button on that page archives. No log entry is written, and any due card for the medicine goes away.
 
-The device cannot bring an archived medicine back. That is meant for the web UI.
+The device cannot bring an archived medicine back. Bring it back in the [web UI](../web-ui/#medicines).
 
 ## Limits
 

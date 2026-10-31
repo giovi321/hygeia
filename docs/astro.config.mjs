@@ -31,6 +31,7 @@ export default defineConfig({
             { label: 'Hardware', link: '/getting-started/hardware/' },
             { label: 'Build and flash', link: '/getting-started/flashing/' },
             { label: 'First boot', link: '/getting-started/first-boot/' },
+            { label: 'Wi-Fi setup', link: '/getting-started/wifi/' },
           ],
         },
         {
@@ -42,6 +43,7 @@ export default defineConfig({
             { label: 'Medicine detail', link: '/user-guide/detail/' },
             { label: 'Add, edit and archive', link: '/user-guide/medicines/' },
             { label: 'Quick settings and settings', link: '/user-guide/settings/' },
+            { label: 'Web UI', link: '/user-guide/web-ui/' },
             { label: 'Idle clock and power', link: '/user-guide/idle-power/' },
             { label: 'Gestures', link: '/user-guide/gestures/' },
           ],
@@ -51,6 +53,7 @@ export default defineConfig({
           items: [
             { label: 'Data model', link: '/reference/data-model/' },
             { label: 'Scheduling rules', link: '/reference/scheduling/' },
+            { label: 'REST API', link: '/reference/rest-api/' },
             { label: 'Development', link: '/reference/development/' },
           ],
         },

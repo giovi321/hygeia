@@ -1,11 +1,15 @@
-// HY.api(method, path, body, headers) -> Promise of the parsed JSON (null when empty).
+// HY.api(method, path, body, headers) -> Promise of the parsed JSON (null when empty). A File or Blob body is sent raw.
 // Failures reject with {status, error, field, message, data}.
 HY.api = function (method, path, body, headers) {
   var isWrite = method !== "GET" && method !== "HEAD";
   var opts = { method: method, credentials: "same-origin", cache: "no-store", headers: {} };
   var k;
   if (isWrite) { opts.headers["X-Hygeia"] = "1"; }
-  if (body !== undefined && body !== null) {
+  if (body instanceof Blob) {
+    // a file is sent as it is
+    opts.headers["Content-Type"] = "application/octet-stream";
+    opts.body = body;
+  } else if (body !== undefined && body !== null) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }

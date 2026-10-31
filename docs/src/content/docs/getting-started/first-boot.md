@@ -18,6 +18,7 @@ The clock is invalid when the RTC oscillator-stop flag is set or when its time i
 - Reminders are paused and logging is off until the time is set, because a dose logged with a wrong time is worse than no log
 - Pick the date and time with the rollers and tap Set. Dates before the firmware build date, and dates or times that do not exist, are rejected
 - The time zone line shows the current zone. Change it in Settings, under Time zone
+- Without a network, the screen offers the web UI to set the time from a phone: start the access point in quick settings, open the web UI and use Settings, Clock, Sync from this browser. With a network up, the button "Or set it from the web UI" shows its QR code
 
 Once the time is valid, the Home screen appears and the scheduler starts.
 
@@ -31,7 +32,7 @@ If the device finds no medicines file in its storage, it adds three example medi
 | V | Vitamin D | fixed: 08:30, every day |
 | M | Magnesium | as needed, no minimum interval |
 
-These are placeholders. Replace them on the device: tap the "+" tile on Home to add a medicine, or open a medicine's detail page and tap Edit or Archive. See [Add, edit and archive medicines](../../user-guide/medicines/). The web UI, which would edit more details, is not built (see [Roadmap](../../roadmap/)).
+These are placeholders. Replace them on the device: tap the "+" tile on Home to add a medicine, or open a medicine's detail page and tap Edit or Archive. See [Add, edit and archive medicines](../../user-guide/medicines/). The [web UI](../../user-guide/web-ui/) edits every detail, and [Wi-Fi setup](../wifi/) shows how to reach it.
 
 ## Storage problems
 

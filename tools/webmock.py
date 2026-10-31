@@ -108,6 +108,8 @@ class Device:
         self.restart_at = 0.0   # an upload finished: unreachable from restart_at for OTA_BOOT_S
         self.next_fw = None
         self.ota_busy = False   # an upload body is being read (outside the device lock)
+        self.browsers = [{"index": 0, "label": "Firefox on Windows", "created": SAMPLE_NOW - 86400 * 9, "current": True},
+                         {"index": 1, "label": "Safari on iPhone", "created": SAMPLE_NOW - 86400 * 30, "current": False}]
 
     def restarting(self):
         """True while the mock plays the restart after an upload; the new version shows once it is over."""
@@ -524,6 +526,20 @@ class Handler(BaseHTTPRequestHandler):
                     dev.zone = zone
                 dev.broadcast("meds_changed")
             return 200, {"set": do_set, "diff_ms": diff, "zone_set": bool(do_set and zone)}
+
+        if path == "/api/browsers":
+            if m == "GET":
+                return 200, {"browsers": dev.browsers, "max": 4}
+            if m == "DELETE":
+                if body.get("all") is True:
+                    dev.browsers = []
+                elif isinstance(body.get("index"), int) and not isinstance(body.get("index"), bool)                         and body["index"] in [b["index"] for b in dev.browsers]:
+                    dev.browsers = [b for b in dev.browsers if b["index"] != body["index"]]
+                elif isinstance(body.get("index"), int):
+                    return 404, err(404, "not_found", "index", "No paired browser at that index")[1]
+                else:
+                    return 400, err(400, "invalid", "index", 'Send {"index":n} or {"all":true}')[1]
+                return 200, {"paired": len(dev.browsers)}
 
         if path == "/api/settings":
             if m == "GET":

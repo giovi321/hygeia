@@ -9,7 +9,7 @@ The images on the user guide pages are design mockups rendered from the reposito
 
 ## Top bar
 
-The top bar shows the local time on the left. It shows `--:--` until the clock is valid. On the right, the battery percentage shows next to the Wi-Fi mark, which is crossed out because Wi-Fi is not built. The percentage turns red below 15%. A small bolt next to it shows that USB power is present. If no battery is detected or the reading fails, the field shows a dash and a percent sign. See [Idle clock and power](../idle-power/).
+The top bar shows the local time on the left. It shows `--:--` until the clock is valid. On the right, the battery percentage shows next to the network mark: two arcs when connected to a network, an "AP" badge in access point mode, crossed arcs when Wi-Fi is off. The percentage turns red below 15%. A small bolt next to it shows that USB power is present. If no battery is detected or the reading fails, the field shows a dash and a percent sign. See [Idle clock and power](../idle-power/).
 
 The Home, Overview and History screens form a horizontal pager. Page dots show the position.
 

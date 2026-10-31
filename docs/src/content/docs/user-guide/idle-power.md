@@ -11,7 +11,7 @@ After 30 seconds without a touch, and with no due card showing, a black overlay 
 
 - The time in large digits
 - "Next: V at 08:30", naming the next scheduled dose, or "No doses scheduled", or "Set the time" while the clock is invalid
-- A status line with the battery percentage and "Wi-Fi off"
+- A status line with the battery percentage and the network state, for example "Wi-Fi off", "Wi-Fi HomeNet" or "Access point on"
 
 The whole group moves by a few pixels each minute to limit burn-in on the AMOLED panel.
 

@@ -7,17 +7,9 @@ description: Features that are planned and not built. No dates are given.
 Everything on this page is planned and does not exist in the firmware. The plans come from `design/spec.md` and can change. No dates are given.
 :::
 
-## Wi-Fi and access point mode
+## Web UI additions
 
-Planned: Wi-Fi client, access point and off modes, switchable from quick settings. Client mode would try saved networks in order of last success and never fall back to the access point on its own. Access point mode would use the SSID `hygeia-XXXX` with a generated password, a Wi-Fi QR code on screen and a captive portal. Networks would be added only in the web UI. The device would answer as `hygeia.local` over mDNS in client mode.
-
-Today the Wi-Fi tile, the Access point tile and the Web UI QR button show "Not available yet".
-
-## Web UI
-
-Planned: a single-page app served by the device from flash, with a REST API and a WebSocket event stream. It would cover the dashboard, medicines (add, edit, reorder, archive), the log (edit, delete, add, export, import), a schedule view, settings, backup and restore, and firmware update with rollback. An optional password would protect it. There would be no TLS on the device, so it is meant for a trusted LAN. Every action available on the screen would also exist in the REST API.
-
-Today the device adds, edits and archives medicines (see [Add, edit and archive medicines](../user-guide/medicines/)), but log entries cannot be edited or deleted, and archived medicines cannot be brought back.
+The web UI, Wi-Fi, pairing, export and import, and firmware update are built (see [Web UI](../user-guide/web-ui/) and [Wi-Fi setup](../getting-started/wifi/)). Not built: TLS, a captive portal page that opens the web UI by itself, and the Integrations page controls for MQTT, Home Assistant and webhooks, which show "Coming in a later version".
 
 ## MQTT and Home Assistant discovery
 
@@ -29,8 +21,5 @@ Planned: HTTP POST of events (taken, skipped, missed, due, snoozed, battery low,
 
 ## Other planned items
 
-- Export (CSV, JSON) and import
-- Time sync from the browser or NTP
 - Persisted untracked intervals and a retention policy for the log
-- Editing every medicine detail (weekdays, dose windows, pill count, order) and unarchiving: the device edits the basics only, the rest is meant for the web UI
 - Battery capacity and a battery life target: no discharge measurement exists yet

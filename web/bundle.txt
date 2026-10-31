@@ -12,4 +12,6 @@ js/p_log.js
 js/p_schedule.js
 js/p_settings.js
 js/p_wifi.js
+js/p_backup.js
+js/p_firmware.js
 js/app.js

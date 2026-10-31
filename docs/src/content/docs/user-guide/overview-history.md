@@ -27,4 +27,4 @@ Each cell shows the outcome of that day. The legend names three marks: on time, 
 
 The page also shows "Adherence N%" over the shown range, or "Adherence" with a dash when nothing is scheduled. Tap a row to open that medicine's [detail](../detail/).
 
-The device cannot edit or delete log entries, apart from the 5 second undo after logging. Editing is planned for the web UI (see [Roadmap](../../roadmap/)).
+The device cannot edit or delete log entries, apart from the 5 second undo after logging. Editing and deleting are done in the [web UI](../web-ui/#history-and-log).
