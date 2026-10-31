@@ -6,7 +6,7 @@ void tearDown(void) {}
 
 static hy_stroke_t stroke(int x0, int y0, int dx, int dy, uint32_t ms)
 {
-    hy_stroke_t s = { (int16_t)x0, (int16_t)y0, (int16_t)(x0 + dx), (int16_t)(y0 + dy), 1000, 1000 + ms, 0 };
+    hy_stroke_t s = { (int16_t)x0, (int16_t)y0, (int16_t)(x0 + dx), (int16_t)(y0 + dy), 1000, 1000 + ms, 0, false, false };
     return s;
 }
 
@@ -36,6 +36,43 @@ static void test_classify_table(void)
     /* a top-edge upward swipe and a left-edge leftward swipe stay plain swipes */
     s = stroke(200, 20, 0, -60, 200);    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
     s = stroke(20, 200, -60, 0, 200);    TEST_ASSERT_EQUAL(HY_G_SWIPE_LEFT, hy_gesture_classify(&s));
+}
+
+static void test_edge_zone_scrolling_view(void)
+{
+    hy_stroke_t s;
+    /* a view that does not scroll keeps the 40 px bottom zone */
+    s = stroke(200, 447, 0, -80, 200);   TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
+    /* over scrollable content the zone is the bottom 16 px */
+    s = stroke(200, 447, 0, -80, 200);   s.scroll_view = true;
+    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
+    s = stroke(200, 463, 0, -80, 200);   s.scroll_view = true;
+    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
+    s = stroke(200, 464, 0, -80, 200);   s.scroll_view = true;
+    TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
+    s = stroke(200, 479, 0, -80, 200);   s.scroll_view = true;
+    TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
+    /* the top and left zones do not change */
+    s = stroke(200, 39, 0, 60, 200);     s.scroll_view = true;
+    TEST_ASSERT_EQUAL(HY_G_EDGE_DOWN, hy_gesture_classify(&s));
+    s = stroke(39, 200, 60, 0, 200);     s.scroll_view = true;
+    TEST_ASSERT_EQUAL(HY_G_EDGE_RIGHT, hy_gesture_classify(&s));
+}
+
+static void test_glide_stop_is_never_edge(void)
+{
+    hy_stroke_t s;
+    s = stroke(252, 457, 0, -300, 200);  s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s = stroke(252, 470, 0, -300, 200);  s.scroll_view = true; s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s = stroke(200, 20, 0, 120, 200);    s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s = stroke(20, 200, 120, 0, 200);    s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    /* away from the edges a glide-stopping drag is the ordinary swipe */
+    s = stroke(200, 300, 0, -80, 200);   s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
 }
 
 static void test_drag_is_not_tap(void)
@@ -539,6 +576,8 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_classify_table);
+    RUN_TEST(test_edge_zone_scrolling_view);
+    RUN_TEST(test_glide_stop_is_never_edge);
     RUN_TEST(test_drag_is_not_tap);
     RUN_TEST(test_double_tap);
     RUN_TEST(test_pager);

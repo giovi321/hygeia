@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 #define HY_EDGE_PX        40
+#define HY_EDGE_SCROLL_PX 16   /* the bottom edge zone over scrollable content */
 #define HY_SWIPE_MIN_PX   60
 #define HY_TAP_SLOP_PX    16
 #define HY_LONG_PRESS_MS  500
@@ -19,13 +20,15 @@ typedef enum { HY_G_NONE = 0, HY_G_TAP, HY_G_LONG_PRESS, HY_G_SWIPE_LEFT, HY_G_S
                HY_G_SWIPE_DOWN, HY_G_EDGE_DOWN, HY_G_EDGE_UP, HY_G_EDGE_RIGHT } hy_gesture_t;
 /* max_dev: the largest |x - x0| or |y - y0| seen during the stroke, updated by the input layer on every
    sample. 0 means the caller does not track it and the endpoints decide. */
-typedef struct { int16_t x0, y0, x1, y1; uint32_t t0_ms, t1_ms; uint16_t max_dev; } hy_stroke_t;
+/* scroll_view: the stroke began on content that scrolls; the bottom edge zone is then HY_EDGE_SCROLL_PX high.
+   glide_stop: the stroke began by stopping a moving list; it is never an edge gesture. */
+typedef struct { int16_t x0, y0, x1, y1; uint32_t t0_ms, t1_ms; uint16_t max_dev; bool scroll_view, glide_stop; } hy_stroke_t;
 
 /* Tap: movement <= 16 px and duration < 500 ms. Long press: <= 16 px and >= 500 ms. Movement is the larger of
    max_dev and the endpoint displacement on either axis, so a drag that returns to its start is not a tap.
    Swipe: dominant axis >= 60 px and >= 1.5x the other axis, else NONE. Edge variants: EDGE_DOWN when a
-   downward swipe starts at y0 < 40; EDGE_UP when an upward swipe starts at y0 >= 440; EDGE_RIGHT when a
-   rightward swipe starts at x0 < 40. Screen HY_SCREEN_PX x HY_SCREEN_PX. */
+   downward swipe starts at y0 < 40; EDGE_UP when an upward swipe starts at y0 >= 440 (>= 464 over scrollable content); EDGE_RIGHT when a
+   rightward swipe starts at x0 < 40. A stroke that stopped a glide is NONE where it would be an edge. Screen HY_SCREEN_PX x HY_SCREEN_PX. */
 hy_gesture_t hy_gesture_classify(const hy_stroke_t *s);
 /* Two taps within 300 ms (prev t1 to cur t0) and 40 px. */
 bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap);

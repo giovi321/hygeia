@@ -20,11 +20,18 @@ hy_gesture_t hy_gesture_classify(const hy_stroke_t *s)
         /* horizontal: dominant axis >= 60 and >= 1.5x the other (2*a >= 3*b in integers) */
         if (adx < HY_SWIPE_MIN_PX || 2 * adx < 3 * ady) return HY_G_NONE;
         if (dx < 0) return HY_G_SWIPE_LEFT;
-        return s->x0 < HY_EDGE_PX ? HY_G_EDGE_RIGHT : HY_G_SWIPE_RIGHT;
+        if (s->x0 < HY_EDGE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_RIGHT;
+        return HY_G_SWIPE_RIGHT;
     }
     if (ady < HY_SWIPE_MIN_PX || 2 * ady < 3 * adx) return HY_G_NONE;
-    if (dy > 0) return s->y0 < HY_EDGE_PX ? HY_G_EDGE_DOWN : HY_G_SWIPE_DOWN;
-    return s->y0 >= HY_SCREEN_PX - HY_EDGE_PX ? HY_G_EDGE_UP : HY_G_SWIPE_UP;
+    if (dy > 0) {
+        if (s->y0 < HY_EDGE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_DOWN;
+        return HY_G_SWIPE_DOWN;
+    }
+    if (s->y0 >= HY_SCREEN_PX - (s->scroll_view ? HY_EDGE_SCROLL_PX : HY_EDGE_PX)) {
+        return s->glide_stop ? HY_G_NONE : HY_G_EDGE_UP;
+    }
+    return HY_G_SWIPE_UP;
 }
 
 bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap)

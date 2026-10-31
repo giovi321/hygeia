@@ -111,6 +111,17 @@ static bool glide_target(lv_obj_t *pressed)
     return false;
 }
 
+/* The pressed object sits in a list whose content overflows: its view scrolls, so the bottom edge zone is thin */
+static bool pressed_in_scroller(lv_obj_t *pressed)
+{
+    for (lv_obj_t *o = pressed; o; o = lv_obj_get_parent(o)) {
+        if (lv_obj_is_scrollable(o) && (lv_obj_get_scroll_top(o) > 0 || lv_obj_get_scroll_bottom(o) > 0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void indev_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
@@ -127,6 +138,8 @@ static void indev_cb(lv_event_t *e)
         screen_activity();
         s_glide_stop = s_glide_pending && !s_waking && glide_target(lv_indev_get_active_obj());
         s_glide_pending = false;
+        s_st.glide_stop = s_glide_stop;
+        s_st.scroll_view = pressed_in_scroller(lv_indev_get_active_obj());
         /* while the logged toast and its scrim are up a swipe does not navigate */
         s_consumed = toast_logged_visible();
         s_last_tap = false;
@@ -281,7 +294,8 @@ void ui_input_consume_force(void)
 
 void ui_input_consume(void)
 {
-    if (s_st.x0 < HY_EDGE_PX || s_st.y0 < HY_EDGE_PX || s_st.y0 >= HY_SCREEN_PX - HY_EDGE_PX) {
+    int bottom = s_st.scroll_view ? HY_EDGE_SCROLL_PX : HY_EDGE_PX;
+    if (s_st.x0 < HY_EDGE_PX || s_st.y0 < HY_EDGE_PX || s_st.y0 >= HY_SCREEN_PX - bottom) {
         return;
     }
     s_consumed = true;
@@ -304,6 +318,7 @@ void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t 
     screen_activity();
     s_consumed = toast_logged_visible();
     s_glide_stop = false;
+    s_st.glide_stop = s_st.scroll_view = false;
     s_last_tap = false;
     s_st.x0 = x0;
     s_st.y0 = y0;
@@ -325,6 +340,7 @@ void input_debug_hold(int16_t x0, int16_t y0)
     screen_activity();
     s_consumed = toast_logged_visible();
     s_glide_stop = false;
+    s_st.glide_stop = s_st.scroll_view = false;
     s_last_tap = false;
     s_st.x0 = x0;
     s_st.y0 = y0;
