@@ -38,6 +38,8 @@ static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_want;            /* hy_motion_enable */
 static bool s_lock;
 static bool s_arm;
+static uint32_t s_arm_seq;      /* bumped by every hy_motion_shake_arm(true): the detector restarts */
+static uint32_t s_shake_gen;   /* bumped at every disarm: drops a shake queued before it */
 static uint32_t s_set_seq;     /* bumped by hy_motion_set_current; the task remembers the last one it handled */
 static hy_rot_t s_applied;     /* the rotation the UI last confirmed through hy_motion_set_current (or init) */
 static uint32_t s_gen;         /* bumped at every disable: drops callbacks queued before it */
@@ -72,7 +74,8 @@ static void async_cb(void *p)
     int ev = (int)((v >> 4) & 0xf);
     hy_rot_t r = (hy_rot_t)(v & 0xf);
     portENTER_CRITICAL(&s_mux);
-    bool stale = gen != (s_gen & 0xffffff) || !s_want;
+    uint32_t cur = ev == EV_SHAKE ? s_shake_gen : s_gen;
+    bool stale = gen != (cur & 0xffffff) || !s_want;
     portEXIT_CRITICAL(&s_mux);
     if (stale) {
         return;
@@ -91,7 +94,7 @@ static bool post(int ev, hy_rot_t r)
         return false;
     }
     portENTER_CRITICAL(&s_mux);
-    uint32_t gen = s_gen & 0xffffff;
+    uint32_t gen = (ev == EV_SHAKE ? s_shake_gen : s_gen) & 0xffffff;
     portEXIT_CRITICAL(&s_mux);
     uintptr_t arg = ((uintptr_t)gen << 8) | ((uintptr_t)ev << 4) | (uintptr_t)r;
     if (!hy_board_lock(POST_LOCK_MS)) {
@@ -157,13 +160,13 @@ static void motion_task(void *arg)
     hy_shake_t sh;
     bool shake_on = false, powered = false, fail_logged = false, imu_bad_logged = false;
     int fails = 0;
-    uint32_t seen_seq = 0;
+    uint32_t seen_seq = 0, seen_arm = 0;
     TickType_t last = xTaskGetTickCount();
 
     for (;;) {
         bool want, lock, arm, set_req;
         hy_rot_t applied;
-        uint32_t seq;
+        uint32_t seq, arm_seq;
 #if CONFIG_HY_DEBUG_CONSOLE
         bool dbg_only = false;
 #endif
@@ -171,6 +174,7 @@ static void motion_task(void *arg)
         want = s_want;
         lock = s_lock;
         arm = s_arm;
+        arm_seq = s_arm_seq;
         seq = s_set_seq;
         set_req = want && seq != seen_seq;   /* handled below; a request is not lost if the power up fails */
         applied = s_applied;
@@ -267,9 +271,10 @@ static void motion_task(void *arg)
             }
             s_orient_cur = hy_orient_current(&o);
         }
-        if (arm && !shake_on) {
-            hy_shake_reset(&sh, t);
+        if (arm && (!shake_on || arm_seq != seen_arm)) {
+            hy_shake_reset(&sh, t);   /* a fresh window, also a re-arm that fell inside one sample */
         }
+        seen_arm = arm_seq;
         shake_on = arm;
         if (arm && hy_shake_feed(&sh, t, a)) {
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -353,6 +358,11 @@ void hy_motion_shake_arm(bool on)
 {
     portENTER_CRITICAL(&s_mux);
     s_arm = on;
+    if (on) {
+        s_arm_seq++;
+    } else {
+        s_shake_gen++;
+    }
     portEXIT_CRITICAL(&s_mux);
     wake_task();
 }
