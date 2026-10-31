@@ -40,6 +40,11 @@ void     hy_orient_resume(hy_orient_t *o);
    then HY_OR_DWELL_MS. No candidate, another candidate, or a gap > HY_OR_GAP_MS restarts the dwell. Returns true
    when cur changed. */
 bool     hy_orient_feed(hy_orient_t *o, uint32_t t_ms, hy_accel_t a);
+/* Pure query: true when o has a candidate (a pose other than cur) that every sample since cand_since_ms has pointed
+   to for at least min_ms, and the last sample is at most HY_OR_GAP_MS before now_ms. *out is that pose. It changes
+   nothing. The UI uses it when a rotation was deferred (finger down, screen off) and the device has moved on to a
+   later pose that has not yet held the full HY_OR_DWELL_MS. */
+bool     hy_orient_held(const hy_orient_t *o, uint32_t now_ms, uint32_t min_ms, hy_rot_t *out);
 hy_rot_t hy_orient_current(const hy_orient_t *o);
 void     hy_orient_set(hy_orient_t *o, hy_rot_t r);   /* forced (lock, debug): cur = r, candidate cleared */
 

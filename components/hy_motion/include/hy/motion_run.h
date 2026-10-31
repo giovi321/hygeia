@@ -21,6 +21,11 @@ void hy_motion_enable(bool on);
 void hy_motion_set_lock(bool locked);
 /* Any task. After a forced or locked rotation: the orientation state takes r and loses its short wake dwell. */
 void hy_motion_set_current(hy_rot_t r);
+/* LVGL task, for a deferred rotation. true when the device holds a pose other than the one the motion task last
+   posted, and has held it on every sample for at least HY_OR_WAKE_DWELL_MS (the sample is at most HY_OR_GAP_MS old).
+   *out is that pose. false when motion is off or locked, or nothing qualifies. The UI applies that pose instead of
+   the pending one when a hold ends, so two quarter turns during a hold become one step. It changes nothing. */
+bool hy_motion_pose_held(hy_rot_t *out);
 /* Any task. on: the shake detector restarts and samples are fed to it. off: they are not. */
 void hy_motion_shake_arm(bool on);
 

@@ -51,12 +51,23 @@ static SemaphoreHandle_t s_idone;
 
 static volatile bool s_powered;   /* written by the motion task only, read for the debug state */
 static volatile hy_rot_t s_orient_cur;
+static hy_orient_t s_snap;     /* copy of the orientation state after each sample, under s_mux; valid only while s_snap_ok */
+static bool s_snap_ok;
 static TaskHandle_t s_task;
 static hy_motion_ui_t s_ui;
 
 static int64_t now_ms(void)
 {
     return esp_timer_get_time() / 1000;
+}
+
+/* Motion task. Publishes the orientation state for hy_motion_pose_held */
+static void snap_publish(const hy_orient_t *o, bool ok)
+{
+    portENTER_CRITICAL(&s_mux);
+    s_snap = *o;
+    s_snap_ok = ok;
+    portEXIT_CRITICAL(&s_mux);
 }
 
 static void wake_task(void)
@@ -194,6 +205,7 @@ static void motion_task(void *arg)
         portEXIT_CRITICAL(&s_mux);
 
         if (!want) {
+            snap_publish(&o, false);
             if (powered) {
                 esp_err_t derr = ESP_FAIL;
                 for (int i = 0; i < 3 && derr != ESP_OK; i++) {
@@ -297,6 +309,7 @@ static void motion_task(void *arg)
             }
             s_orient_cur = hy_orient_current(&o);
         }
+        snap_publish(&o, !lock);
         if (arm && (!shake_on || arm_seq != seen_arm)) {
             hy_shake_reset(&sh, t);   /* a fresh window, also a re-arm that fell inside one sample */
         }
@@ -368,10 +381,22 @@ void hy_motion_enable(bool on)
     }
 }
 
+bool hy_motion_pose_held(hy_rot_t *out)
+{
+    portENTER_CRITICAL(&s_mux);
+    hy_orient_t o = s_snap;
+    bool ok = s_snap_ok && s_want && !s_lock;
+    portEXIT_CRITICAL(&s_mux);
+    return ok && hy_orient_held(&o, (uint32_t)now_ms(), HY_OR_WAKE_DWELL_MS, out);
+}
+
 void hy_motion_set_lock(bool locked)
 {
     portENTER_CRITICAL(&s_mux);
     s_lock = locked;
+    if (locked) {
+        s_snap_ok = false;
+    }
     portEXIT_CRITICAL(&s_mux);
     wake_task();
 }

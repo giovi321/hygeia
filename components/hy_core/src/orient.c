@@ -63,6 +63,15 @@ bool hy_orient_feed(hy_orient_t *o, uint32_t t_ms, hy_accel_t a)
     return true;
 }
 
+bool hy_orient_held(const hy_orient_t *o, uint32_t now_ms, uint32_t min_ms, hy_rot_t *out)
+{
+    if (!o->has_cand || !o->has_last) return false;
+    if (now_ms - o->last_ms > HY_OR_GAP_MS) return false;   /* no recent samples: the candidate is not known to hold */
+    if (o->last_ms - o->cand_since_ms < min_ms) return false;
+    if (out) *out = o->cand;
+    return true;
+}
+
 hy_rot_t hy_orient_current(const hy_orient_t *o)
 {
     return o->cur;
