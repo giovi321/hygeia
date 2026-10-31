@@ -44,6 +44,7 @@
     var lo = 0, hi = 0;     // loaded window [lo, hi)
     var f = { med: "", from: "", to: "" };
     var loading = false;
+    var queued = "";        // "all" or "reload": asked for while a load ran, run after it
     var reached = false;    // the look-back limit is reached, nothing older to load
     var origin = 0;         // newest end of the first window, the look-back is counted from here
     var MAXBACK = 365 * DAY;
@@ -85,9 +86,17 @@
     }
 
     // Fetch the loaded window again (after an edit, a delete, an add or a device event); Load more is kept.
+    function runQueued() {
+      var q = queued; queued = "";
+      if (q === "all") { loadAll(); } else if (q) { reload(); }
+    }
+
     function reload() {
-      if (loading || !hi) { return Promise.resolve(); }
+      if (loading) { if (!queued) { queued = "reload"; } return Promise.resolve(); }
+      if (!hi) { return Promise.resolve(); }
       loading = true;
+      // entries logged since the page opened must fall inside the window
+      if (!f.to) { hi = Math.floor(Date.now() / 1000) + 60; }
       return fetchRange(lo, hi).then(function (list) {
         loading = false;
         if (!HY.alive(token)) { return; }
@@ -96,11 +105,11 @@
       }, function (e) {
         loading = false;
         if (HY.alive(token)) { msg.textContent = HY.errText(e); }
-      });
+      }).then(runQueued);
     }
 
     function loadAll() {
-      if (loading) { return Promise.resolve(); }
+      if (loading) { queued = "all"; return Promise.resolve(); }
       loading = true;
       windowReset();
       return fetchRange(lo, hi).then(function (list) {
@@ -111,7 +120,7 @@
       }, function (e) {
         loading = false;
         if (HY.alive(token)) { msg.textContent = HY.errText(e); }
-      });
+      }).then(runQueued);
     }
 
     // Steps back 30 days at a time until entries turn up or a year is covered.
@@ -138,7 +147,7 @@
         loading = false;
         rows = found.concat(rows);
         if (HY.alive(token)) { msg.textContent = HY.errText(e); draw(); }
-      });
+      }).then(runQueued);
     }
 
     // ---- rendering ----

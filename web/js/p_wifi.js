@@ -27,6 +27,7 @@
     view.appendChild(HY.h("div", { class: "head" }, HY.h("h1", null, "Wi-Fi"),
       HY.h("a", { class: "btn", href: "#/settings" }, "Settings")));
     var noteBox = HY.h("div", { class: "banner warn", hidden: true, role: "status" });
+    var expectSsid = null;
     var expect = null;   // mode the person asked for; the instruction stays until the page sees it
     view.appendChild(noteBox);
     view.appendChild(root);
@@ -62,7 +63,7 @@
         HY.api("POST", "/api/wifi/mode", body).then(function () {
           HY.toast(loses ? "Switching. The page will reconnect if it can" : "Wi-Fi mode changed");
           if (loses) {
-            expect = target;
+            expect = target; expectSsid = body.ssid || null;
             noteBox.hidden = false;
             noteBox.textContent = warning(target);
           }
@@ -213,7 +214,7 @@
         if (!HY.alive(token)) { return; }
         w = r[0]; keep = !!r[1].wifi_keep_batt;
         w.networks = w.networks || [];
-        if (expect && w.mode === expect && (expect !== "client" || w.state === "connected")) { expect = null; noteBox.hidden = true; }
+        if (expect && w.mode === expect && (expect !== "client" || (w.state === "connected" && (!expectSsid || w.ssid === expectSsid)))) { expect = null; noteBox.hidden = true; }
         draw();
       }, function (e) {
         if (!HY.alive(token)) { return; }
