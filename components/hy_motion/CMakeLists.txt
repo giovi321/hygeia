@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/motion_run.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        hy_core
+    PRIV_REQUIRES
+        hy_board
+        lvgl__lvgl
+        esp_timer
+        freertos
+        heap
+)

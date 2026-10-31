@@ -494,6 +494,7 @@ esp_err_t hy_ui_start(void)
     idle_create();
     poweroff_create();
     screen_init();
+    rotate_init();
     input_init(hy_board_indev());
     lv_timer_create(tick_cb, 1000, NULL);
     lv_async_call(first_tick, NULL);   /* the first evaluation runs in the LVGL task, not here */

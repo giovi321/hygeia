@@ -240,6 +240,9 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
         lv_obj_invalidate(lv_screen_active());   /* the whole display: every layer redraws */
         ESP_LOGI(TAG, "display: on");
     }
+    if (st != HY_SCR_OFF) {
+        rotate_screen_state(st);   /* a no-op while the motion task is already on */
+    }
     int32_t set = hy_settings()->brightness;
     switch (st) {
     case HY_SCR_ON:
@@ -262,6 +265,7 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
         ESP_LOGI(TAG, "screen: off (%s)", why);
         ESP_LOGI(TAG, "display: off");
         hy_board_display_power(false);
+        rotate_screen_state(HY_SCR_OFF);   /* before the sleep request: the IMU is off by the time the CPU may sleep */
         if (!poweroff_countdown_visible()) {
             hy_power_screen_off(true);
         }

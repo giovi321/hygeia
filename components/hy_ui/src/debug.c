@@ -833,7 +833,7 @@ static void job_rot(const char *arg)
         ESP_LOGI(TAG, "rot: %u (usage: rot <0-3>)", (unsigned)hy_board_rotation());
         return;
     }
-    hy_board_set_rotation((uint8_t)r);
+    rotate_force((hy_rot_t)r);
 }
 
 static void run_job(void *arg)
