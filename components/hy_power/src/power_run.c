@@ -1021,7 +1021,7 @@ void hy_power_sleep_stats(void)
     ESP_LOGI(TAG, "sleepstat boot: uptime %lld s, reset reason %s, boots since power-on %" PRIu32 " (counters cover all boots since power-on)",
              (long long)mono_s(), reset_name(esp_reset_reason()), boots);
     /* Newest first. The current boot shows its uptime now; earlier boots show the last uptime saved before the reset. */
-    char hist[160];
+    char hist[192];
     int hn = snprintf(hist, sizeof hist, "sleepstat boots:");
     for (uint32_t i = 0; i < BOOT_HIST && i < boots && hn > 0 && hn < (int)sizeof hist; i++) {
         uint32_t up = i == 0 ? (uint32_t)mono_s() : h_up[i];
