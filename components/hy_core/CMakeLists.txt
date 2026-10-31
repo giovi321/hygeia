@@ -21,6 +21,8 @@ idf_component_register(
         "src/screen.c"
         "src/orient.c"
         "src/shake.c"
+        "src/netcfg.c"
+        "src/dns.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
