@@ -17,6 +17,7 @@
 
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -41,7 +42,6 @@ static const char *TAG = "imu";
 #define QMI_CTRL7_ACCEL   0x01
 #define QMI_LSB_PER_G     4096
 #define QMI_IO_TIMEOUT_MS 50
-#define QMI_READY_POLL_MS 5
 #define QMI_READY_MAX_MS  100
 
 /* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. The sensor is mounted mirrored: y is negated */
@@ -211,17 +211,20 @@ esp_err_t hy_board_imu_wait_ready(int timeout_ms)
     if (s_state != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    esp_err_t last = ESP_OK;
-    for (int waited = 0;; waited += QMI_READY_POLL_MS) {
+    /* The timeout is measured on the clock. The tick is 10 ms here (CONFIG_FREERTOS_HZ 100), so a sleep of
+       pdMS_TO_TICKS(5) would be 0 ticks and never wait. One tick between polls is the finest sleep available. */
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t last;
+    for (;;) {
         uint8_t st = 0;
         last = reg_read(QMI_REG_STATUS0, &st, 1);
         if (last == ESP_OK && (st & QMI_STATUS0_ACCEL)) {
             return ESP_OK;
         }
-        if (waited >= timeout_ms) {
+        if (esp_timer_get_time() - t0 >= (int64_t)timeout_ms * 1000) {
             return last != ESP_OK ? last : ESP_ERR_TIMEOUT;
         }
-        vTaskDelay(pdMS_TO_TICKS(QMI_READY_POLL_MS));
+        vTaskDelay(1);
     }
 }
 
