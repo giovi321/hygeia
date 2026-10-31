@@ -265,7 +265,7 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
         ESP_LOGI(TAG, "screen: off (%s)", why);
         ESP_LOGI(TAG, "display: off");
         hy_board_display_power(false);
-        rotate_screen_state(HY_SCR_OFF);   /* before the sleep request: the IMU is off by the time the CPU may sleep */
+        rotate_screen_state(HY_SCR_OFF);   /* before the sleep request: the motion task powers the IMU down at its next sample, within 20 ms */
         if (!poweroff_countdown_visible()) {
             hy_power_screen_off(true);
         }

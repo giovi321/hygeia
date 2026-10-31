@@ -165,13 +165,13 @@ static void motion_task(void *arg)
     hy_shake_t sh;
     bool shake_on = false, powered = false, fail_logged = false, imu_bad_logged = false;
     int fails = 0;
-    uint32_t seen_seq = 0, seen_arm = 0;
+    uint32_t seen_seq = 0, seen_arm = 0, seen_gen = 0;
     TickType_t last = xTaskGetTickCount();
 
     for (;;) {
         bool want, lock, arm, set_req;
         hy_rot_t applied;
-        uint32_t seq, arm_seq, shake_gen;
+        uint32_t seq, arm_seq, shake_gen, gen;
 #if CONFIG_HY_DEBUG_CONSOLE
         bool dbg_only = false;
 #endif
@@ -181,6 +181,7 @@ static void motion_task(void *arg)
         arm = s_arm;
         arm_seq = s_arm_seq;
         shake_gen = s_shake_gen;
+        gen = s_gen;
         seq = s_set_seq;
         set_req = want && seq != seen_seq;   /* handled below; a request is not lost if the power up fails */
         applied = s_applied;
@@ -194,12 +195,19 @@ static void motion_task(void *arg)
 
         if (!want) {
             if (powered) {
-                if (hy_board_imu_power(false) != ESP_OK) {
-                    ESP_LOGE(TAG, "imu power down failed");
+                esp_err_t derr = ESP_FAIL;
+                for (int i = 0; i < 3 && derr != ESP_OK; i++) {
+                    if (i > 0) {
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                    }
+                    derr = hy_board_imu_power(false);
+                }
+                if (derr != ESP_OK) {
+                    ESP_LOGE(TAG, "imu power down failed: %s", esp_err_to_name(derr));
                 }
                 powered = false;
                 s_powered = false;
-                ESP_LOGI(TAG, "motion: off");
+                ESP_LOGI(TAG, "motion: off, stack free min %u bytes", (unsigned)uxTaskGetStackHighWaterMark(NULL));
             }
 #if CONFIG_HY_DEBUG_CONSOLE
             imu_req_end();
@@ -235,8 +243,20 @@ static void motion_task(void *arg)
             }
             shake_on = false;
             fails = 0;
+            seen_gen = gen;
             ESP_LOGI(TAG, "motion: on");
             last = xTaskGetTickCount();
+        } else if (gen != seen_gen) {
+            /* Off and on again inside one sample or one lock wait: the state may be ahead of the panel */
+            seen_gen = gen;
+            hy_orient_resume(&o);
+            if (hy_orient_current(&o) != applied) {
+                hy_orient_set(&o, applied);
+                if (set_req) {
+                    o.quick = false;
+                }
+            }
+            shake_on = false;
         }
 
         if (set_req) {
@@ -295,6 +315,10 @@ static void motion_task(void *arg)
 #if CONFIG_HY_DEBUG_CONSOLE
         imu_req_sample(t, mg);
 #endif
+        TickType_t now_t = xTaskGetTickCount();
+        if (now_t - last > pdMS_TO_TICKS(SAMPLE_MS)) {
+            last = now_t;   /* a long post or print: do not catch up with a burst of reads */
+        }
         vTaskDelayUntil(&last, pdMS_TO_TICKS(SAMPLE_MS));
     }
 }
