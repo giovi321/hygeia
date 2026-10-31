@@ -158,6 +158,7 @@ static void cmd_archive(const char *args) { hy_ui_debug_archive(args); }
 static void cmd_limits(const char *args) { (void)args; hy_ui_debug_limits(); }
 static void cmd_madctl(const char *args) { hy_ui_debug_madctl(args); }
 static void cmd_rot(const char *args) { hy_ui_debug_rot(args); }
+static void cmd_shake(const char *args) { (void)args; hy_ui_debug_shake(); }
 static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
 static void cmd_imu(const char *args)
 {
@@ -398,6 +399,7 @@ void app_main(void)
     console_register("motion", cmd_motion);
     console_register("madctl", cmd_madctl);
     console_register("rot", cmd_rot);
+    console_register("shake", cmd_shake);
     console_start();
 #endif
 }

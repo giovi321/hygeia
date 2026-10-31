@@ -2,6 +2,7 @@
 
 #include "esp_log.h"
 #include "hy/actions.h"
+#include "hy/motion_run.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_toast";
@@ -23,6 +24,9 @@ static const lv_point_precise_t check_pts[] = {{12, 23}, {19, 30}, {32, 15}};
 
 static void hide(void)
 {
+    if (s_mode == MODE_LOGGED) {
+        hy_motion_shake_arm(false);
+    }
     s_mode = MODE_NONE;
     lv_obj_set_hidden(s_toast, true);
     lv_obj_set_hidden(s_scrim, true);
@@ -122,6 +126,11 @@ void toast_create(lv_obj_t *parent)
 
 static void open(int mode)
 {
+    if (mode == MODE_LOGGED) {
+        hy_motion_shake_arm(true);   /* the logged and the skipped toast: a shake undoes while the window runs */
+    } else if (s_mode == MODE_LOGGED) {
+        hy_motion_shake_arm(false);   /* an info toast replaces the Undo toast without hide() */
+    }
     s_mode = mode;
     s_start = lv_tick_get();
     lv_obj_set_hidden(s_toast, false);

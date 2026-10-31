@@ -121,12 +121,23 @@ void rotate_force(hy_rot_t r)
     apply(r, "forced");
 }
 
+/* LVGL task. A shake does what a tap on Undo does, and only while the Undo toast shows. It never wakes the screen. */
+void shake_event(void)
+{
+    if (toast_logged_visible()) {
+        ESP_LOGI(TAG, "shake: undo");
+        toast_undo_pressed();
+    } else {
+        ESP_LOGI(TAG, "shake: ignored");
+    }
+}
+
 void rotate_init(void)
 {
     s_locked = hy_settings()->rot_lock;
     s_off = false;
     s_has_pending = false;
-    hy_motion_ui_t ui = {.rotate = rotate_request, .shake = NULL};
+    hy_motion_ui_t ui = {.rotate = rotate_request, .shake = shake_event};
     esp_err_t err = hy_motion_init(&ui, (hy_rot_t)hy_board_rotation());
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "hy_motion_init: %s: the screen will not follow the device", esp_err_to_name(err));
