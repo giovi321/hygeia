@@ -39,6 +39,7 @@ SAMPLES = os.path.join(HERE, "webmock", "samples")
 SAMPLE_NOW = 1793181600     # utc_ms / 1000 in samples/state.json
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 PAIR_CODE = "123456"
+BUILD_EPOCH = 1700000000
 
 
 def sample(name):
@@ -72,6 +73,8 @@ class Device:
         self.log.append({"id": 5, "ts": SAMPLE_NOW + shift - 86400 * 21, "med_id": 4, "status": "taken",
                          "source": "screen", "edited": False})
         self.next_log = 6
+        self.settings = sample("settings.json")
+        self.wifi = {"mode": "client", "ssid": "HomeNet", "host": "hygeia", "networks": ["HomeNet"]}
         st = sample("state.json")
         self.state = st
         self.shift = shift
@@ -145,6 +148,16 @@ def ws_frame(text):
     n = len(data)
     head = b"\x81" + (bytes([n]) if n < 126 else b"\x7e" + struct.pack(">H", n))
     return head + data
+
+
+def w_list(nets):
+    return [{"ssid": n, "last_ok": i + 1} for i, n in enumerate(nets)]
+
+
+def with_local(e):
+    out = dict(e)
+    out["local"] = time.strftime("%Y-%m-%d %H:%M", time.gmtime(e["ts"]))
+    return out
 
 
 def err(status, code, field, message, **extra):
@@ -318,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
             if m == "GET" and path not in dev.busy_seen:
                 dev.busy_seen.add(path)
                 return 503, err(503, "busy", None, "The device is busy, try again")[1], {}
-        body = self.read_body() if m in ("POST", "PUT") else {}
+        body = self.read_body() if m in ("POST", "PUT", "DELETE") else {}
         if body is None:
             return 400, err(400, "invalid", None, "The body is not valid JSON")[1], {}
         r = self.route(m, path, q, body)
@@ -329,6 +342,10 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, m, path, q, body):
         dev = self.dev
         now = int(time.time())
+
+        extra = self.route_extra(m, path, q, body, now)
+        if extra is not None:
+            return extra
 
         if path == "/api/info" and m == "GET":
             return 200, {"api": 1, "fw": "0.0.0-mock", "name": "hygeia",
@@ -362,26 +379,6 @@ class Handler(BaseHTTPRequestHandler):
                       "tiles": dev.tiles(), "due": dev.due})
             return 200, s
 
-        if path == "/api/time" and m == "POST":
-            ms = body.get("utc_ms")
-            if not isinstance(ms, (int, float)):
-                return 400, err(400, "invalid", "utc_ms", "Send utc_ms")[1]
-            dev.skew = ms / 1000.0 - time.time()
-            dev.clock_valid = True
-            if body.get("zone"):
-                dev.zone = body["zone"]
-            dev.sync = {"src": "browser", "at": now}
-            dev.broadcast("meds_changed")
-            return 200, {"utc_ms": dev.now_ms(), "zone": dev.zone}
-
-        if path == "/api/settings":
-            if m == "GET":
-                return 200, sample("settings.json")
-            return 501, err(501, "not_implemented", None, "Not available in this firmware")[1]
-
-        if path == "/api/log" and m == "GET":
-            return 200, {"log": sorted(dev.log, key=lambda e: -e["ts"]), "next": None}
-
         if path == "/api/medicines":
             if m == "GET":
                 return 200, {"api": 1, "meds": sorted(dev.meds, key=lambda x: x["order"])}
@@ -406,7 +403,7 @@ class Handler(BaseHTTPRequestHandler):
             for i, mid in enumerate(ids):
                 dev.med(mid)["order"] = i
             dev.broadcast("meds_changed")
-            return 200, {}
+            return 200, {"ids": ids}
 
         mm = re.fullmatch(r"/api/medicines/(\d+)(?:/(archive|unarchive|pills|log|skip|snooze))?", path)
         if mm:
@@ -437,7 +434,7 @@ class Handler(BaseHTTPRequestHandler):
                 dev.log = [e for e in dev.log if e["med_id"] != med["id"]]
                 dev.meds.remove(med)
                 dev.broadcast("meds_changed")
-                return 200, {}
+                return 200, {"deleted": True, "log_entries": n}
             if act == "archive" and m == "POST":
                 med["archived"] = True
                 dev.due = [d for d in dev.due if d["med_id"] != med["id"]]
@@ -458,19 +455,295 @@ class Handler(BaseHTTPRequestHandler):
             if act in ("log", "skip", "snooze") and m == "POST":
                 return self.dose(med, act, body)
 
-        mm = re.fullmatch(r"/api/log/(\d+)/undo", path)
-        if mm and m == "POST":
-            for e in dev.log:
-                if e["id"] == int(mm.group(1)):
-                    dev.log.remove(e)
-                    if e.get("slot"):
-                        dev.due.append({"med_id": e["med_id"], "slot": e["slot"], "state": "due",
-                                        "snoozed_until": None})
-                    dev.broadcast("undone")
-                    return 200, {}
-            return 410, err(410, "undo_expired", None, "Too late to undo")[1]
-
         return 501, err(501, "not_implemented", None, "Not available in this firmware")[1]
+
+    # ---- routes added with the device handlers: the shapes copy the firmware's answers ----
+    def route_extra(self, m, path, q, body, now):
+        dev = self.dev
+
+        if path == "/api/time" and m == "POST":
+            ms = body.get("utc_ms")
+            if isinstance(ms, bool) or not isinstance(ms, (int, float)) or ms < BUILD_EPOCH * 1000:
+                return 400, err(400, "invalid", "utc_ms", "The time was refused")[1]
+            auto = bool(body.get("auto"))
+            zone = None if auto else body.get("zone")
+            if zone is not None and not (isinstance(zone, str) and ("/" in zone or zone == "UTC")):
+                return 400, err(400, "invalid", "zone", "That zone is not in the device's table")[1]
+            diff = int(ms - dev.now_ms()) if dev.clock_valid else 0
+            do_set = (not auto) or (not dev.clock_valid) or abs(ms - dev.now_ms()) > 2000
+            if do_set:
+                dev.skew = ms / 1000.0 - time.time()
+                dev.clock_valid = True
+                dev.sync = {"src": "browser", "at": now}
+                if zone:
+                    dev.zone = zone
+                dev.broadcast("meds_changed")
+            return 200, {"set": do_set, "diff_ms": diff, "zone_set": bool(do_set and zone)}
+
+        if path == "/api/settings":
+            if m == "GET":
+                return 200, dev.settings
+            if m == "PUT":
+                new = dict(dev.settings)
+                rng = {"volume": (0, 100), "brightness": (10, 100), "snooze_min": (1, 120), "dim_s": (10, 600),
+                       "off_bat_s": (30, 3600), "off_usb_s": (0, 86400)}
+                for k, v in body.items():
+                    if k in ("sound", "dnd", "rot_lock", "wifi_keep_batt"):
+                        if not isinstance(v, bool):
+                            return 400, err(400, "invalid", k, "Wrong type")[1]
+                        new[k] = v
+                    elif k in rng:
+                        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                            return 400, err(400, "invalid", k, "Wrong type")[1]
+                        new[k] = max(rng[k][0], min(rng[k][1], v))
+                    elif k == "quiet":
+                        ok = v is None or (isinstance(v, dict) and re.fullmatch(r"\d\d:\d\d", str(v.get("from"))) and
+                                           re.fullmatch(r"\d\d:\d\d", str(v.get("to"))))
+                        if not ok:
+                            return 400, err(400, "invalid", "quiet", "Wrong type")[1]
+                        new["quiet"] = v
+                dev.settings = new   # "rot" is the applied rotation: never written here
+                return 200, new
+
+        if path == "/api/log":
+            if m == "GET":
+                return self.log_page(q, now)
+            if m == "POST":
+                mid, ts = body.get("med_id"), body.get("ts")
+                if not isinstance(mid, int):
+                    return 400, err(400, "invalid", "med_id", "med_id is required")[1]
+                if not dev.med(mid):
+                    return 404, err(404, "not_found", None, "Not found")[1]
+                if not isinstance(ts, int) or ts < BUILD_EPOCH or ts > now + 60:
+                    return 400, err(400, "invalid", "ts", "The time is not valid")[1]
+                if body.get("status", "taken") != "taken":
+                    return 400, err(400, "invalid", "status", "Only taken doses can be added")[1]
+                e = {"id": dev.next_log, "ts": ts, "tz": "UTC0", "med_id": mid, "status": "taken", "slot": 0,
+                     "delta_min": 0, "source": "web", "edited": False}
+                if body.get("note"):
+                    e["note"] = body["note"]
+                dev.next_log += 1
+                dev.log.append(e)
+                dev.broadcast("taken")
+                return 201, with_local(e)
+
+        mm = re.fullmatch(r"/api/log/(\d+)(/undo)?", path)
+        if mm:
+            lid = int(mm.group(1))
+            e = next((x for x in dev.log if x["id"] == lid), None)
+            if mm.group(2):
+                if m != "POST":
+                    return None
+                if not e:
+                    return 404, err(404, "not_found", None, "Not found")[1]
+                if now - e["ts"] > 5:
+                    return 410, err(410, "undo_expired", None, "Too late to undo")[1]
+                dev.log.remove(e)
+                if e.get("slot"):
+                    dev.due.append({"med_id": e["med_id"], "slot": e["slot"], "state": "due", "snoozed_until": None})
+                dev.broadcast("undone")
+                return 200, {"undone": True}
+            if m == "PUT":
+                orig = body.get("orig_ts")
+                if not isinstance(orig, int):
+                    return 400, err(400, "invalid", "orig_ts", "orig_ts is required")[1]
+                if not e or e["ts"] != orig:
+                    return 404, err(404, "not_found", None, "Not found")[1]
+                if "ts" in body:
+                    if not isinstance(body["ts"], int) or body["ts"] < BUILD_EPOCH or body["ts"] > now + 60:
+                        return 400, err(400, "invalid", "ts", "The time is not valid")[1]
+                    e["ts"] = body["ts"]
+                if "status" in body:
+                    if body["status"] not in ("taken", "skipped", "missed"):
+                        return 400, err(400, "invalid", "status", "Wrong status")[1]
+                    e["status"] = body["status"]
+                if body.get("note") is not None:
+                    e["note"] = body["note"]
+                e["edited"] = True
+                dev.broadcast("log_edited")
+                return 200, with_local(e)
+            if m == "DELETE":
+                try:
+                    ts = int(q.get("ts", [""])[0])
+                except ValueError:
+                    return 400, err(400, "invalid", "ts", "Send ?ts= with the entry's time")[1]
+                if not e or e["ts"] != ts:
+                    return 404, err(404, "not_found", None, "Not found")[1]
+                dev.log.remove(e)
+                dev.broadcast("log_edited")
+                return 200, {"deleted": True}
+
+        if path == "/api/history" and m == "GET":
+            return self.history(q, now)
+        if path == "/api/schedule" and m == "GET":
+            return self.schedule(q, now)
+
+        if path == "/api/wifi" and m == "GET":
+            w = dev.wifi
+            on = w["mode"] == "client"
+            return 200, {"mode": w["mode"], "state": "connected" if on else w["mode"],
+                         "ssid": w["ssid"] if on else None, "rssi": -52 if on else None,
+                         "ip": "192.168.1.23" if on else None, "host": w["host"],
+                         "ap_ssid": "hygeia-AB12", "ap_clients": 0, "networks": w_list(w["networks"])}
+        if path == "/api/wifi/mode" and m == "POST":
+            mode, ssid = body.get("mode"), body.get("ssid")
+            if mode not in ("off", "client", "ap"):
+                return 400, err(400, "invalid", "mode", "mode is off, client or ap")[1]
+            if ssid is not None and (not isinstance(ssid, str) or mode != "client"):
+                return 400, err(400, "invalid", "ssid", "ssid is for the client mode")[1]
+            if ssid is not None and ssid not in dev.wifi["networks"]:
+                return 404, err(404, "not_found", "ssid", "That network is not saved")[1]
+            dev.wifi["mode"] = mode
+            if ssid:
+                dev.wifi["ssid"] = ssid
+            return 200, {"mode": mode, "ssid": ssid}
+        if path == "/api/wifi/networks" and m in ("POST", "DELETE"):
+            nets = dev.wifi["networks"]
+            ssid = body.get("ssid")
+            if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32:
+                return 400, err(400, "invalid", "ssid", "The name is 1 to 32 characters")[1]
+            if m == "POST":
+                pw = body.get("password", "")
+                if not isinstance(pw, str) or (pw and not 8 <= len(pw) <= 63):
+                    return 400, err(400, "invalid", "password", "The password is 8 to 63 characters, or empty")[1]
+                if ssid not in nets:
+                    if len(nets) >= 5:
+                        return 409, err(409, "full", None, "Five networks are saved: forget one first")[1]
+                    nets.append(ssid)
+                return 201, {"networks": w_list(nets)}
+            if ssid not in nets:
+                return 404, err(404, "not_found", "ssid", "That network is not saved")[1]
+            nets.remove(ssid)
+            return 200, {"networks": w_list(nets)}
+        if path == "/api/wifi/ap" and m == "PUT":
+            pw, host = body.get("password"), body.get("host")
+            if not isinstance(pw, str) and not isinstance(host, str):
+                return 400, err(400, "invalid", None, 'Send "password", "host" or both')[1]
+            if isinstance(pw, str) and not 8 <= len(pw) <= 63:
+                return 400, err(400, "invalid", "password", "The password is 8 to 63 characters")[1]
+            if isinstance(host, str):
+                if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", host):
+                    return 400, err(400, "invalid", "host", "The host name is 1 to 32 of a-z, 0-9 and -")[1]
+                dev.wifi["host"] = host
+            return 200, {"host": dev.wifi["host"], "ap_ssid": "hygeia-AB12"}
+
+        if path == "/api/chime/test" and m == "POST":
+            return 200, {"played": True}
+
+        if path == "/api/power/off" and m == "POST":
+            due = any(not x["archived"] and x["schedule"]["type"] == "fixed" and x["schedule"]["times"]
+                      for x in dev.meds)
+            if body.get("confirm") is not True:
+                return 409, {"error": "confirm", "message": 'Send {"confirm":true} to power off', "due_24h": due}
+            return 200, {"powering_off": True, "due_24h": due}
+        return None
+
+    def log_page(self, q, now):
+        dev = self.dev
+        try:
+            to = int(q.get("to", [now + 1])[0])
+            frm = int(q.get("from", [to - 30 * 86400])[0])
+            med = int(q.get("med", [0])[0])
+            limit = int(q.get("limit", [200])[0])
+            after = q.get("after", [None])[0]
+            a_ts, a_id = (int(x) for x in after.split(".")) if after else (0, 0)
+        except ValueError:
+            return 400, err(400, "invalid", None, "A query value is not a number")[1]
+        if frm >= to:
+            return 400, err(400, "invalid", "from", "from is not before to")[1]
+        if not 1 <= limit <= 500:
+            return 400, err(400, "invalid", "limit", "limit is 1 to 500")[1]
+        rows = sorted((e for e in dev.log if max(frm, a_ts) <= e["ts"] < to and (not med or e["med_id"] == med)
+                       and (e["ts"], e["id"]) > (a_ts, a_id)), key=lambda e: (e["ts"], e["id"]))
+        page = rows[:limit]
+        nxt = "%d.%d" % (page[-1]["ts"], page[-1]["id"]) if len(rows) > limit else None
+        return 200, {"log": [with_local(e) for e in page], "next": nxt}
+
+    def history(self, q, now):
+        dev = self.dev
+        days = {"7": 7, "30": 30}.get(q.get("days", ["7"])[0])
+        if not days:
+            return 400, err(400, "invalid", "days", "days is 7 or 30")[1]
+        if not dev.clock_valid:
+            return 409, err(409, "clock_invalid", None, "The device clock is not set")[1]
+        today = int(now // 86400)
+        out, tt, tr = [], 0, 0
+        for med in sorted((x for x in dev.meds if not x["archived"]), key=lambda x: x["order"]):
+            marks, taken_n, resolved = [], 0, 0
+            for d in range(today - days + 1, today + 1):
+                ents = [e for e in dev.log if e["med_id"] == med["id"] and e["ts"] // 86400 == d]
+                sch = med["schedule"]
+                if sch["type"] == "as_needed":
+                    marks.append("as_needed_taken" if any(e["status"] == "taken" for e in ents) else "none")
+                    continue
+                n = len(sch["times"]) if (sch["weekdays"] >> ((d + 3) % 7)) & 1 else 0
+                got = len([e for e in ents if e["status"] == "taken"])
+                skp = len([e for e in ents if e["status"] == "skipped"])
+                if n == 0:
+                    marks.append("none")
+                elif got >= n:
+                    late = any(e.get("delta_min", 0) >= med["late_after_min"] for e in ents)
+                    marks.append("late" if late else "on_time")
+                    taken_n += n
+                    resolved += n
+                elif skp:
+                    marks.append("skipped")
+                    resolved += n
+                elif d < today:
+                    marks.append("missed")
+                    resolved += n
+                else:
+                    marks.append("none")
+            tt += taken_n
+            tr += resolved
+            out.append({"id": med["id"], "code": med["code"], "name": med["name"], "color": med["color"],
+                        "in_progress": False, "adherence": {"taken": taken_n, "resolved": resolved}, "marks": marks})
+
+        def day(n):
+            return time.strftime("%Y-%m-%d", time.gmtime(n * 86400))
+        return 200, {"days": days, "first": day(today - days + 1), "today": day(today),
+                     "adherence": {"taken": tt, "resolved": tr}, "meds": out}
+
+    def schedule(self, q, now):
+        dev = self.dev
+        try:
+            frm = int(q.get("from", [now])[0])
+            to = int(q.get("to", [frm + 7 * 86400])[0])
+        except ValueError:
+            return 400, err(400, "invalid", "from", "from is a time in seconds")[1]
+        if to <= frm or to - frm > 8 * 86400:
+            return 400, err(400, "invalid", "to", "The range is between 1 second and 8 days")[1]
+        if not dev.clock_valid:
+            return 409, err(409, "clock_invalid", None, "The device clock is not set")[1]
+        slots = []
+        for med in dev.meds:
+            sch = med["schedule"]
+            if med["archived"] or sch["type"] != "fixed":
+                continue
+            for d in range(frm // 86400 - 1, to // 86400 + 1):
+                if not (sch["weekdays"] >> ((d + 3) % 7)) & 1:
+                    continue
+                for t in sch["times"]:
+                    hh, mi = (int(x) for x in t.split(":"))
+                    slot = d * 86400 + hh * 3600 + mi * 60
+                    if not frm <= slot < to:
+                        continue
+                    got = [e for e in dev.log if e["med_id"] == med["id"] and abs(e["ts"] - slot) < 3 * 3600]
+                    if any(e["status"] == "taken" for e in got):
+                        st = "taken"
+                    elif any(e["status"] == "skipped" for e in got):
+                        st = "skipped"
+                    elif slot > now:
+                        st = "upcoming"
+                    elif now < slot + med["late_after_min"] * 60:
+                        st = "due"
+                    elif now < slot + med["missed_after_min"] * 60:
+                        st = "late"
+                    else:
+                        st = "missed"
+                    slots.append({"med_id": med["id"], "slot": slot, "state": st})
+        slots.sort(key=lambda x: (x["slot"], x["med_id"]))
+        return 200, {"from": frm, "to": to, "slots": slots}
 
     def dose(self, med, act, body):
         dev = self.dev
@@ -481,7 +754,7 @@ class Handler(BaseHTTPRequestHandler):
                 if d["med_id"] == med["id"]:
                     d["state"], d["snoozed_until"] = "snoozed", now + 15 * 60
             dev.broadcast("snoozed")
-            return 200, {}
+            return 200, {"until": now + 15 * 60}
         if act == "log" and not body.get("confirm") and med["schedule"]["type"] == "as_needed":
             gap = med["schedule"]["min_interval_min"] * 60
             last = [e["ts"] for e in dev.log if e["med_id"] == med["id"] and e["status"] == "taken"]

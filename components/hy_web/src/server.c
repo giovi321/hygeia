@@ -536,19 +536,21 @@ void hy_web_set_ui(const hy_web_ui_t *ui)
     s_ui = ui;
 }
 
-static void ui_post(void (*fn)(void *), void *arg)
+static bool ui_post(void (*fn)(void *), void *arg)
 {
     if (!hy_board_display()) {
-        return;
+        return false;
     }
     if (!hy_board_lock(1000)) {
         ESP_LOGW(TAG, "ui call dropped (LVGL busy)");
-        return;
+        return false;
     }
-    if (lv_async_call(fn, arg) != LV_RESULT_OK) {
+    bool ok = lv_async_call(fn, arg) == LV_RESULT_OK;
+    if (!ok) {
         ESP_LOGW(TAG, "ui call dropped (no memory)");
     }
     hy_board_unlock();
+    return ok;
 }
 
 static void a_pair_show(void *arg)
@@ -594,7 +596,7 @@ static void a_power_off(void *arg)
 }
 
 const hy_web_ui_t *web_ui(void) { return s_ui; }
-void web_ui_power_off(void) { ui_post(a_power_off, NULL); }
+bool web_ui_power_off(void) { return ui_post(a_power_off, NULL); }
 void web_ui_pair_show(void) { ui_post(a_pair_show, NULL); }
 void web_ui_pair_hide(int reason) { ui_post(a_pair_hide, (void *)(intptr_t)reason); }
 void web_ui_toast_ok(const char *text) { ui_post(a_toast_ok, (void *)text); }

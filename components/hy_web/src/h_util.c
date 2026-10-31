@@ -44,7 +44,7 @@ void *web_job_go(web_req_t *r, hy_job_t *j, uint32_t timeout_ms, esp_err_t *sent
 
 esp_err_t web_oom(web_req_t *r)
 {
-    return web_send_err(r, 500, "internal", NULL, "Out of memory");
+    return web_send_busy(r);
 }
 
 /* ---------------------------------------------------------------- answers */
@@ -95,7 +95,7 @@ esp_err_t web_send_cjson(web_req_t *r, int status, cJSON *o)
     char *s = o ? cJSON_PrintUnformatted(o) : NULL;
     cJSON_Delete(o);
     if (!s) {
-        return web_send_err(r, 500, "internal", NULL, "Out of memory");
+        return web_oom(r);
     }
     esp_err_t e = web_send_json(r, status, s);
     cJSON_free(s);
@@ -234,7 +234,7 @@ esp_err_t web_sb_send(web_req_t *r, int status, web_sb_t *b)
 {
     esp_err_t e;
     if (b->bad || !b->p) {
-        e = web_send_err(r, 500, "internal", NULL, "Out of memory");
+        e = web_oom(r);
     } else {
         e = web_send_json(r, status, b->p);
     }

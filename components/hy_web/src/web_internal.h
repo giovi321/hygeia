@@ -81,8 +81,9 @@ void web_ui_pair_show(void);
 void web_ui_pair_hide(int reason);
 void web_ui_toast_ok(const char *text);
 void web_ui_toast_info(const char *text);
-/* Calls the registered power_off callback in the LVGL task (hy_power_off() when none is registered) */
-void web_ui_power_off(void);
+/* Calls the registered power_off callback in the LVGL task (hy_power_off() when none is registered). false when it
+ * could not be queued (LVGL busy): the caller retries. */
+bool web_ui_power_off(void);
 /* The registered callbacks or NULL; read it only from the LVGL task */
 const hy_web_ui_t *web_ui(void);
 
@@ -153,7 +154,7 @@ hy_job_t *web_job_new(web_req_t *r, void (*fn)(void *), size_t ctx_size);
  * context; on a timeout the 503 busy answer is already sent in *sent, the job is released and NULL comes back.
  * Otherwise the caller reads the context and then calls hy_job_put(j). */
 void *web_job_go(web_req_t *r, hy_job_t *j, uint32_t timeout_ms, esp_err_t *sent);
-/* 500 "internal" for a failed web_job_new */
+/* Out of memory: 503 "busy" with Retry-After, the answer the web UI retries on */
 esp_err_t web_oom(web_req_t *r);
 
 /* hy_api_err_from mapping with a readable message */

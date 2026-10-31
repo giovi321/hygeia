@@ -35,7 +35,7 @@ static const hy_route_t TABLE[] = {
     { HY_M_PUT,    "/api/settings",                   HY_R_SETTINGS_PUT,  0, "Settings" },
     { HY_M_POST,   "/api/time",                       HY_R_TIME,          0, "Settings > Time" },
     { HY_M_GET,    "/api/wifi",                       HY_R_WIFI,          0, "Settings > Network" },
-    { HY_M_PUT,    "/api/wifi/mode",                  HY_R_WIFI_MODE,     0, "Settings > Network" },
+    { HY_M_POST,   "/api/wifi/mode",                  HY_R_WIFI_MODE,     0, "Settings > Network" },
     { HY_M_POST,   "/api/wifi/networks",              HY_R_WIFI_NET_ADD,  0, "" },
     { HY_M_DELETE, "/api/wifi/networks",              HY_R_WIFI_NET_DEL,  0, "Settings > Network" },
     { HY_M_PUT,    "/api/wifi/ap",                    HY_R_WIFI_AP,       0, "" },

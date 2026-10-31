@@ -1,7 +1,7 @@
 /* Log, history and schedule routes.
  *
  * Log writes and reads run as one short job each. History and schedule walk every active medicine, so they run one
- * job per HY_CHUNK medicines (each job a few milliseconds per medicine and day) and the httpd task joins the pieces:
+ * job per chunk of medicines (sized by medicine-days, so each job stays near 300 ms) and the httpd task joins the pieces:
  * the LVGL task is never held for the whole walk. A medicine that disappears between two jobs is left out. */
 
 #include <stdio.h>
@@ -17,10 +17,12 @@
 #include "hy/summary.h"
 #include "web_internal.h"
 
-#define HY_CHUNK 10
+#define HY_CHUNK 10          /* most medicines in one history job (7 day range) */
+#define HIST_WORK 70         /* medicine-days in one history job: about 4 ms each, so a job stays near 300 ms */
+#define SCHED_CHUNK 5        /* medicines in one schedule job */
 #define LOG_ENTRY_JSON 640
 #define MAX_RANGE_S (8 * 86400)
-#define SLOTS_PER_MED 64       /* 8 times a day over 8 days */
+#define SLOTS_PER_MED 72       /* 8 times a day over 8 days, plus room for a clock change inside the range */
 #define DEEP_ROWS 512
 #define DEEP_WINDOW_S (32 * 86400)
 
@@ -186,8 +188,8 @@ static esp_err_t h_log_new(web_req_t *r)
     if (q.has_status && q.status != HY_TAKEN) {
         return web_send_err(r, 400, "invalid", "status", "Only taken doses can be added");
     }
-    if (q.ts > (int64_t)time(NULL) + 60) {
-        return web_send_err(r, 400, "invalid", "ts", "The time is in the future");
+    if (q.ts > (int64_t)time(NULL) + 60 || q.ts < hy_clock_build_epoch()) {
+        return web_send_err(r, 400, "invalid", "ts", "The time is not valid");
     }
     hy_job_t *j;
     lw_ctx_t *c = lw_begin(r, job_log_new, &j);
@@ -217,6 +219,9 @@ static esp_err_t h_log_put(web_req_t *r)
     }
     if (q.orig_ts == 0) {
         return web_send_err(r, 400, "invalid", "orig_ts", "orig_ts is required");
+    }
+    if (q.has_ts && (q.ts > (int64_t)time(NULL) + 60 || q.ts < hy_clock_build_epoch())) {
+        return web_send_err(r, 400, "invalid", "ts", "The time is not valid");
     }
     hy_job_t *j;
     lw_ctx_t *c = lw_begin(r, job_log_put, &j);
@@ -325,6 +330,7 @@ typedef struct {
     const char *body;
     int days;
     int32_t first;
+    bool nomem;
     size_t n;
     uint32_t ids[HY_CHUNK];
     bool gone[HY_CHUNK];
@@ -340,6 +346,10 @@ static void job_hist_chunk(void *arg)
     hchunk_t *c = arg;
     const hy_snapshot_t *sn = hy_sched_snapshot();
     hy_log_t *buf = c->days == 30 ? heap_caps_malloc(DEEP_ROWS * sizeof *buf, MALLOC_CAP_SPIRAM) : NULL;
+    if (c->days == 30 && !buf) {   /* the 8 day snapshot would read older days as missed: fail instead */
+        c->nomem = true;
+        return;
+    }
     for (size_t i = 0; i < c->n; i++) {
         const hy_med_t *m = NULL;
         for (size_t k = 0; k < sn->in.n_meds; k++) {
@@ -413,7 +423,11 @@ static esp_err_t h_history(web_req_t *r)
         return web_fail(r, HY_E_CLOCK);
     }
 
-    for (size_t at = 0; at < meta->n; at += HY_CHUNK) {
+    size_t per = HIST_WORK / (size_t)days;   /* 10 medicines for 7 days, 2 for 30 */
+    if (per > HY_CHUNK) {
+        per = HY_CHUNK;
+    }
+    for (size_t at = 0; at < meta->n; at += per) {
         j = web_job_new(r, job_hist_chunk, sizeof(hchunk_t));
         if (!j) {
             heap_caps_free(meta);
@@ -423,7 +437,7 @@ static esp_err_t h_history(web_req_t *r)
         hchunk_t *c = hy_job_ctx(j);
         c->days = days;
         c->first = meta->first;
-        c->n = meta->n - at < HY_CHUNK ? meta->n - at : HY_CHUNK;
+        c->n = meta->n - at < per ? meta->n - at : per;
         for (size_t i = 0; i < c->n; i++) {
             c->ids[i] = meta->m[at + i].id;
         }
@@ -432,6 +446,12 @@ static esp_err_t h_history(web_req_t *r)
             heap_caps_free(meta);
             heap_caps_free(res);
             return sent;
+        }
+        if (c->nomem) {
+            hy_job_put(j);
+            heap_caps_free(meta);
+            heap_caps_free(res);
+            return web_oom(r);
         }
         for (size_t i = 0; i < c->n; i++) {
             res[at + i].gone = c->gone[i];
@@ -512,9 +532,10 @@ typedef struct {
     const char *body;
     int64_t from, to;
     size_t n_ids;
-    uint32_t ids[HY_CHUNK];
+    uint32_t ids[SCHED_CHUNK];
+    bool nomem;
     size_t n;
-    sslot_t slots[HY_CHUNK * SLOTS_PER_MED];
+    sslot_t slots[SCHED_CHUNK * SLOTS_PER_MED];
 } schunk_t;
 
 static void job_sched_chunk(void *arg)
@@ -526,6 +547,10 @@ static void job_sched_chunk(void *arg)
     }
     int64_t now = (int64_t)time(NULL);
     hy_log_t *buf = heap_caps_malloc(DEEP_ROWS * sizeof *buf, MALLOC_CAP_SPIRAM);
+    if (!buf) {   /* states without the logs would show taken doses as missed: fail instead */
+        c->nomem = true;
+        return;
+    }
     for (size_t i = 0; i < c->n_ids; i++) {
         const hy_med_t *m = NULL;
         for (size_t k = 0; k < sn->in.n_meds; k++) {
@@ -541,7 +566,7 @@ static void job_sched_chunk(void *arg)
         /* logs that can decide these slots: from a day before the range to a day after it, but none from the future */
         size_t nl = 0;
         int64_t lo = c->from - 86400, hi = c->to + 86400 < now + 1 ? c->to + 86400 : now + 1;
-        if (buf && no > 0 && hi > lo) {
+        if (no > 0 && hi > lo) {
             nl = web_log_window(m->id, lo, hi, buf, DEEP_ROWS);
         }
         hy_gap_t gap = {0, hy_sched_tracked_since(sn->sched, m->id)};
@@ -622,7 +647,7 @@ static esp_err_t h_schedule(web_req_t *r)
     }
 
     size_t total = 0;
-    for (size_t at = 0; at < meta->n; at += HY_CHUNK) {
+    for (size_t at = 0; at < meta->n; at += SCHED_CHUNK) {
         j = web_job_new(r, job_sched_chunk, sizeof(schunk_t));
         if (!j) {
             heap_caps_free(meta);
@@ -632,7 +657,7 @@ static esp_err_t h_schedule(web_req_t *r)
         schunk_t *c = hy_job_ctx(j);
         c->from = from;
         c->to = to;
-        c->n_ids = meta->n - at < HY_CHUNK ? meta->n - at : HY_CHUNK;
+        c->n_ids = meta->n - at < SCHED_CHUNK ? meta->n - at : SCHED_CHUNK;
         for (size_t i = 0; i < c->n_ids; i++) {
             c->ids[i] = meta->ids[at + i];
         }
@@ -641,6 +666,12 @@ static esp_err_t h_schedule(web_req_t *r)
             heap_caps_free(meta);
             heap_caps_free(all);
             return sent;
+        }
+        if (c->nomem) {
+            hy_job_put(j);
+            heap_caps_free(meta);
+            heap_caps_free(all);
+            return web_oom(r);
         }
         memcpy(all + total, c->slots, c->n * sizeof(sslot_t));
         total += c->n;

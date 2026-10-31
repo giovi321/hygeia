@@ -15,6 +15,14 @@ static const char *TAG = "web_wifi";
 static const char *const MODE_NAME[] = {"off", "client", "ap"};
 static const char *const STATE_NAME[] = {"off", "paused", "connecting", "connected", "failing", "ap"};
 
+/* Zeroes the parsed copy of a password before the tree is freed */
+static void wipe_str(const cJSON *it)
+{
+    if (cJSON_IsString(it) && it->valuestring) {
+        memset(it->valuestring, 0, strlen(it->valuestring));
+    }
+}
+
 static void wipe_body(web_req_t *r)
 {
     if (r->body && r->body_len) {
@@ -96,7 +104,7 @@ static esp_err_t h_wifi_get(web_req_t *r)
     return web_send_cjson(r, 200, o);
 }
 
-/* ---------------------------------------------------------------- PUT /api/wifi/mode */
+/* ---------------------------------------------------------------- POST /api/wifi/mode */
 
 #define MODE_DELAY_US 1000000
 
@@ -108,7 +116,8 @@ static struct {
 } s_pending;
 static esp_timer_handle_t s_mode_timer;
 
-static void mode_fire(void *arg)
+/* httpd task: the net call takes a mutex and writes NVS, which the shared esp_timer task should not */
+static void mode_work(void *arg)
 {
     (void)arg;
     hy_net_mode_t m;
@@ -121,6 +130,14 @@ static void mode_fire(void *arg)
     portEXIT_CRITICAL(&s_mux);
     esp_err_t e = hy_net_set_mode(m, has ? ssid : NULL);
     ESP_LOGI(TAG, "mode %s: %s", MODE_NAME[m], esp_err_to_name(e));
+}
+
+static void mode_fire(void *arg)
+{
+    (void)arg;
+    if (!web_queue_work(mode_work, NULL)) {   /* the server is stopping: apply from here */
+        mode_work(NULL);
+    }
 }
 
 /* {"mode":"client"|"ap"|"off","ssid":"HomeNet"}: the answer goes out first, and the change follows one second later,
@@ -207,6 +224,7 @@ static esp_err_t h_net_add(web_req_t *r)
             }
         }
     }
+    wipe_str(pass);
     cJSON_Delete(o);
     wipe_body(r);
     return e;
@@ -292,6 +310,7 @@ static esp_err_t h_ap(web_req_t *r)
             e = web_send_cjson(r, 200, a);
         }
     }
+    wipe_str(pass);
     cJSON_Delete(o);
     wipe_body(r);
     return e;

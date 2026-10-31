@@ -119,8 +119,7 @@ typedef struct {
     hy_api_time_t t;
     bool set, zone_set;
     int64_t diff_ms;
-    esp_err_t err;
-    bool zone_clock;   /* the zone could not be set because the clock is not valid */
+    esp_err_t err;     /* hy_clock_set, then the zone: the first failure */
 } tctx_t;
 
 /* {"utc_ms":..,"auto":true}: set only when more than 2 s off or the clock is invalid.
@@ -134,8 +133,10 @@ static void job_time(void *arg)
     if (!hy_api_time_should_set(&c->t, dev, valid)) {
         return;
     }
+    int64_t jump;
+    uint32_t seq = hy_clock_sync_seq(&jump);
     esp_err_t e = hy_clock_set(c->t.utc_ms / 1000, NULL, "browser");
-    c->set = e != ESP_ERR_INVALID_ARG;   /* the time is in force even when the zone record could not be saved */
+    c->set = hy_clock_sync_seq(&jump) != seq;   /* in force, even when persisting it failed */
     c->err = e;
     if (c->set && c->t.has_zone) {
         esp_err_t z = hy_clock_set_zone(c->t.zone, hy_tzdb_posix(c->t.zone));
@@ -144,7 +145,13 @@ static void job_time(void *arg)
             c->err = z;
         }
     }
-    hy_sched_run_invalidate();
+    if (c->set) {
+        hy_sched_run_invalidate();
+    }
+    const hy_web_ui_t *ui = web_ui();
+    if ((c->set || c->zone_set) && ui && ui->time_changed) {
+        ui->time_changed();
+    }
 }
 
 static esp_err_t h_time(web_req_t *r)
@@ -165,10 +172,12 @@ static esp_err_t h_time(web_req_t *r)
         return sent;
     }
     esp_err_t e;
-    if (c->err == ESP_ERR_INVALID_ARG) {
+    if (!c->set && c->err == ESP_ERR_INVALID_ARG) {
         e = web_send_err(r, 400, "invalid", "utc_ms", "The time was refused");
-    } else if (c->err != ESP_OK) {
-        e = web_fail(r, HY_E_IO);
+    } else if (!c->set && c->err != ESP_OK) {   /* not set at all */
+        e = web_send_err(r, 500, "internal", NULL, "The device could not set the time");
+    } else if (c->err != ESP_OK) {              /* set, but not saved: the zone or the time source is lost on reboot */
+        e = web_send_err(r, 503, "storage", NULL, "The time is set but could not be saved");
     } else {
         char buf[72];
         snprintf(buf, sizeof buf, "{\"set\":%s,\"diff_ms\":%lld,\"zone_set\":%s}", c->set ? "true" : "false",
@@ -195,13 +204,33 @@ static esp_err_t h_chime(web_req_t *r)
 
 #define POWER_DELAY_US 1000000
 
+#define POWER_TRIES 10
+
 static esp_timer_handle_t s_power_timer;
+static int s_power_tries;
+
+/* httpd task: posting to the LVGL task can wait for the board lock, which the esp_timer task should not. A busy LVGL
+ * task (a long job) is retried once a second. */
+static void power_work(void *arg)
+{
+    (void)arg;
+    if (web_ui_power_off()) {
+        return;
+    }
+    if (++s_power_tries < POWER_TRIES) {
+        esp_timer_start_once(s_power_timer, POWER_DELAY_US);
+    } else {
+        ESP_LOGE(TAG, "power off not delivered: the LVGL task stayed busy");
+    }
+}
 
 static void power_fire(void *arg)
 {
     (void)arg;
     ESP_LOGW(TAG, "power off requested from the web UI");
-    web_ui_power_off();
+    if (!web_queue_work(power_work, NULL)) {   /* the server is stopping: post from here */
+        power_work(NULL);
+    }
 }
 
 typedef struct {
@@ -261,6 +290,7 @@ static esp_err_t h_power_off(web_req_t *r)
         }
     }
     if (s_power_timer) {
+        s_power_tries = 0;
         esp_timer_stop(s_power_timer);
         esp_timer_start_once(s_power_timer, POWER_DELAY_US);
     } else {

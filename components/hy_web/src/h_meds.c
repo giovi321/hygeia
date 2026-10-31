@@ -20,7 +20,7 @@
 #define LONG_JOB_MS 15000   /* a delete rewrites every month file of the medicine */
 #define TOO_SOON_ROWS 32
 
-typedef enum { F_OK = 0, F_ERR, F_API, F_STALE, F_CONFIRM, F_TOO_SOON } fail_t;
+typedef enum { F_OK = 0, F_ERR, F_API, F_STALE, F_CONFIRM, F_TOO_SOON, F_NOMEM } fail_t;
 
 typedef struct {
     const char *body;       /* first: set by web_job_new */
@@ -87,6 +87,9 @@ static bool sent_failure(web_req_t *r, const mctx_t *c, esp_err_t *sent)
         return false;
     case F_API:
         *sent = web_fail_api(r, &c->aerr);
+        break;
+    case F_NOMEM:
+        *sent = web_oom(r);
         break;
     case F_STALE:
         *sent = web_send_err(r, 412, "stale", NULL, STALE_MSG);
@@ -265,8 +268,10 @@ static void job_edit(void *arg)
     m.id = live->id;
     m.archived = live->archived;
     m.order = live->order;
+    /* The remaining count changes through /pills. The one exception is switching pill counting on: the form then
+     * gives the starting count and hy_act_med_upsert takes it. */
     if (live->pills_enabled || !m.pills_enabled) {
-        m.pills_left = live->pills_left;   /* the count changes through /pills; switching counting on takes the body's */
+        m.pills_left = live->pills_left;
     }
     hy_err_t e = hy_act_med_upsert(&m);
     if (e != HY_OK) {
@@ -524,7 +529,11 @@ static void job_log(void *arg)
      * window is read: any entry in it means too soon, even when the buffer fills. */
     if (!c->confirm && !c->has_ts && m->type == HY_SCHED_AS_NEEDED && m->min_interval_min > 0 && hy_clock_valid()) {
         hy_log_t *rows = heap_caps_malloc(TOO_SOON_ROWS * sizeof *rows, MALLOC_CAP_SPIRAM);
-        if (rows) {
+        if (!rows) {   /* no degraded answer: the request fails and can be repeated */
+            c->fail = F_NOMEM;
+            return;
+        }
+        {
             size_t n = hy_store_port()->query_log(NULL, now - (int64_t)m->min_interval_min * 60, now + 1, m->id, rows,
                                                   TOO_SOON_ROWS);
             int32_t since = -1;
@@ -556,8 +565,8 @@ static esp_err_t h_log_dose(web_req_t *r)
     if (hy_api_logreq_from_json(web_body_or_empty(r), &q, &ae) != HY_OK) {
         return web_fail_api(r, &ae);
     }
-    if (q.has_ts && q.ts > (int64_t)time(NULL) + 60) {
-        return web_send_err(r, 400, "invalid", "ts", "The time is in the future");
+    if (q.has_ts && (q.ts > (int64_t)time(NULL) + 60 || q.ts < hy_clock_build_epoch())) {
+        return web_send_err(r, 400, "invalid", "ts", "The time is not valid");
     }
     hy_job_t *j;
     mctx_t *c = begin(r, job_log, &j);

@@ -32,6 +32,8 @@ typedef struct {
     void (*toast_info)(const char *text);
     void (*settings_applied)(const hy_settings_t *old, const hy_settings_t *now);
     void (*power_off)(void);
+    /* After a web time or zone set; runs in the LVGL task inside the request's job. Refresh what shows the clock. */
+    void (*time_changed)(void);
 } hy_web_ui_t;
 
 /* The pointer is kept; the struct must outlive the server. Any task. */
