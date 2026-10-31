@@ -44,6 +44,9 @@
     var lo = 0, hi = 0;     // loaded window [lo, hi)
     var f = { med: "", from: "", to: "" };
     var loading = false;
+    var reached = false;    // the look-back limit is reached, nothing older to load
+    var origin = 0;         // newest end of the first window, the look-back is counted from here
+    var MAXBACK = 365 * DAY;
     var tableBox = HY.h("div");
     var moreBox = HY.h("div");
     var msg = HY.h("p", { class: "msg bad" });
@@ -78,6 +81,22 @@
       hi = f.to ? HY.wallToEpoch(HY.addDays(f.to, 1), "00:00", zone) : now + 60;
       lo = f.from ? HY.wallToEpoch(f.from, "00:00", zone) : hi - 7 * DAY;
       if (lo >= hi) { lo = hi - DAY; }
+      origin = hi; reached = false;
+    }
+
+    // Fetch the loaded window again (after an edit, a delete, an add or a device event); Load more is kept.
+    function reload() {
+      if (loading || !hi) { return Promise.resolve(); }
+      loading = true;
+      return fetchRange(lo, hi).then(function (list) {
+        loading = false;
+        if (!HY.alive(token)) { return; }
+        rows = list; msg.textContent = "";
+        draw();
+      }, function (e) {
+        loading = false;
+        if (HY.alive(token)) { msg.textContent = HY.errText(e); }
+      });
     }
 
     function loadAll() {
@@ -95,18 +114,30 @@
       });
     }
 
+    // Steps back 30 days at a time until entries turn up or a year is covered.
     function loadMore() {
       if (loading) { return; }
       loading = true;
-      var newLo = lo - 30 * DAY;
-      fetchRange(newLo, lo).then(function (list) {
+      draw();
+      var found = [];
+      function step() {
+        var newLo = Math.max(lo - 30 * DAY, origin - MAXBACK);
+        return fetchRange(newLo, lo).then(function (list) {
+          lo = newLo;
+          found = list.concat(found);
+          if (!list.length && lo > origin - MAXBACK) { return step(); }
+        });
+      }
+      step().then(function () {
         loading = false;
         if (!HY.alive(token)) { return; }
-        rows = list.concat(rows); lo = newLo; msg.textContent = "";
+        rows = found.concat(rows); msg.textContent = "";
+        if (!found.length || lo <= origin - MAXBACK) { reached = true; }
         draw();
       }, function (e) {
         loading = false;
-        if (HY.alive(token)) { msg.textContent = HY.errText(e); }
+        rows = found.concat(rows);
+        if (HY.alive(token)) { msg.textContent = HY.errText(e); draw(); }
       });
     }
 
@@ -137,8 +168,13 @@
             HY.h("th", null, "Status"), HY.h("th", null, "Note"), HY.h("th", null, ""))),
           HY.h("tbody", null, list.map(rowEl)))));
       }
-      if (!f.from && lo > 1700000000) {
-        moreBox.appendChild(HY.h("button", { class: "btn", type: "button", onclick: loadMore }, "Load more"));
+      if (!f.from) {
+        if (reached) {
+          moreBox.appendChild(HY.h("p", { class: "mut sm" }, "No older entries (looked back to " + HY.epochToDate(lo, zone) + ")"));
+        } else {
+          moreBox.appendChild(HY.h("button", { class: "btn", type: "button", disabled: loading, onclick: loadMore },
+            loading ? "Loading" : "Load more"));
+        }
       }
     }
 
@@ -178,7 +214,7 @@
         }
         return HY.api("PUT", "/api/log/" + e.id, body).then(function () {
           HY.toast("Entry saved");
-          loadAll();
+          reload();
           return true;
         }, function (er) { return HY.errText(er) || false; });
       });
@@ -191,10 +227,10 @@
           if (!yes) { return; }
           HY.api("DELETE", "/api/log/" + e.id + "?ts=" + e.ts).then(function () {
             HY.toast("Entry deleted");
-            loadAll();
+            reload();
           }, function (er) {
             var t = HY.errText(er); if (t) { HY.toast(t); }
-            loadAll();
+            reload();
           });
         });
     }
@@ -221,7 +257,7 @@
         if (note.value) { body.note = note.value; }
         return HY.api("POST", "/api/log", body).then(function () {
           HY.toast("Dose added");
-          loadAll();
+          reload();
           return true;
         }, function (er) { return HY.errText(er) || false; });
       });
@@ -241,6 +277,6 @@
       if (HY.alive(token)) { msg.textContent = HY.errText(e) || "Could not load the log"; }
     });
 
-    return function () { if (meds.length) { return loadAll(); } };
+    return function () { if (meds.length) { return reload(); } };
   }, "history");
 })();

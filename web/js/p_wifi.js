@@ -26,6 +26,9 @@
     var timer = null;
     view.appendChild(HY.h("div", { class: "head" }, HY.h("h1", null, "Wi-Fi"),
       HY.h("a", { class: "btn", href: "#/settings" }, "Settings")));
+    var noteBox = HY.h("div", { class: "banner warn", hidden: true, role: "status" });
+    var expect = null;   // mode the person asked for; the instruction stays until the page sees it
+    view.appendChild(noteBox);
     view.appendChild(root);
     HY.onLeave(function () { clearTimeout(timer); });
 
@@ -45,8 +48,8 @@
       return "The page will lose its connection. Turn Wi-Fi on again from the device or its power button";
     }
 
-    function setMode(target) {
-      if (!w || target === w.mode) { return; }
+    function setMode(target, force) {
+      if (!w || (target === w.mode && !force)) { return; }
       var body = { mode: target };
       if (target === "client") {
         if (!w.networks.length) { HY.toast("Save a network first"); return; }
@@ -58,6 +61,11 @@
       var go = function () {
         HY.api("POST", "/api/wifi/mode", body).then(function () {
           HY.toast(loses ? "Switching. The page will reconnect if it can" : "Wi-Fi mode changed");
+          if (loses) {
+            expect = target;
+            noteBox.hidden = false;
+            noteBox.textContent = warning(target);
+          }
           clearTimeout(timer);
           timer = setTimeout(load, 3000);
         }, fail);
@@ -83,7 +91,11 @@
           w.networks.map(function (n) { return HY.h("option", { value: n.ssid }, n.ssid); }));
         sel.value = pick || w.ssid || w.networks[0].ssid;
         pick = sel.value;
-        kids.push(field("Network to join", "w-pick", sel, "Used when you choose Wi-Fi above"));
+        var join = HY.h("button", { class: "btn", type: "button", hidden: !(w.mode === "client" && pick !== w.ssid),
+          onclick: function () { setMode("client", true); } }, "Join this network");
+        sel.addEventListener("change", function () { join.hidden = !(w.mode === "client" && pick !== w.ssid); });
+        kids.push(field("Network to join", "w-pick", sel, w.mode === "client" ? "Pick another saved network and join it" : "Used when you choose Wi-Fi above"));
+        kids.push(HY.h("div", { class: "actions" }, join));
       }
       return HY.h("section", { class: "panel" }, HY.h("h2", null, "Mode"), kids);
     }
@@ -201,6 +213,7 @@
         if (!HY.alive(token)) { return; }
         w = r[0]; keep = !!r[1].wifi_keep_batt;
         w.networks = w.networks || [];
+        if (expect && w.mode === expect && (expect !== "client" || w.state === "connected")) { expect = null; noteBox.hidden = true; }
         draw();
       }, function (e) {
         if (!HY.alive(token)) { return; }

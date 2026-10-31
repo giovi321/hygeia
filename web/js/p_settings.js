@@ -22,7 +22,9 @@ HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, sav
     var offset = 0;   // device clock minus browser clock, ms
     var zoneNow = "";
 
+    var errBox = HY.h("p", { class: "msg bad", role: "alert" });
     view.appendChild(HY.h("h1", null, "Settings"));
+    view.appendChild(errBox);
     view.appendChild(root);
     HY.onLeave(function () { clearInterval(clockTimer); });
 
@@ -134,7 +136,7 @@ HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, sav
     // ---- clock ----
     function fmtDevice(ms) {
       try {
-        return new Intl.DateTimeFormat("en-GB", { timeZone: zoneNow || undefined, dateStyle: "medium", timeStyle: "medium", hour12: false }).format(new Date(ms));
+        return new Intl.DateTimeFormat("en-GB", { timeZone: zoneNow || "UTC", dateStyle: "medium", timeStyle: "medium", hour12: false }).format(new Date(ms));
       } catch (e) { return new Date(ms).toISOString(); }
     }
 
@@ -168,7 +170,7 @@ HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, sav
           setZone.disabled = false;
           zerr.textContent = e.field === "zone" ? "The device does not know that time zone" : (HY.errText(e) || "");
         });
-      } }, "Set time zone");
+      } }, "Set time zone and time");
       var syncBtn = HY.h("button", { class: "btn p", type: "button", onclick: function () {
         syncBtn.disabled = true;
         HY.api("POST", "/api/time", { utc_ms: Date.now() }).then(function () {
@@ -180,8 +182,9 @@ HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, sav
         });
       } }, "Sync from this browser");
       clockBox.appendChild(HY.h("div", null, "Device time: ", shown));
+      if (!st.zone) { clockBox.appendChild(HY.h("div", { class: "warn sm" }, "Device zone unknown, showing UTC")); }
       clockBox.appendChild(HY.h("div", { class: "mut sm" }, syncText));
-      clockBox.appendChild(field("Time zone", "s-zone", zin));
+      clockBox.appendChild(field("Time zone", "s-zone", zin, "Also sets the device time from this browser"));
       clockBox.appendChild(list);
       clockBox.appendChild(zerr);
       clockBox.appendChild(HY.h("div", { class: "actions" }, setZone, syncBtn));
@@ -288,15 +291,17 @@ HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, sav
       return HY.api("GET", "/api/settings").then(function (s) {
         if (!HY.alive(token)) { return; }
         cur = s;
-        if (!ctl.volume) { build(); }
+        errBox.textContent = "";
+        if (!ctl.volume) { build(); loadClock(); loadBrowsers(); }
         sync();
         ctl.rot_show.textContent = "Current orientation: position " + s.rot + " of 0 to 3";
       }, function (e) {
-        if (HY.alive(token)) { HY.clear(root); root.appendChild(HY.h("p", { class: "msg bad" }, HY.errText(e) || "Could not load the settings")); }
+        // keep the page that is on screen; the next good answer clears the message
+        if (HY.alive(token)) { errBox.textContent = HY.errText(e) || "Could not load the settings"; }
       });
     }
 
-    load().then(function () { loadClock(); loadBrowsers(); });
+    load();
     // A device event refetches the settings only while nothing is being edited.
     return function () {
       var a = document.activeElement;
