@@ -209,14 +209,23 @@ static void cmd_settings(const char *args) { (void)args; hy_ui_debug_settings();
 static void cmd_wifi(const char *args) { hy_net_debug(args); }
 static void cmd_web(const char *args) { hy_web_debug(args); }
 static void cmd_webjob(const char *args) { hy_web_debug_job(args); }
-/* "pair": the running pairing code (console only) */
+/* "pair": the running pairing code (console only); "pair show|hide": the overlay with an example code */
 static void cmd_pair(const char *args)
 {
     if (args[0]) {
-        printf("usage: pair\n");
+        hy_ui_debug_pair(args);
         return;
     }
     hy_web_debug_pair();
+}
+/* "ui net <state>": the screens show that network state (see hy_ui_debug_net) */
+static void cmd_ui(const char *args)
+{
+    if (strncmp(args, "net ", 4) == 0) {
+        hy_ui_debug_net(args + 4);
+        return;
+    }
+    printf("usage: ui net off|paused|connecting|connected|weak|failing|ap|auto\n");
 }
 #endif
 
@@ -575,6 +584,7 @@ void app_main(void)
     console_register("web", cmd_web);
     console_register("webjob", cmd_webjob);
     console_register("pair", cmd_pair);
+    console_register("ui", cmd_ui);
     console_register("otafail", cmd_otafail);
     console_start();
 #endif

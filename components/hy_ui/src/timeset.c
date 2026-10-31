@@ -1,7 +1,9 @@
 /* Set the time: rollers day, month, year, hour and minute in the current zone, and "Set". The same widget is
  * the Date and time sub-view of Settings and, in invalid mode, the CLOCK_INVALID root with its header and the
  * explanation. The default is the current time, or the build time while the clock is invalid. An impossible date
- * (31 Feb) is refused with the info toast. */
+ * (31 Feb) is refused with the info toast.
+ * The clock-invalid root also offers the web UI: while the network is up a button opens a page with the QR code of
+ * the web UI address, otherwise a line says how to start the access point. Its rollers show three rows to make room. */
 
 #include <stdio.h>
 #include <string.h>
@@ -20,8 +22,11 @@ static const char *TAG = "ui_timeset";
 
 typedef struct {
     lv_obj_t *day, *mon, *year, *hour, *min, *zone_line;
+    lv_obj_t *parent, *hint, *web_btn, *phone;   /* clock-invalid root only */
     bool invalid;
 } inst_t;
+
+#define PHONE_Y 254   /* the hint and the web UI button, under the three roller rows */
 
 static inst_t s_inst[2];   /* [0] the Settings sub-view, [1] the CLOCK_INVALID root */
 
@@ -31,6 +36,74 @@ static void tm_of(int64_t ts, struct tm *tm)
     hy_tz_lock();   /* the process TZ is hy_clock's zone outside this lock */
     localtime_r(&t, tm);
     hy_tz_unlock();
+}
+
+static void phone_close(inst_t *in)
+{
+    if (in->phone) {
+        lv_obj_delete(in->phone);
+        in->phone = NULL;
+    }
+}
+
+static void phone_back_tap(void *ud)
+{
+    inst_t *in = ud;
+    if (in->phone) {
+        lv_obj_delete_async(in->phone);   /* the Back button is inside it: let its handler finish */
+        in->phone = NULL;
+    }
+}
+
+/* The page with the QR code of the web UI address */
+static void phone_open_tap(void *ud)
+{
+    inst_t *in = ud;
+    hy_net_status_t st;
+    char url[48];
+    net_ui_status(&st);
+    if (in->phone || !net_web_url(&st, url, sizeof url)) {
+        return;
+    }
+    in->phone = ui_plain(in->parent);
+    lv_obj_set_size(in->phone, HY_SCREEN, HY_CONTENT_H);
+    lv_obj_set_pos(in->phone, 0, 0);
+    lv_obj_set_style_bg_color(in->phone, lv_color_hex(HY_C_BG), 0);
+    lv_obj_set_style_bg_opa(in->phone, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(in->phone, true);   /* absorbs the touches meant for the rollers underneath */
+    ui_view_title(in->phone, HY_S_TIME_FROM_PHONE);
+    qr_block(in->phone, url, 44);
+    char ip[20];
+    net_ip_text(&st, ip, sizeof ip);
+    snprintf(url, sizeof url, HY_S_WEB_URL_SHOWN, ip);
+    lv_obj_t *l = ui_label(in->phone, hy_type.body, HY_C_TEXT, url);
+    lv_obj_set_width(l, HY_SCREEN);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(l, 0, 44 + QR_BLOCK_H + 10);
+    lv_obj_t *b = ui_button(in->phone, 288, 66, hy_type.body_bold, HY_S_BACK, phone_back_tap, in);
+    lv_obj_set_pos(b, (HY_SCREEN - 288) / 2, 356);
+}
+
+/* The clock-invalid root: the web UI button while the network is up, the hint on how to bring it up otherwise */
+void timeset_net_changed(void)
+{
+    inst_t *in = &s_inst[1];
+    if (!in->hint) {
+        return;
+    }
+    hy_net_status_t st;
+    net_ui_status(&st);
+    bool up = net_is_up(&st);
+    lv_obj_set_hidden(in->web_btn, !up);
+    lv_obj_set_hidden(in->hint, up);
+    if (!up) {
+        phone_close(in);
+    }
+}
+
+void timeset_hide(void)
+{
+    phone_close(&s_inst[1]);
 }
 
 void timeset_show(bool invalid_mode)
@@ -53,6 +126,10 @@ void timeset_show(bool invalid_mode)
     lv_roller_set_selected(in->year, (uint32_t)y, LV_ANIM_OFF);
     lv_roller_set_selected(in->hour, (uint32_t)tm.tm_hour, LV_ANIM_OFF);
     lv_roller_set_selected(in->min, (uint32_t)tm.tm_min, LV_ANIM_OFF);
+    if (invalid_mode) {
+        phone_close(in);
+        timeset_net_changed();
+    }
     if (in->zone_line) {
         char zone[HY_ZONE_LEN], tz[HY_TZ_LEN], t[80];
         hy_clock_zone_copy(zone, sizeof zone);
@@ -162,6 +239,21 @@ void timeset_create(lv_obj_t *parent, bool invalid_mode)
 
     lv_obj_t *b = ui_button(parent, HY_SCREEN - 36, 66, hy_type.body_bold, HY_S_SET_SET, set_tap, in);
     lv_obj_set_pos(b, 18, 346);
+
+    if (invalid_mode) {
+        lv_obj_t *r[5] = {in->day, in->mon, in->year, in->hour, in->min};
+        for (int i = 0; i < 5; i++) {
+            lv_roller_set_visible_row_count(r[i], 3);
+        }
+        in->parent = parent;
+        in->hint = ui_label(parent, hy_type.status, HY_C_TEXT2, HY_S_TIME_START_AP);
+        lv_obj_set_width(in->hint, HY_SCREEN - 2 * MARGIN);
+        lv_label_set_long_mode(in->hint, LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_set_pos(in->hint, MARGIN, PHONE_Y);
+        in->web_btn = ui_button(parent, HY_SCREEN - 36, 56, hy_type.body_bold, HY_S_TIME_FROM_PHONE, phone_open_tap, in);
+        lv_obj_set_pos(in->web_btn, 18, PHONE_Y);
+        lv_obj_set_hidden(in->web_btn, true);
+    }
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE

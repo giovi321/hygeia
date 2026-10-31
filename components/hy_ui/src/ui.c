@@ -100,6 +100,7 @@ void ui_refresh_all(void)
     nav_host_tick();
     topbar_refresh();
     topbar_battery_refresh();
+    net_ui_refresh();
     home_refresh_if_changed();
     overview_refresh_if_changed();
     history_refresh_if_changed();
@@ -506,6 +507,7 @@ esp_err_t hy_ui_start(void)
                                            .wake = power_wake};
     hy_power_set_ui(&power_ui);
     pair_register();
+    net_ui_init();
     hy_board_unlock();
 
     if (sub < 0) {

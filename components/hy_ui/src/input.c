@@ -12,6 +12,7 @@
  * navigate. A touch outside the moving list (a quick settings tile, a toast, an overlay) is an ordinary stroke. A stroke that moves on from there is an ordinary drag or swipe. */
 
 #include "esp_log.h"
+#include "hy/net.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_input";
@@ -121,6 +122,7 @@ static void indev_cb(lv_event_t *e)
         }
         s_active = true;
         lv_display_trigger_activity(NULL);
+        hy_net_activity();   /* someone is using the device: the radio stays up on battery */
         s_waking = stroke_waking();
         screen_activity();
         s_glide_stop = s_glide_pending && !s_waking && glide_target(lv_indev_get_active_obj());
@@ -146,6 +148,7 @@ static void indev_cb(lv_event_t *e)
 static void finish(int32_t x, int32_t y, uint32_t t)
 {
     s_active = false;
+    hy_net_activity();
     s_st.x1 = (int16_t)x;
     s_st.y1 = (int16_t)y;
     s_st.t1_ms = t;

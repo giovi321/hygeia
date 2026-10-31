@@ -11,6 +11,7 @@
 #include "hy/screen.h"
 #include "hy/motion.h"
 #include "esp_err.h"
+#include "hy/net.h"
 #include "strings.h"
 
 /* colours (global constraints) */
@@ -97,6 +98,7 @@ lv_obj_t *ui_view_title(lv_obj_t *view, const char *text);     /* 26 bold header
 /* A 30 px slider. live runs on every change, commit on release; a stroke that only woke the screen changes nothing.
  * It consumes its strokes (no gesture). */
 lv_obj_t *ui_slider(lv_obj_t *parent, int32_t w, int32_t min, int32_t max, void (*live)(int32_t), void (*commit)(int32_t));
+lv_obj_t *ui_list_row(lv_obj_t *parent, int h, const char *title, ui_action_cb cb, void *ud); /* settings.c: title left, value label (returned) right; 444 wide */
 lv_obj_t *ui_roller(lv_obj_t *parent, const char *opts, lv_roller_mode_t mode, int32_t w, const lv_font_t *sel_font,
                     lv_event_cb_t changed);
 
@@ -112,6 +114,7 @@ hy_view_t ui_current_view(void);                  /* the view shown now */
 bool      ui_nav_idle(void);                     /* the dimmed screen: the next stroke only wakes */
 void      ui_nav_set_idle(bool idle);            /* the raw nav flag; idle.c owns it (the debug note wake test sets it alone) */
 void      ui_nav_set_poweroff(bool on);          /* the power-off overlay or the countdown is up: nav rule 0 */
+void      ui_nav_set_pairing(bool on);           /* the pairing overlay is up: nav rule 0 */
 void      ui_nav_set_due(bool due);              /* the due card is up: nav rule 2 (it holds the screen on USB only, R1) */
 void      ui_nav_push(hy_view_t v);
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -157,8 +160,11 @@ void      topbar_battery_refresh(void);          /* percent, red, bolt; also the
 /* Battery text for every place that shows it. *known false: pct holds the placeholder. est empty when hidden. */
 void      ui_battery_text(char *pct, size_t pct_len, bool *red, bool *bolt, char *est, size_t est_len, bool *has_est,
                           bool *known);
-void      idle_status_refresh(void);             /* idle.c: battery percent in the status line */
+void      idle_status_refresh(void);             /* idle.c: battery percent and network in the status line */
 void      qs_battery_refresh(void);              /* qs.c: battery line */
+void      qs_net_refresh(void);                  /* qs.c: the Wi-Fi and Access point tiles */
+void      qs_values_refresh(void);               /* qs.c: every tile and the slider, no slide (a setting changed elsewhere) */
+void      topbar_net_refresh(const hy_net_status_t *st); /* Wi-Fi arcs or the AP badge from the network state */
 void      topbar_set_visible(bool on);
 void      topbar_set_grab(bool on);              /* pull-down handle, Home only */
 
@@ -242,16 +248,48 @@ void qs_create(void);
 void qs_show(void);                              /* the view became the top: values and the 200 ms slide */
 void settings_create(void);                      /* Settings, Time zone, Sound, Display and About views */
 void settings_show(hy_view_t v);                 /* one of those views became the top: refresh its values */
+void settings_values_refresh(void);             /* the shown Settings view re-reads settings and network state (web UI changes) */
 esp_err_t settings_set_zone(const char *iana);   /* the zone picker's Set; the debug settz calls it too */
 void settings_brightness_live(int32_t pct);      /* live brightness, no save */
 void settings_brightness_commit(int32_t pct);    /* saves the brightness setting */
 void timeset_create(lv_obj_t *parent, bool invalid_mode);
 void timeset_show(bool invalid_mode);            /* rollers to the current time (the build time while the clock is invalid) */
+void timeset_hide(void);                         /* the clock-invalid root left the screen: drops its QR */
+void timeset_net_changed(void);                  /* the clock-invalid root: the hint or the web UI button follows the network */
 #if CONFIG_HY_DEBUG_CONSOLE
 void qs_debug(const char *arg);                  /* "sound|dnd|bright <n>": the tile taps and the slider release */
 void timeset_debug_set(int year, int month, int day, int hour, int minute); /* the Date and time rollers, then Set */
 void settings_debug_log(void);                   /* logs the settings the RAM copy holds */
 #endif
+
+/* wifi.c: the network state as the screens see it, and Settings > Wi-Fi. LVGL task unless noted. */
+void net_ui_init(void);                          /* any task after hy_net_init: subscribes to hy_net */
+void net_ui_status(hy_net_status_t *out);        /* the status the screens show (the debug override, else hy_net) */
+void net_ui_refresh(void);                       /* re-reads it and updates every screen that shows it; ui.c, every second */
+void net_state_text(const hy_net_status_t *st, char *out, size_t len); /* "Off", the SSID, "Connecting", ... */
+bool net_ip_text(const hy_net_status_t *st, char *out, size_t len); /* dotted address while the net is up */
+bool net_is_up(const hy_net_status_t *st);       /* a client connected or the access point running */
+bool net_web_url(const hy_net_status_t *st, char *out, size_t len);    /* "http://<ip>/" while the net is up */
+void net_idle_text(const hy_net_status_t *st, char *out, size_t len);  /* the network part of the idle status line */
+void wifi_create(void);                          /* the Settings > Wi-Fi view (called from settings_create) */
+void wifi_show(void);
+void wifi_values_refresh(void);                  /* a setting changed elsewhere */
+#if CONFIG_HY_DEBUG_CONSOLE
+void net_ui_debug(const char *arg);              /* "off|paused|connecting|connected|weak|failing|ap|auto" */
+#endif
+
+/* apinfo.c, webqr.c: the access point screen and the Web UI QR screen. The QR is built when the view shows and
+ * deleted when it leaves (apinfo_hide and webqr_hide get the view that follows). */
+lv_obj_t *qr_block(lv_obj_t *parent, const char *text, int32_t y); /* QR on a light square with its quiet zone, centred at y */
+#define QR_BLOCK_H 244
+void apinfo_create(void);
+void apinfo_show(void);
+void apinfo_hide(hy_view_t next);
+void apinfo_open_fill(lv_obj_t *holder, int32_t y); /* the "Then open" block: QR of the access point address and the text */
+void webqr_create(void);
+void webqr_show(void);
+void webqr_hide(hy_view_t next);
+void webqr_net_changed(void);
 
 /* storage_down.c */
 lv_obj_t *storage_down_create(lv_obj_t *parent);
@@ -341,6 +379,7 @@ void poweroff_countdown_show(void);              /* critical battery: 60 s count
 bool poweroff_countdown_visible(void);
 void poweroff_pwr_short(void);                   /* hy_power_ui_t.pwr_short */
 void poweroff_pwr_long(void);                    /* hy_power_ui_t.pwr_long */
+void poweroff_now(void);                         /* the power-off slider's path: hy_power_off, then the failure toast */
 void poweroff_usb(bool in);                      /* hy_power_ui_t.usb */
 #if CONFIG_HY_DEBUG_CONSOLE
 void poweroff_debug(const char *arg);            /* show | slide | cancel | crit */
@@ -357,8 +396,12 @@ void ui_battery_toast_flush(void);
 void toast_show_info(const char *text);  /* warning style, no Undo */
 void toast_show_ok(const char *text);    /* green tick, no Undo: a completed action */
 
-/* pair.c: registers the web server's screen callbacks (pairing overlay, toasts) */
-void pair_register(void);
+/* pair.c: the pairing overlay, and the registration of the web server's screen callbacks */
+void pair_register(void);                        /* after poweroff_create: the overlay sits above every other */
+bool pair_visible(void);                         /* the overlay is up: it holds the screen on like the power-off slider */
+#if CONFIG_HY_DEBUG_CONSOLE
+void pair_debug(const char *arg);                /* "show|hide" */
+#endif
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_undo_by_shake(void);          /* same, then an info toast says the shake undid it */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */

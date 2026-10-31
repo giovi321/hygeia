@@ -2,8 +2,8 @@
  * - TICK every second (ui.c), touch strokes (TOUCH), a newly showing due card (DUE), each chime moment (CHIME: wakes
  *   on USB only, R2), USB in and out, PWR short (toggles ON <-> OFF) and the user key drive it, with the dim_s,
  *   off_bat_s and off_usb_s settings.
- * - Hold (no dim, no off; a dimmed screen comes back ON): the power-off confirmation or the critical countdown shows,
- *   or a due card shows on USB (R1). On battery a due card dims and goes off like any view.
+ * - Hold (no dim, no off; a dimmed screen comes back ON): the power-off confirmation, the critical countdown or the
+ *   browser pairing code shows, or a due card shows on USB (R1). On battery a due card dims and goes off like any view.
  * - DIM is the idle clock: a black overlay on the top layer, above the top bar and below the power-off overlay, with
  *   the time, the next dose and the status line, brightness min(setting, 20%), moved a few pixels each minute
  *   against burn-in (hy_idle_drift).
@@ -159,11 +159,16 @@ void idle_status_refresh(void)
     if (!s_status) {
         return;
     }
-    char pct[16], est[16], b[48];
+    char pct[16], est[16], net[48], b[96];
     bool red, bolt, has_est, known;
     ui_battery_text(pct, sizeof pct, &red, &bolt, est, sizeof est, &has_est, &known);
-    snprintf(b, sizeof b, HY_S_IDLE_STATUS, pct);
-    lv_label_set_text(s_status, b);
+    hy_net_status_t ns;
+    net_ui_status(&ns);
+    net_idle_text(&ns, net, sizeof net);
+    snprintf(b, sizeof b, HY_S_IDLE_STATUS, pct, net);
+    if (strcmp(lv_label_get_text(s_status), b) != 0) {
+        lv_label_set_text(s_status, b);
+    }
 }
 
 static void render(void)
@@ -275,7 +280,7 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
 
 static bool hold_now(void)
 {
-    return poweroff_visible() || poweroff_countdown_visible() || (due_visible() && s_scr.usb);
+    return poweroff_visible() || poweroff_countdown_visible() || pair_visible() || (due_visible() && s_scr.usb);
 }
 
 static void event(hy_scr_ev_t ev, const char *why)
@@ -485,6 +490,9 @@ void idle_create(void)
     s_next = ui_label(s_grp, hy_type.body, HY_C_TEXT2, "");
     lv_obj_align(s_next, LV_ALIGN_CENTER, 0, 65);
     s_status = ui_label(s_grp, hy_type.status, HY_C_TEXT2, "");
+    lv_obj_set_width(s_status, HY_SCREEN - 2 * 40);   /* a long network name is cut, not wrapped */
+    lv_label_set_long_mode(s_status, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_align(s_status, LV_TEXT_ALIGN_CENTER, 0);
     idle_status_refresh();
     lv_obj_align(s_status, LV_ALIGN_CENTER, 0, 110);
     s_bri = hy_settings()->brightness;

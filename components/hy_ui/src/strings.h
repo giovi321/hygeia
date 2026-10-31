@@ -165,6 +165,8 @@
 #define HY_S_TIME_BAD_TIME "That time does not exist"
 #define HY_S_TIME_TOO_EARLY "Date is before this firmware was built"
 #define HY_S_TIME_ZONE_LINE "Time zone %s"          /* IANA name or POSIX string */
+#define HY_S_TIME_FROM_PHONE "Or set it from the web UI"
+#define HY_S_TIME_START_AP "To set it from a phone, start the access point in quick settings"
 
 /* ---- idle clock ---- */
 #define HY_S_IDLE_NEXT     "Next: %s at %s"         /* code, HH:MM */
@@ -172,7 +174,12 @@
 #define HY_S_IDLE_DUE_MORE "%s and %u more due"      /* code of the first open dose, count of the others */
 #define HY_S_IDLE_NONE     "No doses scheduled"
 #define HY_S_IDLE_SET_TIME HY_S_TIME_TITLE
-#define HY_S_IDLE_STATUS   "%s" HY_S_DOT "Wi-Fi off"   /* battery text */
+#define HY_S_IDLE_STATUS   "%s" HY_S_DOT "%s"          /* battery text, network text */
+#define HY_S_IDLE_NET_OFF  "Wi-Fi off"
+#define HY_S_IDLE_NET_CONNECTING "Wi-Fi connecting"
+#define HY_S_IDLE_NET_FAILING "Wi-Fi can't connect"
+#define HY_S_IDLE_NET_UP   "Wi-Fi %s"               /* network name */
+#define HY_S_IDLE_NET_AP   "Access point on"
 
 /* ---- power-off confirmation and the critical-battery countdown ---- */
 #define HY_S_CANCEL        "Cancel"
@@ -246,6 +253,55 @@
 #define HY_S_MF_SAVED      "Saved"
 #define HY_S_MF_FULL_ACTIVE "50 medicines is the limit. Archive one first"
 #define HY_S_MF_FULL_STORED "No room for more medicines. Ask for help in the web UI"
+
+/* ---- network: top bar, quick settings, Settings, address screens, pairing ---- */
+#define HY_S_NET_OFF       "Off"
+#define HY_S_NET_CONNECTING "Connecting"
+#define HY_S_NET_FAILING   "Can't connect"
+#define HY_S_NET_PAUSED    "Off on battery"
+#define HY_S_NET_AP_ON     "On"
+#define HY_S_NET_AP        "Access point"
+#define HY_S_NET_HINT      "Can't reach a saved network. Start the access point to add one"
+#define HY_S_NET_BADGE     "AP"
+#define HY_S_NET_ERR       "Could not change Wi-Fi"
+
+#define HY_S_WIFI_MODE_OFF "Off"
+#define HY_S_WIFI_MODE_CLIENT "Wi-Fi"
+#define HY_S_WIFI_MODE_AP  "Access point"
+#define HY_S_WIFI_SAVED    "Saved networks"
+#define HY_S_WIFI_CONNECTED "Connected"
+#define HY_S_WIFI_ADD_WEB  "Add networks in the web UI"
+#define HY_S_WIFI_NONE     "No saved networks"
+#define HY_S_WIFI_AP_ROW   "Access point"
+#define HY_S_WIFI_ADDR     "Web UI address"
+#define HY_S_WIFI_BROWSERS "Paired browsers: %u"
+#define HY_S_WIFI_FORGET   "Forget all"
+#define HY_S_WIFI_FORGET_Q "Forget all paired browsers?"
+#define HY_S_WIFI_FORGET_DO "Forget"
+#define HY_S_WIFI_FORGOTTEN "Paired browsers forgotten"
+#define HY_S_WIFI_KEEP     "Keep Wi-Fi on battery"
+
+#define HY_S_AP_JOIN       "Join the device's Wi-Fi"
+#define HY_S_AP_OPEN       "Then open"
+#define HY_S_AP_URL        "http://192.168.4.1/"
+#define HY_S_AP_NAME       "Name %s"                /* access point name */
+#define HY_S_AP_PASS       "Password %s"
+
+#define HY_S_WEB_TITLE     "Web UI"
+#define HY_S_WEB_NEED_NET  "Turn on Wi-Fi or the access point first"
+#define HY_S_WEB_WIFI_BTN  "Turn on Wi-Fi"
+#define HY_S_WEB_AP_BTN    "Start access point"
+#define HY_S_WEB_URL       "http://%s/"             /* address */
+#define HY_S_WEB_URL_SHOWN "http://%s"
+#define HY_S_WEB_LOCAL     "%s.local"               /* host name */
+
+#define HY_S_PAIR_TITLE    "Pair a browser"
+#define HY_S_PAIR_HINT     "Type this code in the browser"
+#define HY_S_PAIR_LEFT     "%u s left"              /* seconds */
+#define HY_S_PAIR_DONE     "Browser paired"
+#define HY_S_PAIR_EXPIRED  "Pairing code expired"
+#define HY_S_PAIR_BLOCKED  "Too many wrong codes. Try again in a minute"
+#define HY_S_PAIR_FAILED   "Could not pair. Try again"
 
 /* ---- archive confirmation ---- */
 #define HY_S_ARCH_TITLE    "Archive %s?"            /* name */

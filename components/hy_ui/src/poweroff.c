@@ -180,6 +180,13 @@ static void power_off_now(void)
     failed();
 }
 
+/* The web UI's power-off asks for the same path as the slider */
+void poweroff_now(void)
+{
+    ESP_LOGI(TAG, "poweroff: asked by the web UI");
+    power_off_now();
+}
+
 /* ---- countdown ---- */
 
 static void countdown_render(int left)

@@ -1,4 +1,4 @@
-/* Quick settings: 2 x 2 tiles (Wi-Fi and Access point are placeholders for now, Sound and Do not disturb
+/* Quick settings: 2 x 2 tiles (Wi-Fi and Access point follow the network, Sound and Do not disturb
  * toggle the settings), the brightness slider, the battery line and the Settings and Web UI QR buttons. The view
  * slides down over the previous one in 200 ms. Closing is the nav rule: swipe up anywhere or the bottom edge. */
 
@@ -30,11 +30,33 @@ static void save(const hy_settings_t *s)
              s->dnd, (unsigned)s->volume, (unsigned)s->brightness);
 }
 
+/* The Wi-Fi tile is on for a client in any step of connecting; the Access point tile while the access point runs. A
+ * saved mode that the battery rule holds back reads "Off on battery" on the tile of that mode. */
+void qs_net_refresh(void)
+{
+    if (!s_root) {
+        return;
+    }
+    hy_net_status_t ns;
+    net_ui_status(&ns);
+    bool client = ns.state == HY_NS_CONNECTING || ns.state == HY_NS_CONNECTED || ns.state == HY_NS_FAILING;
+    bool ap = ns.state == HY_NS_AP;
+    char t[48];
+    if (ns.state == HY_NS_AP || (ns.state == HY_NS_PAUSED && ns.saved == HY_NET_AP)) {
+        snprintf(t, sizeof t, "%s", HY_S_NET_OFF);   /* not the client: the Access point tile speaks for the radio */
+    } else {
+        net_state_text(&ns, t, sizeof t);
+    }
+    lv_label_set_text(s_sub[T_WIFI], t);
+    lv_label_set_text(s_sub[T_AP], ap ? HY_S_NET_AP_ON : (ns.state == HY_NS_PAUSED && ns.saved == HY_NET_AP) ? HY_S_NET_PAUSED : HY_S_NET_OFF);
+    lv_obj_set_style_bg_color(s_tile[T_WIFI], lv_color_hex(client ? HY_C_ON : HY_C_SURFACE2), 0);
+    lv_obj_set_style_bg_color(s_tile[T_AP], lv_color_hex(ap ? HY_C_ON : HY_C_SURFACE2), 0);
+}
+
 static void refresh(void)
 {
     const hy_settings_t *st = hy_settings();
-    lv_label_set_text(s_sub[T_WIFI], HY_S_OFF);
-    lv_label_set_text(s_sub[T_AP], HY_S_OFF);
+    qs_net_refresh();
     lv_label_set_text(s_sub[T_SOUND], st->sound ? HY_S_QS_CHIME_ON : HY_S_QS_CHIME_OFF);
     lv_label_set_text(s_sub[T_DND], st->dnd ? HY_S_ON : HY_S_OFF);
     lv_obj_set_style_bg_color(s_tile[T_SOUND], lv_color_hex(st->sound ? HY_C_ON : HY_C_SURFACE2), 0);
@@ -81,17 +103,52 @@ static void toggle_dnd(void)
     refresh();
 }
 
+static void net_mode(hy_net_mode_t m)
+{
+    esp_err_t err = hy_net_set_mode(m, NULL);   /* on battery this counts as starting the radio there */
+    ESP_LOGI(TAG, "net mode %d: %s", (int)m, esp_err_to_name(err));
+    if (err != ESP_OK) {
+        toast_show_info(HY_S_NET_ERR);
+    }
+    net_ui_refresh();
+}
+
+/* Wi-Fi: a client in any step gives off; off, paused or the access point gives the client */
+static void toggle_wifi(void)
+{
+    hy_net_status_t ns;
+    net_ui_status(&ns);
+    bool client = ns.state == HY_NS_CONNECTING || ns.state == HY_NS_CONNECTED || ns.state == HY_NS_FAILING;
+    net_mode(client ? HY_NET_OFF : HY_NET_CLIENT);
+}
+
+/* Access point: on gives off; otherwise it starts and its join screen opens */
+static void toggle_ap(void)
+{
+    hy_net_status_t ns;
+    net_ui_status(&ns);
+    if (ns.state == HY_NS_AP) {
+        net_mode(HY_NET_OFF);
+        return;
+    }
+    net_mode(HY_NET_AP);
+    ui_nav_push(HY_V_AP_INFO);
+}
+
 static void tile_tap(void *ud)
 {
     switch ((int)(uintptr_t)ud) {
+    case T_WIFI:
+        toggle_wifi();
+        break;
+    case T_AP:
+        toggle_ap();
+        break;
     case T_SOUND:
         toggle_sound();
         break;
-    case T_DND:
-        toggle_dnd();
-        break;
     default:
-        toast_show_info(HY_S_NOT_YET);   /* Wi-Fi and Access point: not built yet */
+        toggle_dnd();
         break;
     }
 }
@@ -105,7 +162,7 @@ static void settings_tap(void *ud)
 static void qr_tap(void *ud)
 {
     (void)ud;
-    toast_show_info(HY_S_NOT_YET);   /* the QR is not built yet */
+    ui_nav_push(HY_V_WEB_QR);
 }
 
 static void make_tile(int idx, const char *title)
@@ -118,9 +175,6 @@ static void make_tile(int idx, const char *title)
     lv_obj_set_style_bg_color(t, lv_color_hex(HY_C_SURFACE2), 0);
     lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
     lv_obj_set_scrollable(t, false);
-    if (idx == T_WIFI || idx == T_AP) {
-        lv_obj_set_style_opa(t, LV_OPA_40, 0);
-    }
     ui_on_tap(t, tile_tap, (void *)(uintptr_t)idx);
     lv_obj_t *l = ui_label(t, hy_type.body_bold, HY_C_TEXT, title);
     lv_obj_set_pos(l, 16, 18);
@@ -173,7 +227,6 @@ void qs_create(void)
     b = ui_button(s_root, bw, 64, hy_type.status_bold, HY_S_QS_QR, qr_tap, NULL);
     lv_obj_set_x(b, MARGIN + bw + GAP);
     lv_obj_align(lv_obj_get_child(b, 0), LV_ALIGN_LEFT_MID, 16, 0);
-    lv_obj_set_style_opa(b, LV_OPA_40, 0);
     s_btn[1] = b;
     qs_battery_refresh();
 }
@@ -203,6 +256,14 @@ void qs_show(void)
     lv_anim_start(&a);
 }
 
+/* A setting changed elsewhere (the web UI): the tiles and the slider follow, with no slide */
+void qs_values_refresh(void)
+{
+    if (s_root) {
+        refresh();
+    }
+}
+
 #if CONFIG_HY_DEBUG_CONSOLE
 /* The same handlers as a tap on the tile and a release of the slider */
 void qs_debug(const char *arg)
@@ -214,12 +275,18 @@ void qs_debug(const char *arg)
         toggle_sound();
     } else if (strcmp(arg, "dnd") == 0) {
         toggle_dnd();
+    } else if (strcmp(arg, "wifi") == 0) {
+        toggle_wifi();
+    } else if (strcmp(arg, "ap") == 0) {
+        toggle_ap();
+    } else if (strcmp(arg, "webqr") == 0) {
+        qr_tap(NULL);
     } else if (sscanf(arg, "bright %d", &n) == 1 && n >= 10 && n <= 100) {
         lv_slider_set_value(s_slider, n, LV_ANIM_OFF);
         settings_brightness_live(n);
         settings_brightness_commit(n);
     } else {
-        ESP_LOGE(TAG, "usage: qs sound|dnd|bright <10-100>|time <y> <m> <d> <h> <mi>");
+        ESP_LOGE(TAG, "usage: qs sound|dnd|wifi|ap|webqr|bright <10-100>|time <y> <m> <d> <h> <mi>");
     }
 }
 #endif

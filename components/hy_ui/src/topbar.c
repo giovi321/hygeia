@@ -1,5 +1,7 @@
-/* Top bar on lv_layer_top: time left; crossed Wi-Fi arcs (Wi-Fi is off in this firmware), the charging bolt
- * and the battery percent right; the pull-down handle above the middle on Home. Nothing here takes touches. */
+/* Top bar on lv_layer_top: time left; the network icon, the charging bolt and the battery percent right; the
+ * pull-down handle above the middle on Home. Nothing here takes touches.
+ * Network icon: a client that is connected draws both arcs light (the outer one grey below -70 dBm); connecting or
+ * failing draws both grey; the access point shows an "AP" badge; off or paused shows the grey arcs crossed out. */
 
 #include <stdio.h>
 #include <string.h>
@@ -19,8 +21,12 @@
 #define GRAB_W    44
 #define GRAB_H    5
 #define GRAB_Y    6
+#define BADGE_W   36
+#define BADGE_H   WIFI_H
+#define WEAK_DBM  (-70)
 
-static lv_obj_t *s_bar, *s_time, *s_wifi, *s_batt, *s_bolt, *s_grab;
+static lv_obj_t *s_bar, *s_time, *s_wifi, *s_batt, *s_bolt, *s_grab, *s_ap, *s_arc[2], *s_slash;
+static int s_net_view = -1;   /* the icon drawn now: 0 crossed, 1 grey arcs, 2 connected, 3 connected and weak, 4 badge */
 static char s_time_txt[32];
 /* what the battery widgets show now; a refresh with the same values does no LVGL work */
 static char s_batt_txt[16], s_est_txt[16];
@@ -45,7 +51,7 @@ static lv_obj_t *plain(lv_obj_t *parent)
     return o;
 }
 
-static void wifi_arc(lv_obj_t *parent, int32_t d)
+static lv_obj_t *wifi_arc(lv_obj_t *parent, int32_t d)
 {
     lv_obj_t *a = lv_arc_create(parent);
     lv_obj_remove_style_all(a);
@@ -59,6 +65,14 @@ static void wifi_arc(lv_obj_t *parent, int32_t d)
     lv_obj_set_style_arc_opa(a, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_arc_rounded(a, true, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    return a;
+}
+
+/* The network icon sits left of the bolt (or of the percent when there is none) */
+static void net_icon_align(lv_obj_t *anchor)
+{
+    lv_obj_align_to(s_wifi, anchor, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
+    lv_obj_align_to(s_ap, anchor, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
 }
 
 static void bolt_draw(lv_event_t *e)
@@ -102,14 +116,23 @@ void topbar_create(void)
 
     s_wifi = plain(s_bar);
     lv_obj_set_size(s_wifi, WIFI_W, WIFI_H);
-    wifi_arc(s_wifi, 30);
-    wifi_arc(s_wifi, 14);
-    lv_obj_t *slash = lv_line_create(s_wifi);
-    lv_line_set_points(slash, slash_pts, 2);
-    lv_obj_set_style_line_width(slash, 3, 0);
-    lv_obj_set_style_line_color(slash, lv_color_hex(HY_C_TEXT2), 0);
-    lv_obj_set_style_line_rounded(slash, true, 0);
-    lv_obj_align_to(s_wifi, s_batt, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
+    s_arc[0] = wifi_arc(s_wifi, 30);
+    s_arc[1] = wifi_arc(s_wifi, 14);
+    s_slash = lv_line_create(s_wifi);
+    lv_line_set_points(s_slash, slash_pts, 2);
+    lv_obj_set_style_line_width(s_slash, 3, 0);
+    lv_obj_set_style_line_color(s_slash, lv_color_hex(HY_C_TEXT2), 0);
+    lv_obj_set_style_line_rounded(s_slash, true, 0);
+
+    s_ap = plain(s_bar);
+    lv_obj_set_size(s_ap, BADGE_W, BADGE_H);
+    lv_obj_set_style_radius(s_ap, 6, 0);
+    lv_obj_set_style_border_width(s_ap, 1, 0);
+    lv_obj_set_style_border_color(s_ap, lv_color_hex(HY_C_TEXT2), 0);
+    lv_obj_set_style_border_opa(s_ap, LV_OPA_COVER, 0);
+    lv_obj_center(ui_label(s_ap, hy_type.status_bold, HY_C_TEXT, HY_S_NET_BADGE));
+    lv_obj_set_hidden(s_ap, true);
+    net_icon_align(s_batt);
 
     s_bolt = plain(s_bar);
     lv_obj_set_size(s_bolt, BOLT_W, BOLT_H);
@@ -181,13 +204,45 @@ void topbar_battery_refresh(void)
         lv_obj_align(s_batt, LV_ALIGN_RIGHT_MID, -PAD_X, 0);
         if (bolt) {
             lv_obj_align_to(s_bolt, s_batt, LV_ALIGN_OUT_LEFT_MID, -BOLT_GAP, 0);
-            lv_obj_align_to(s_wifi, s_bolt, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
+            net_icon_align(s_bolt);
         } else {
-            lv_obj_align_to(s_wifi, s_batt, LV_ALIGN_OUT_LEFT_MID, -WIFI_GAP, 0);
+            net_icon_align(s_batt);
         }
     }
     idle_status_refresh();
     qs_battery_refresh();
+}
+
+/* The network icon for the current state. Idempotent: a repeated call with the same look does no LVGL work. */
+void topbar_net_refresh(const hy_net_status_t *st)
+{
+    int view;
+    switch (st->state) {
+    case HY_NS_CONNECTED:
+        view = st->rssi != 0 && st->rssi < WEAK_DBM ? 3 : 2;
+        break;
+    case HY_NS_CONNECTING:
+    case HY_NS_FAILING:
+        view = 1;
+        break;
+    case HY_NS_AP:
+        view = 4;
+        break;
+    default:
+        view = 0;
+        break;
+    }
+    if (view == s_net_view) {
+        return;
+    }
+    s_net_view = view;
+    bool badge = view == 4;
+    lv_obj_set_hidden(s_wifi, badge);
+    lv_obj_set_hidden(s_ap, !badge);
+    lv_obj_set_hidden(s_slash, view != 0);
+    uint32_t light = HY_C_TEXT, grey = HY_C_TEXT2;
+    lv_obj_set_style_arc_color(s_arc[0], lv_color_hex(view == 2 ? light : grey), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_arc[1], lv_color_hex(view == 2 || view == 3 ? light : grey), LV_PART_MAIN);
 }
 
 void topbar_refresh(void)

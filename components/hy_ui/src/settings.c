@@ -1,5 +1,5 @@
 /* Settings and its sub-views: Time zone (region and city rollers), Sound (volume slider, Play chime), Display
- * (brightness slider, rotation lock) and About. Date and time is timeset.c, Wi-Fi is a placeholder until Wi-Fi support is built.
+ * (brightness slider, rotation lock) and About. Date and time is timeset.c, Wi-Fi is wifi.c.
  * The list scrolls and consumes its scroll strokes; every row acts on a still tap only. */
 
 #include <stdio.h>
@@ -250,8 +250,6 @@ static void sound_create(void)
     lv_obj_set_pos(b, MARGIN, 176);
 }
 
-static lv_obj_t *row_build(lv_obj_t *parent, int h, const char *title, ui_action_cb cb, void *ud);
-
 static void rot_lock_refresh(void)
 {
     lv_label_set_text(s_rot_val, rotate_locked() ? HY_S_ON : HY_S_OFF);
@@ -273,7 +271,7 @@ static void display_create(void)
     lv_obj_set_pos(s_bright_lbl, 24, 72);
     s_bright_slider = ui_slider(s_disp_root, ROW_W, 10, 100, display_live, settings_brightness_commit);
     lv_obj_set_pos(s_bright_slider, MARGIN, 116);
-    s_rot_val = row_build(s_disp_root, 66, HY_S_SET_ROT_LOCK, rot_lock_tap, NULL);
+    s_rot_val = ui_list_row(s_disp_root, 66, HY_S_SET_ROT_LOCK, rot_lock_tap, NULL);
     lv_obj_set_pos(lv_obj_get_parent(s_rot_val), MARGIN, 176);
 }
 
@@ -361,8 +359,10 @@ static void row_tap(void *ud)
     case R_ABOUT:
         ui_nav_push(HY_V_ABOUT);
         break;
+    case R_WIFI:
+        ui_nav_push(HY_V_SET_WIFI);
+        break;
     default:
-        toast_show_info(HY_S_NOT_YET);   /* Wi-Fi: not built yet */
         break;
     }
 }
@@ -374,7 +374,7 @@ static void list_scroll_cb(lv_event_t *e)
 }
 
 /* A list-style row: the title on the left, the value on the right. Returns the value label (its parent is the row). */
-static lv_obj_t *row_build(lv_obj_t *parent, int h, const char *title, ui_action_cb cb, void *ud)
+lv_obj_t *ui_list_row(lv_obj_t *parent, int h, const char *title, ui_action_cb cb, void *ud)
 {
     lv_obj_t *r = lv_obj_create(parent);
     lv_obj_remove_style_all(r);
@@ -385,7 +385,9 @@ static lv_obj_t *row_build(lv_obj_t *parent, int h, const char *title, ui_action
     lv_obj_set_style_bg_color(r, lv_color_hex(HY_C_SURFACE2), LV_STATE_PRESSED);
     lv_obj_set_scrollable(r, false);
     lv_obj_set_scroll_chain(r, true);
-    ui_on_tap(r, cb, ud);
+    if (cb) {
+        ui_on_tap(r, cb, ud);
+    }
     lv_obj_t *t = ui_label(r, hy_type.body, HY_C_TEXT, title);
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 22, 0);
     lv_obj_t *v = ui_label(r, hy_type.status, HY_C_TEXT2, "");
@@ -398,10 +400,7 @@ static lv_obj_t *row_build(lv_obj_t *parent, int h, const char *title, ui_action
 
 static void make_row(int idx, const char *title)
 {
-    s_val[idx] = row_build(s_list, ROW_H, title, row_tap, (void *)(uintptr_t)idx);
-    if (idx == R_WIFI) {
-        lv_obj_set_style_opa(lv_obj_get_parent(s_val[idx]), LV_OPA_40, 0);
-    }
+    s_val[idx] = ui_list_row(s_list, ROW_H, title, row_tap, (void *)(uintptr_t)idx);
 }
 
 static void list_refresh(void)
@@ -422,7 +421,11 @@ static void list_refresh(void)
     lv_label_set_text(s_val[R_DATETIME], t);
     lv_label_set_text_fmt(s_val[R_SOUND], HY_S_SET_VOLUME, (unsigned)st->volume);
     lv_label_set_text_fmt(s_val[R_DISPLAY], HY_S_SET_BRIGHT, (unsigned)st->brightness);
-    lv_label_set_text(s_val[R_WIFI], HY_S_OFF);
+    hy_net_status_t ns;
+    char net[48];
+    net_ui_status(&ns);
+    net_state_text(&ns, net, sizeof net);
+    lv_label_set_text(s_val[R_WIFI], net);
     lv_label_set_text(s_val[R_ABOUT], esp_app_get_description()->version);
 }
 
@@ -476,6 +479,27 @@ void settings_show(hy_view_t v)
     }
 }
 
+/* A setting or the network changed behind the screen's back (web UI): redraw the values of the view that shows them,
+ * leaving its scroll position and any open picker alone */
+void settings_values_refresh(void)
+{
+    hy_view_t v = ui_current_view();
+    switch (v) {
+    case HY_V_SETTINGS:
+        list_refresh();
+        break;
+    case HY_V_SET_SOUND:
+    case HY_V_SET_DISPLAY:
+        settings_show(v);
+        break;
+    case HY_V_SET_WIFI:
+        wifi_values_refresh();
+        break;
+    default:
+        break;
+    }
+}
+
 void settings_create(void)
 {
     s_root = ui_view_box();
@@ -507,6 +531,7 @@ void settings_create(void)
     sound_create();
     display_create();
     about_create();
+    wifi_create();
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
