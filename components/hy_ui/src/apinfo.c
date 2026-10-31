@@ -6,7 +6,7 @@
  *
  * HY_V_AP_INFO has two pages. 1: "Join the device's Wi-Fi", the Wi-Fi QR code with the network name and password
  * below it. 2: "Then open", the QR code of the access point's address and that address. Next goes to page 2, Done
- * leaves the view. Page 2 is also what the Web UI QR view shows while the access point is on. */
+ * leaves the view. The Web UI QR view shows the same two pages while the access point is on. */
 
 #include <stdio.h>
 #include <string.h>
@@ -72,36 +72,42 @@ void apinfo_open_fill(lv_obj_t *holder, int32_t y)
     lv_obj_set_pos(l, 0, y + QR_BLOCK_H + 10);
 }
 
+/* The join block shared with the Web UI QR view: the Wi-Fi code of the access point with its name and password */
+void apinfo_join_fill(lv_obj_t *holder, int32_t y)
+{
+    hy_net_status_t st;
+    net_ui_status(&st);
+    char pass[64], qr[128];
+    if (hy_net_ap_pass_get(pass) != ESP_OK) {
+        pass[0] = '\0';
+    }
+    if (hy_net_wifi_qr(st.ap_ssid, pass, qr, sizeof qr) < 0) {
+        qr[0] = '\0';
+    }
+    qr_block(holder, qr, y);
+    char line[96];
+    snprintf(line, sizeof line, HY_S_AP_NAME, st.ap_ssid);
+    lv_obj_t *l = ui_label(holder, hy_type.body, HY_C_TEXT, line);
+    lv_obj_set_width(l, HY_SCREEN);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(l, 0, y + QR_BLOCK_H + 6);
+    snprintf(line, sizeof line, HY_S_AP_PASS, pass);
+    l = ui_label(holder, hy_type.body, HY_C_TEXT, line);
+    lv_obj_set_width(l, HY_SCREEN);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(l, 0, y + QR_BLOCK_H + 36);
+    memset(pass, 0, sizeof pass);
+    memset(qr, 0, sizeof qr);
+    memset(line, 0, sizeof line);
+}
+
 static void fill(void)
 {
     lv_obj_clean(s_dyn);
     if (s_page == 0) {
-        hy_net_status_t st;
-        net_ui_status(&st);
-        char pass[64], qr[128];
-        if (hy_net_ap_pass_get(pass) != ESP_OK) {
-            pass[0] = '\0';
-        }
-        if (hy_net_wifi_qr(st.ap_ssid, pass, qr, sizeof qr) < 0) {
-            qr[0] = '\0';
-        }
         lv_label_set_text(s_title, HY_S_AP_JOIN);
         lv_label_set_text(s_btn_text, HY_S_NEXT);
-        qr_block(s_dyn, qr, 44);
-        char line[96];
-        snprintf(line, sizeof line, HY_S_AP_NAME, st.ap_ssid);
-        lv_obj_t *l = ui_label(s_dyn, hy_type.body, HY_C_TEXT, line);
-        lv_obj_set_width(l, HY_SCREEN);
-        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(l, 0, 44 + QR_BLOCK_H + 6);
-        snprintf(line, sizeof line, HY_S_AP_PASS, pass);
-        l = ui_label(s_dyn, hy_type.body, HY_C_TEXT, line);
-        lv_obj_set_width(l, HY_SCREEN);
-        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(l, 0, 44 + QR_BLOCK_H + 36);
-        memset(pass, 0, sizeof pass);
-        memset(qr, 0, sizeof qr);
-        memset(line, 0, sizeof line);
+        apinfo_join_fill(s_dyn, 44);
     } else {
         lv_label_set_text(s_title, HY_S_AP_OPEN);
         lv_label_set_text(s_btn_text, HY_S_DONE);

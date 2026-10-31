@@ -1,6 +1,6 @@
 /* Web UI QR (quick settings): what the person needs to open the web UI from a phone.
  * - Wi-Fi client connected: the QR code of http://<ip>/, the address and <host>.local under it.
- * - Access point on: the "Then open" block of the access point screen, and Done.
+ * - Access point on: the two pages of the access point screen (join the Wi-Fi, then open the address), Next and Done.
  * - Otherwise: a line saying the network must be on first, and buttons that turn on Wi-Fi or the access point.
  * The view follows network changes while it shows (webqr_net_changed); its QR code exists only while it shows. */
 
@@ -14,7 +14,8 @@ static const char *TAG = "ui_webqr";
 
 #define BTN_H 66
 
-static lv_obj_t *s_root, *s_dyn, *s_msg, *s_b_wifi, *s_b_ap, *s_b_done;
+static lv_obj_t *s_root, *s_title, *s_dyn, *s_msg, *s_b_wifi, *s_b_ap, *s_b_done, *s_b_done_text;
+static int s_ap_page;   /* access point mode: 0 join, 1 open */
 
 static void start_mode(hy_net_mode_t m)
 {
@@ -38,10 +39,17 @@ static void ap_tap(void *ud)
     start_mode(HY_NET_AP);
 }
 
+static void fill(void);
+
 static void done_tap(void *ud)
 {
     (void)ud;
-    ui_nav_pop();
+    if (s_ap_page == 0) {
+        s_ap_page = 1;
+        fill();
+    } else {
+        ui_nav_pop();
+    }
 }
 
 static lv_obj_t *centred(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *text, int32_t y)
@@ -63,6 +71,10 @@ static void fill(void)
     lv_obj_set_hidden(s_b_wifi, true);
     lv_obj_set_hidden(s_b_ap, true);
     lv_obj_set_hidden(s_b_done, true);
+    if (st.state != HY_NS_AP) {
+        s_ap_page = 0;
+    }
+    lv_label_set_text(s_title, HY_S_WEB_TITLE);
     char url[48], ip[20], line[48];
     if (st.state == HY_NS_CONNECTED && net_web_url(&st, url, sizeof url) && net_ip_text(&st, ip, sizeof ip)) {
         qr_block(s_dyn, url, 44);
@@ -71,7 +83,15 @@ static void fill(void)
         snprintf(line, sizeof line, HY_S_WEB_LOCAL, st.host);
         centred(s_dyn, hy_type.body, HY_C_TEXT2, line, 44 + QR_BLOCK_H + 42);
     } else if (st.state == HY_NS_AP) {
-        apinfo_open_fill(s_dyn, 44);
+        if (s_ap_page == 0) {
+            lv_label_set_text(s_title, HY_S_AP_JOIN);
+            lv_label_set_text(s_b_done_text, HY_S_NEXT);
+            apinfo_join_fill(s_dyn, 44);
+        } else {
+            lv_label_set_text(s_title, HY_S_AP_OPEN);
+            lv_label_set_text(s_b_done_text, HY_S_DONE);
+            apinfo_open_fill(s_dyn, 44);
+        }
         lv_obj_set_hidden(s_b_done, false);
     } else {
         const char *msg = HY_S_WEB_NEED_NET;
@@ -96,6 +116,7 @@ void webqr_hide(hy_view_t next)
 {
     if (next != HY_V_QS) {   /* quick settings slides over this view: it keeps its code until it comes back */
         lv_obj_clean(s_dyn);
+        s_ap_page = 0;
     }
 }
 
@@ -110,7 +131,7 @@ void webqr_create(void)
 {
     s_root = ui_view_box();
     ui_register_view(HY_V_WEB_QR, s_root);
-    ui_view_title(s_root, HY_S_WEB_TITLE);
+    s_title = ui_view_title(s_root, HY_S_WEB_TITLE);
     s_dyn = ui_plain(s_root);
     lv_obj_set_size(s_dyn, HY_SCREEN, HY_CONTENT_H);
     lv_obj_set_pos(s_dyn, 0, 0);
@@ -127,6 +148,7 @@ void webqr_create(void)
     lv_obj_set_pos(s_b_ap, 18, 250);
     s_b_done = ui_button(s_root, 288, BTN_H, hy_type.body_bold, HY_S_DONE, done_tap, NULL);
     lv_obj_set_pos(s_b_done, (HY_SCREEN - 288) / 2, 356);
+    s_b_done_text = lv_obj_get_child(s_b_done, 0);
     lv_obj_set_hidden(s_msg, true);
     lv_obj_set_hidden(s_b_wifi, true);
     lv_obj_set_hidden(s_b_ap, true);

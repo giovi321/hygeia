@@ -285,6 +285,7 @@ lv_obj_t *qr_block(lv_obj_t *parent, const char *text, int32_t y); /* QR on a li
 void apinfo_create(void);
 void apinfo_show(void);
 void apinfo_hide(hy_view_t next);
+void apinfo_join_fill(lv_obj_t *holder, int32_t y); /* the "Join" block: Wi-Fi QR code of the access point, its name and password */
 void apinfo_open_fill(lv_obj_t *holder, int32_t y); /* the "Then open" block: QR of the access point address and the text */
 void webqr_create(void);
 void webqr_show(void);
