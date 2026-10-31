@@ -274,6 +274,7 @@
 #define HY_S_WIFI_NONE     "No saved networks"
 #define HY_S_WIFI_AP_ROW   "Access point"
 #define HY_S_WIFI_ADDR     "Web UI address"
+#define HY_S_WIFI_JOIN_BTN "Show join code"
 #define HY_S_WIFI_BROWSERS "Paired browsers: %u"
 #define HY_S_WIFI_FORGET   "Forget all"
 #define HY_S_WIFI_FORGET_Q "Forget all paired browsers?"

@@ -194,7 +194,7 @@ void net_ui_init(void)
 /* ---- Settings > Wi-Fi ---- */
 
 static lv_obj_t *s_root, *s_list, *s_mode[3], *s_net_row[HY_NET_MAX_KNOWN], *s_net_tag[HY_NET_MAX_KNOWN];
-static lv_obj_t *s_saved_hdr, *s_none, *s_ap_val, *s_addr_val, *s_br_lbl, *s_forget_btn, *s_keep_sw, *s_confirm;
+static lv_obj_t *s_join_btn, *s_saved_hdr, *s_none, *s_ap_val, *s_addr_val, *s_br_lbl, *s_forget_btn, *s_keep_sw, *s_confirm;
 static hy_known_net_t s_known[HY_NET_MAX_KNOWN];
 static size_t s_nknown;
 
@@ -310,6 +310,7 @@ void wifi_values_refresh(void)
     }
     lv_obj_set_hidden(s_none, s_nknown != 0);
     lv_label_set_text(s_ap_val, st->state == HY_NS_AP ? HY_S_NET_AP_ON : HY_S_OFF);
+    lv_obj_set_hidden(s_join_btn, st->state != HY_NS_AP);
     char url[40];
     char shown[48];
     if (net_web_url(st, url, sizeof url)) {
@@ -391,6 +392,9 @@ void wifi_create(void)
     s_ap_val = ui_list_row(s_list, 66, HY_S_WIFI_AP_ROW, ap_row_tap, NULL);
     s_addr_val = ui_list_row(s_list, 66, HY_S_WIFI_ADDR, NULL, NULL);
     lv_obj_set_clickable(lv_obj_get_parent(s_addr_val), false);
+    /* the Access point row opens the join code too, but nothing on it says so */
+    s_join_btn = ui_button(s_list, ROW_W, 66, hy_type.body_bold, HY_S_WIFI_JOIN_BTN, ap_row_tap, NULL);
+    lv_obj_set_hidden(s_join_btn, true);
 
     /* paired browsers: the count and Forget all */
     lv_obj_t *br = ui_list_row(s_list, 72, "", NULL, NULL);
