@@ -2,16 +2,20 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "hy/audio.h"
 #include "hy/board.h"
 #include "hy/actions.h"
 #include "hy/clock.h"
+#include "hy/motion.h"
+#include "hy/motion_run.h"
 #include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
@@ -152,7 +156,33 @@ static void cmd_scr(const char *args) { hy_ui_debug_scr(args); }
 static void cmd_mf(const char *args) { hy_ui_debug_mf(args); }
 static void cmd_archive(const char *args) { hy_ui_debug_archive(args); }
 static void cmd_limits(const char *args) { (void)args; hy_ui_debug_limits(); }
+static void cmd_madctl(const char *args) { hy_ui_debug_madctl(args); }
+static void cmd_rot(const char *args) { hy_ui_debug_rot(args); }
+static void cmd_shake(const char *args) { (void)args; hy_ui_debug_shake(); }
 static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
+static void cmd_imu(const char *args)
+{
+    /* The motion task owns the IMU: it prints the samples from its own reads. `imu regs` is a direct register read. */
+    bool raw = strncmp(args, "raw", 3) == 0;
+    int secs = 0;
+    bool rec = sscanf(args, "rec %d", &secs) == 1;
+    if (strncmp(args, "regs", 4) == 0) {
+        uint8_t r[3];
+        esp_err_t rerr = hy_board_imu_regs(r);
+        if (rerr != ESP_OK) {
+            ESP_LOGE(TAG, "imu regs: %s", esp_err_to_name(rerr));
+            return;
+        }
+        printf("imu regs: CTRL1=0x%02x CTRL2=0x%02x CTRL7=0x%02x\n", r[0], r[1], r[2]);
+        return;
+    }
+    if (strncmp(args, "rec", 3) == 0 && (!rec || secs < 1 || secs > 120)) {
+        ESP_LOGE(TAG, "usage: imu rec <1..120 s>");
+        return;
+    }
+    hy_motion_imu(raw, rec, rec ? secs * 50 : 10);
+}
+static void cmd_motion(const char *args) { hy_motion_debug(args); }
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
 static void cmd_history(const char *args) { hy_ui_debug_history(args); }
@@ -247,23 +277,62 @@ static void init_nvs(void)
     ESP_LOGI(TAG, "nvs_flash_init: %s", esp_err_to_name(err));
 }
 
+/* The orientation before the splash's first frame: the saved one when locked, else one IMU sample, else the saved one */
+static void boot_rotation(const hy_settings_t *settings)
+{
+    hy_rot_t rot = (hy_rot_t)(settings->rot & 3);
+    const char *why = "saved";
+    char detail[64];
+    if (settings->rot_lock) {
+        why = "locked";
+    } else {
+        int16_t mg[3];
+        hy_rot_t cand;
+        esp_err_t serr = hy_board_imu_sample_once(mg);
+        if (serr == ESP_OK && hy_orient_candidate((hy_accel_t){mg[0], mg[1], mg[2]}, &cand)) {
+            rot = cand;
+            why = "imu";
+        } else if (serr == ESP_OK) {
+            snprintf(detail, sizeof detail, "saved; imu %d %d %d mg, no candidate", mg[0], mg[1], mg[2]);
+            why = detail;
+        } else {
+            snprintf(detail, sizeof detail, "saved; imu error %s", esp_err_to_name(serr));
+            why = detail;
+        }
+    }
+    if (hy_board_lock(1000)) {
+        hy_board_set_rotation((uint8_t)rot);
+        hy_board_unlock();
+    } else {
+        ESP_LOGE(TAG, "boot rotation: lvgl lock timeout");
+    }
+    ESP_LOGI(TAG, "boot rotation: %u (%s)", (unsigned)rot * 90, why);
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "hygeia %s", esp_app_get_description()->version);
 
     esp_err_t err = hy_board_init();
     ESP_LOGI(TAG, "hy_board_init: %s", esp_err_to_name(err));
+
+    int64_t t_pre = esp_timer_get_time();
+    init_nvs();
+    hy_settings_t settings;
+    esp_err_t serr = hy_settings_load(&settings);
+    ESP_LOGI(TAG, "settings loaded: %s (sound %d, dnd %d, volume %u, brightness %u, snooze %u min, rot %u, rot lock %d)",
+             esp_err_to_name(serr), settings.sound, settings.dnd, (unsigned)settings.volume,
+             (unsigned)settings.brightness, (unsigned)settings.snooze_min, (unsigned)settings.rot,
+             settings.rot_lock);
+    if (err == ESP_OK) {
+        boot_rotation(&settings);
+    }
+    ESP_LOGI(TAG, "boot: nvs, settings and rotation took %lld ms before the splash",
+             (long long)((esp_timer_get_time() - t_pre) / 1000));
     if (err == ESP_OK) {
         esp_err_t perr = hy_ui_splash_start();
         ESP_LOGI(TAG, "hy_ui_splash_start: %s", esp_err_to_name(perr));
     }
-
-    init_nvs();
-    hy_settings_t settings;
-    esp_err_t serr = hy_settings_load(&settings);
-    ESP_LOGI(TAG, "settings loaded: %s (sound %d, dnd %d, volume %u, brightness %u, snooze %u min)",
-             esp_err_to_name(serr), settings.sound, settings.dnd, (unsigned)settings.volume,
-             (unsigned)settings.brightness, (unsigned)settings.snooze_min);
     if (err == ESP_OK) {
         hy_board_set_brightness(settings.brightness);
         hy_audio_set_volume(settings.volume);   /* hy_audio_init runs after the splash */
@@ -334,6 +403,11 @@ void app_main(void)
     console_register("archive", cmd_archive);
     console_register("limits", cmd_limits);
     console_register("sleepstat", cmd_sleepstat);
+    console_register("imu", cmd_imu);
+    console_register("motion", cmd_motion);
+    console_register("madctl", cmd_madctl);
+    console_register("rot", cmd_rot);
+    console_register("shake", cmd_shake);
     console_start();
 #endif
 }

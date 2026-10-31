@@ -240,6 +240,9 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
         lv_obj_invalidate(lv_screen_active());   /* the whole display: every layer redraws */
         ESP_LOGI(TAG, "display: on");
     }
+    if (st != HY_SCR_OFF) {
+        rotate_screen_state(st);   /* a no-op while the motion task is already on */
+    }
     int32_t set = hy_settings()->brightness;
     switch (st) {
     case HY_SCR_ON:
@@ -262,6 +265,7 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
         ESP_LOGI(TAG, "screen: off (%s)", why);
         ESP_LOGI(TAG, "display: off");
         hy_board_display_power(false);
+        rotate_screen_state(HY_SCR_OFF);   /* before the sleep request: the motion task powers the IMU down at its next sample, within 20 ms */
         if (!poweroff_countdown_visible()) {
             hy_power_screen_off(true);
         }
@@ -285,7 +289,14 @@ static void event(hy_scr_ev_t ev, const char *why)
     const hy_settings_t *st = hy_settings();
     hy_scr_cfg_t cfg = {.dim_s = st->dim_s, .off_bat_s = st->off_bat_s, .off_usb_s = st->off_usb_s};
     hy_scr_t prev = s_shown;
+    bool usb_before = s_scr.usb;
     hy_scr_t now_st = hy_screen_event(&s_scr, ev, now, &cfg);
+    if (s_scr.usb != usb_before) {
+        ESP_LOGI(TAG, "screen: usb %d -> %d (%s)", usb_before, s_scr.usb, why ? why : names[ev]);
+        if (!s_scr.usb) {
+            ESP_LOGI(TAG, "screen: off timer on battery %d s", (int)st->off_bat_s);
+        }
+    }
     if (now_st != prev) {
         apply(prev, now_st, why ? why : names[ev]);
     }

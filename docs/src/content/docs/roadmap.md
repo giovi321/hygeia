@@ -27,10 +27,6 @@ Planned: MQTT with a configurable base topic, availability through a last will, 
 
 Planned: HTTP POST of events (taken, skipped, missed, due, snoozed, battery low, battery critical, clock invalid) to one or more URLs, with an optional HMAC-SHA256 signature, retry with backoff and a persistent outbox for events not yet delivered.
 
-## Auto-rotate and shake to undo
-
-Planned: rotate the screen with the board, and undo the last log by shaking it. Both would use the onboard motion sensor, which the firmware does not use today.
-
 ## Other planned items
 
 - Export (CSV, JSON) and import

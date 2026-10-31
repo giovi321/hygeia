@@ -53,7 +53,7 @@ Technical users can go further and connect it to MQTT or webhooks to build autom
 
 ## What does not exist yet
 
-Wi-Fi and access point mode, the web UI, MQTT with Home Assistant discovery, webhooks, auto-rotate and shake to undo are planned and not built. Log entries cannot be edited or deleted on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
+Wi-Fi and access point mode, the web UI, MQTT with Home Assistant discovery, and webhooks are planned and not built. Log entries cannot be edited or deleted on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
 
 ## Quick start
 

@@ -10,6 +10,8 @@ void hy_settings_defaults(hy_settings_t *s)
     s->dim_s = 30;
     s->off_bat_s = 120;
     s->off_usb_s = 0;
+    s->rot_lock = false;
+    s->rot = 0;
 }
 
 void hy_settings_clamp(hy_settings_t *s)
@@ -28,4 +30,5 @@ void hy_settings_clamp(hy_settings_t *s)
         if (s->off_usb_s < 60) s->off_usb_s = 60;
         if (s->off_usb_s > 86400) s->off_usb_s = 86400;
     }
+    if (s->rot > 3) s->rot = 0;
 }

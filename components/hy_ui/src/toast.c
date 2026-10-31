@@ -2,6 +2,7 @@
 
 #include "esp_log.h"
 #include "hy/actions.h"
+#include "hy/motion_run.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_toast";
@@ -23,6 +24,9 @@ static const lv_point_precise_t check_pts[] = {{12, 23}, {19, 30}, {32, 15}};
 
 static void hide(void)
 {
+    if (s_mode == MODE_LOGGED) {
+        hy_motion_shake_arm(false);
+    }
     s_mode = MODE_NONE;
     lv_obj_set_hidden(s_toast, true);
     lv_obj_set_hidden(s_scrim, true);
@@ -122,6 +126,11 @@ void toast_create(lv_obj_t *parent)
 
 static void open(int mode)
 {
+    if (mode == MODE_LOGGED) {
+        hy_motion_shake_arm(true);   /* the logged and the skipped toast: a shake undoes while the window runs */
+    } else if (s_mode == MODE_LOGGED) {
+        hy_motion_shake_arm(false);   /* an info toast replaces the Undo toast without hide() */
+    }
     s_mode = mode;
     s_start = lv_tick_get();
     lv_obj_set_hidden(s_toast, false);
@@ -208,7 +217,7 @@ void ui_battery_toast_flush(void)
     toast_show_info(b);
 }
 
-bool toast_undo_pressed(void)
+static bool undo(bool by_shake)
 {
     if (s_mode != MODE_LOGGED) {
         return false;
@@ -219,10 +228,24 @@ bool toast_undo_pressed(void)
     ui_log_hwm("undo");
     if (err == HY_E_UNDO_EXPIRED) {
         toast_show_info(HY_S_UNDO_EXPIRED);
+    } else if (err != HY_OK) {
+        toast_show_info(ui_err_text(err));
+    } else if (by_shake) {
+        toast_show_info(HY_S_UNDONE_SHAKE);   /* info toast: it does not arm the shake and does not wake the screen */
     } else {
         ui_battery_toast_flush();   /* the Undo toast is gone */
     }
     return true;
+}
+
+bool toast_undo_pressed(void)
+{
+    return undo(false);
+}
+
+bool toast_undo_by_shake(void)
+{
+    return undo(true);
 }
 
 bool toast_logged_visible(void)

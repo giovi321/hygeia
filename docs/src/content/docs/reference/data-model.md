@@ -56,6 +56,10 @@ Stored in NVS:
 | volume | 60 | 0 to 100 |
 | brightness | 50 | 10 to 100 |
 | snooze | 15 min | 1 to 120 |
+| rot_lock | 0 | 0 or 1 (1 keeps the current orientation) |
+| rot | 0 | 0 to 3: the orientation in force, 0, 90, 180 or 270 degrees clockwise; an out-of-range value reads as 0 |
+
+The settings are in NVS namespace `settings`.
 
 The time zone (IANA name and POSIX rule) is also stored in NVS, namespace `clock`.
 
