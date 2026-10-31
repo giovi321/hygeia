@@ -946,11 +946,14 @@ hy_err_t hy_store_import_begin(size_t bytes)
         char pre[PATH_MAX_], stage[PATH_MAX_], base[BASE_MAX];
         if (!make_path(pre, PRE_DIR) || !make_path(stage, STAGE_DIR)) return HY_E_IO;
         if (mkdir(pre, 0775) != 0 && errno != EEXIST) return HY_E_IO;
-        if (!roll_forward() || !rm_tree(stage, 2)) return HY_E_IO;
+        if (roll_forward()) rm_tree(stage, 2);
+        /* Some live items may have moved even when a rename failed: always reopen, so the month index and the
+         * next log id follow what is on disk now. */
         s_staging = false;
         strcpy(base, s_base);
-        hy_err_t r = hy_store_open(base);   /* the live files changed: month index and next id again */
+        hy_err_t r = hy_store_open(base);
         if (r != HY_OK) return r;
+        if (hy_store_import_pending()) return HY_E_IO;
     }
     if (s_free_fn) {
         size_t need = bytes > ((size_t)-1) / 2 ? (size_t)-1 : bytes * 2;

@@ -832,6 +832,13 @@ void test_import_begin_keeps_pending_commit(void)
     TEST_ASSERT_TRUE(exists("import.tmp/meds.json"));
     TEST_ASSERT_TRUE(exists("pre-import/meds.json"));
     TEST_ASSERT_TRUE(exists("meds.json"));
+    /* only meds.json was blocked: log/ and gaps.jsonl moved in, and the store was reopened on them */
+    hy_log_t got[8];
+    TEST_ASSERT_EQUAL(2, q(0, NOV + DAY, 0, got, 8));
+    TEST_ASSERT_EQUAL_UINT32(41, got[0].id);
+    TEST_ASSERT_EQUAL_UINT32(40, got[1].id);
+    TEST_ASSERT_EQUAL_UINT32(42, hy_store_next_log_id());
+    TEST_ASSERT_TRUE(exists("pre-import/log/2026-10.jsonl"));
     hy_store_import_abort();
     TEST_ASSERT_TRUE(exists("import.tmp/commit"));
     TEST_ASSERT_EQUAL(HY_E_INVALID, hy_store_import_commit());

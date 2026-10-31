@@ -658,11 +658,12 @@ static void job_stage_begin(void *arg)
     bool was_pending = hy_store_import_pending();
     c->err = hy_store_import_begin(c->bytes);
     c->pending = hy_store_import_pending();
-    if (was_pending && !c->pending) {
-        ESP_LOGW(TAG, "an earlier unfinished import commit was completed");
+    if (was_pending) {
+        /* the begin repeated that commit, fully or in part: live items may have moved either way */
+        ESP_LOGW(TAG, "an earlier unfinished import commit was %s", c->pending ? "advanced, not finished" : "completed");
         (void)reload_after_store_change();
     }
-    /* read after the begin: a completed earlier commit changes both */
+    /* read after the begin: a repeated earlier commit changes both */
     const hy_med_t *m;
     size_t n = hy_meds(&m);
     c->next_log_id = hy_store_next_log_id();
