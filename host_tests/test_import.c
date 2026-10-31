@@ -67,7 +67,7 @@ static const char *build(const hy_med_t *m, size_t n, const hy_log_t *logs, size
 
 /* ---- device log index for log_exists ---- */
 typedef struct { uint32_t med; int64_t ts; hy_status_t st; } dkey_t;
-static dkey_t dev[16]; static size_t n_dev;
+static dkey_t dev[512]; static size_t n_dev;
 static uint32_t asked_meds[64]; static size_t n_asked;
 static bool exists_cb(void *ctx, uint32_t m, int64_t ts, hy_status_t st)
 {
@@ -351,10 +351,13 @@ static void test_import_roundtrip(void)
     /* merging the same file onto the same device finds every entry */
     hy_med_t same[3] = { f[0], f[1], f[2] };
     hy_import_diff_t d2;
+    for (size_t i = 0; i < 300; i++) dev[i] = (dkey_t){ l[i].med_id, l[i].ts, l[i].status };
+    n_dev = 300;
     hy_import_free(&imp);
     TEST_ASSERT_EQUAL(HY_OK, hy_import_plan(js, HY_IMPORT_MERGE, same, 3, exists_cb, NULL, &d2, &e));
     TEST_ASSERT_EQUAL_size_t(3, d2.meds_same);
-    TEST_ASSERT_EQUAL_size_t(300, d2.log_add + d2.log_dup);
+    TEST_ASSERT_EQUAL_size_t(300, d2.log_dup);
+    TEST_ASSERT_EQUAL_size_t(0, d2.log_add);
 }
 
 static void test_too_many_meds(void)
@@ -371,6 +374,33 @@ static void test_too_many_meds(void)
     TEST_ASSERT_EQUAL(HY_E_FULL, hy_import_plan(js, HY_IMPORT_REPLACE, cur, 3, exists_cb, NULL, &d, &e));
 }
 
+static void test_deep_nesting_refused(void)
+{
+    /* a 64-deep member never reaches cJSON's recursive parser */
+    char js[400];
+    int n = snprintf(js, sizeof js, "{\"v\":1,\"meds\":[],\"x\":");
+    for (int i = 0; i < 64; i++) js[n++] = '[';
+    for (int i = 0; i < 64; i++) js[n++] = ']';
+    snprintf(js + n, sizeof js - (size_t)n, ",\"log\":[]}");
+    hy_import_diff_t d; hy_api_err_t e;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_import_plan(js, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_EQUAL_STRING("json", e.field);
+    /* a nested value inside a log element */
+    const char *deep_log = "{\"v\":1,\"meds\":[],\"log\":[{\"id\":1,\"ts\":1793145600,\"med_id\":1,"
+                           "\"status\":\"taken\",\"x\":{\"y\":1}}]}";
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_import_plan(deep_log, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_EQUAL_STRING("json", e.field);
+    /* 8 levels in the head (root plus 7) still pass */
+    const char *ok = "{\"v\":1,\"meds\":[],\"x\":[[[[[[[1]]]]]]],\"log\":[]}";
+    TEST_ASSERT_EQUAL(HY_OK, hy_import_plan(ok, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    /* a replace with log id 0xFFFFFFFF fails in the preview, not in the commit */
+    const char *top = "{\"v\":1,\"meds\":[{\"id\":1,\"code\":\"A\",\"name\":\"Antibiotic\",\"schedule\":"
+                      "{\"type\":\"as_needed\"}}],\"log\":[{\"id\":4294967295,\"ts\":1793145600,\"med_id\":1,"
+                      "\"status\":\"taken\"}]}";
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_import_plan(top, HY_IMPORT_REPLACE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_EQUAL_STRING("log", e.field);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -385,6 +415,7 @@ int main(void)
     RUN_TEST(test_secrets);
     RUN_TEST(test_import_roundtrip);
     RUN_TEST(test_too_many_meds);
+    RUN_TEST(test_deep_nesting_refused);
     free(buf);
     return UNITY_END();
 }

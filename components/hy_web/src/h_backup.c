@@ -73,24 +73,47 @@ typedef struct {
 
 static atomic_int s_state;           /* 0 idle, else the wkind_t running */
 static atomic_bool s_committing;     /* an import writes: other writes answer 409 busy */
-static atomic_bool s_abort;          /* the server is stopping */
+static atomic_bool s_abort;          /* the server is stopping: the worker ends at its next step */
+static atomic_bool s_stopping;       /* no new export or import until web_backup_allow */
 
 bool web_backup_busy(void)
 {
     return atomic_load(&s_committing);
 }
 
+/* The worker holds an async request of the server, so httpd_stop must wait for it however long its last job takes.
+ * start_worker claims s_state before it reads s_stopping, and this sets s_stopping before it reads s_state, so
+ * either the new worker sees the stop and gives up, or the wait below sees the worker. */
 void web_backup_stop(void)
 {
+    atomic_store(&s_stopping, true);
     if (!atomic_load(&s_state)) {
         return;
     }
     atomic_store(&s_abort, true);
-    for (int i = 0; i < 600 && atomic_load(&s_state); i++) {   /* at most one job timeout plus the clean-up */
+    int64_t t0 = esp_timer_get_time();
+    int64_t next_log = t0 + 10000000;
+    while (atomic_load(&s_state)) {
         vTaskDelay(pdMS_TO_TICKS(50));
+        if (esp_timer_get_time() >= next_log) {
+            ESP_LOGW(TAG, "server stop waits for the backup worker (%lld s)",
+                     (long long)((esp_timer_get_time() - t0) / 1000000));
+            next_log += 10000000;
+        }
     }
-    if (atomic_load(&s_state)) {
-        ESP_LOGW(TAG, "backup worker still running at server stop");
+}
+
+void web_backup_allow(void)
+{
+    atomic_store(&s_stopping, false);
+}
+
+/* A wipe the compiler cannot drop before the following free. */
+static void wipe(void *p, size_t n)
+{
+    volatile unsigned char *v = p;
+    while (n--) {
+        *v++ = 0;
     }
 }
 
@@ -256,26 +279,24 @@ static void do_export(wjob_t *w)
 
     char disp[64];
     bool json = w->kind == W_JSON;
-    file_name(disp, sizeof disp, json ? "json" : "csv");
-    httpd_resp_set_type(req, json ? "application/json" : "text/csv; charset=utf-8");
-    httpd_resp_set_hdr(req, "Content-Disposition", disp);
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-
+    char *head = NULL;
     if (json) {
         hy_backup_wifi_t *wifi = NULL;
         if (w->secrets) {
             wifi = psram_calloc(sizeof *wifi);
-            if (wifi) {
-                hy_known_net_t k[HY_NET_MAX_KNOWN];
-                size_t n = hy_net_known(k);
-                for (size_t i = 0; i < n && i < HY_NET_MAX_KNOWN; i++) {
-                    if (hy_net_pass_get(k[i].ssid, wifi->pass[wifi->n]) == ESP_OK) {
-                        strlcpy(wifi->ssid[wifi->n], k[i].ssid, sizeof wifi->ssid[0]);
-                        wifi->n++;
-                    }
-                }
-                hy_net_ap_pass_get(wifi->ap_pass);
+            if (!wifi) {   /* never a file without the passwords the user asked for */
+                send_err(req, 503, "busy", NULL, "The device is busy, try again");
+                goto out;
             }
+            hy_known_net_t k[HY_NET_MAX_KNOWN];
+            size_t n = hy_net_known(k);
+            for (size_t i = 0; i < n && i < HY_NET_MAX_KNOWN; i++) {
+                if (hy_net_pass_get(k[i].ssid, wifi->pass[wifi->n]) == ESP_OK) {
+                    strlcpy(wifi->ssid[wifi->n], k[i].ssid, sizeof wifi->ssid[0]);
+                    wifi->n++;
+                }
+            }
+            hy_net_ap_pass_get(wifi->ap_pass);
         }
         hy_export_head_t eh = {
             .exported = hy_clock_valid() ? (int64_t)time(NULL) : 0,
@@ -283,22 +304,28 @@ static void do_export(wjob_t *w)
             .gaps = h->gaps, .gap_reasons = h->reasons, .n_gaps = h->n_gaps,
             .settings = &h->settings, .wifi = wifi,
         };
-        char *head = hy_export_head_json(&eh);
+        head = hy_export_head_json(&eh);
         if (wifi) {
-            memset(wifi, 0, sizeof *wifi);
+            wipe(wifi, sizeof *wifi);
             heap_caps_free(wifi);
         }
         if (!head) {
             send_err(req, 503, "busy", NULL, "The device is busy, try again");
-            ok = false;
             goto out;
         }
-        httpd_resp_set_status(req, "200 OK");
+    }
+
+    /* the download headers only once the head exists: an error before this is a plain JSON answer */
+    file_name(disp, sizeof disp, json ? "json" : "csv");
+    httpd_resp_set_type(req, json ? "application/json" : "text/csv; charset=utf-8");
+    httpd_resp_set_hdr(req, "Content-Disposition", disp);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_status(req, "200 OK");
+    if (json) {
         ok = httpd_resp_send_chunk(req, head, HTTPD_RESP_USE_STRLEN) == ESP_OK;
-        memset(head, 0, strlen(head));   /* it can hold Wi-Fi passwords */
+        wipe(head, strlen(head));   /* it can hold Wi-Fi passwords */
         free(head);
     } else {
-        httpd_resp_set_status(req, "200 OK");
         ok = httpd_resp_send_chunk(req, HY_EXPORT_CSV_HEADER "\r\n", HTTPD_RESP_USE_STRLEN) == ESP_OK;
     }
 
@@ -606,16 +633,40 @@ typedef struct {
     uint32_t next_log_id;
     uint32_t fingerprint;
     hy_err_t err;
+    bool pending;      /* an earlier commit is unfinished and could not be completed now */
 } ibegin_t;
+
+/* The device reloads after a store change it did not make through the actions. */
+static hy_err_t reload_after_store_change(void)
+{
+    hy_err_t r = hy_actions_init(hy_store_port(), NULL, hy_clock_port(), NULL);
+    if (r != HY_OK) {
+        ESP_LOGE(TAG, "actions reload: %s", hy_err_str(r));
+    }
+    hy_sched_run_invalidate();
+    int64_t now = hy_clock_valid() ? (int64_t)time(NULL) : 0;
+    hy_event_t ev = {.type = HY_EV_MEDS_CHANGED, .ts = now};
+    hy_ev_publish(&ev);
+    ev.type = HY_EV_LOG_EDITED;
+    hy_ev_publish(&ev);
+    return r;
+}
 
 static void job_stage_begin(void *arg)
 {
     ibegin_t *c = arg;
+    bool was_pending = hy_store_import_pending();
+    c->err = hy_store_import_begin(c->bytes);
+    c->pending = hy_store_import_pending();
+    if (was_pending && !c->pending) {
+        ESP_LOGW(TAG, "an earlier unfinished import commit was completed");
+        (void)reload_after_store_change();
+    }
+    /* read after the begin: a completed earlier commit changes both */
     const hy_med_t *m;
     size_t n = hy_meds(&m);
     c->next_log_id = hy_store_next_log_id();
     c->fingerprint = meds_fingerprint(m, n);
-    c->err = hy_store_import_begin(c->bytes);
 }
 
 typedef struct {
@@ -648,6 +699,8 @@ typedef struct {
     uint32_t next_log_id;
     uint32_t fingerprint;
     bool changed;
+    bool untouched;    /* the commit failed before its marker: the live data is as it was */
+    bool pending;      /* the commit stopped after its marker: a restart or the next import completes it */
     hy_err_t err;
     hy_err_t reload;
 } icommit_t;
@@ -663,14 +716,15 @@ static void job_stage_commit(void *arg)
         return;
     }
     c->err = hy_store_import_commit();   /* re-runs the store's open logic */
-    /* The store is reopened either way: the actions must reload what is on disk now. */
-    c->reload = hy_actions_init(hy_store_port(), NULL, hy_clock_port(), NULL);
-    hy_sched_run_invalidate();
-    int64_t now = hy_clock_valid() ? (int64_t)time(NULL) : 0;
-    hy_event_t ev = {.type = HY_EV_MEDS_CHANGED, .ts = now};
-    hy_ev_publish(&ev);
-    ev.type = HY_EV_LOG_EDITED;
-    hy_ev_publish(&ev);
+    if (c->err != HY_OK && hy_store_import_staging()) {
+        /* failed before its marker: nothing was replaced */
+        c->untouched = true;
+        hy_store_import_abort();
+        return;
+    }
+    c->pending = hy_store_import_pending();
+    /* The store was reopened: the actions must reload what is on disk now. */
+    c->reload = reload_after_store_change();
 }
 
 /* ---------------------------------------------------------------- import: worker */
@@ -745,10 +799,23 @@ static esp_err_t send_counts(httpd_req_t *req, const wjob_t *w, const hy_import_
     return web_send_json(&r, 200, buf);
 }
 
-/* A failure inside the commit: the answer names how far it got (merge keeps what was written). */
+/* A merge that stops partway keeps what it wrote: the answer says so, because the same file then reports those
+ * medicines as clashes and those entries as duplicates. */
+#define PARTIAL_MSG                                                                                              \
+    "The import stopped partway: some medicines or entries were already added. Importing the same file again " \
+    "reports them as duplicates; check the medicines and the log"
+
 static esp_err_t send_partial(httpd_req_t *req, int status, const char *code, const char *msg)
 {
     return send_err(req, status, code, NULL, msg);
+}
+
+/* An action error partway through a merge: its code and status, with the partial message */
+static esp_err_t send_partial_err(httpd_req_t *req, hy_err_t e)
+{
+    hy_api_err_t ae;
+    hy_api_err_from(e, &ae);
+    return send_err(req, ae.http, ae.code, ae.field[0] ? ae.field : NULL, PARTIAL_MSG);
 }
 
 /* Merge commit. Returns ESP_OK when everything was written; otherwise the answer is already sent. */
@@ -772,7 +839,7 @@ static esp_err_t merge_commit(httpd_req_t *req, iwork_t *k)
             continue;
         }
         if (atomic_load(&s_abort) || run_job(job_merge_meds, c, sizeof *c, WRITE_JOB_MS) != ESP_OK) {
-            return send_partial(req, 503, "busy", "The device was busy: the import stopped partway, check the medicines");
+            return send_partial(req, 503, "busy", PARTIAL_MSG);
         }
         for (size_t j = 0; j < c->done; j++) {
             if (c->kind[j] == HY_IMP_ADD) {
@@ -780,10 +847,8 @@ static esp_err_t merge_commit(httpd_req_t *req, iwork_t *k)
             }
         }
         if (c->err != HY_OK) {
-            hy_api_err_t ae;
-            hy_api_err_from(c->err, &ae);
             ESP_LOGW(TAG, "merge: medicine %s refused: %s", c->m[c->done].code, hy_err_str(c->err));
-            return send_api_err(req, &ae);
+            return send_partial_err(req, c->err);
         }
     }
     /* log */
@@ -811,12 +876,10 @@ static esp_err_t merge_commit(httpd_req_t *req, iwork_t *k)
             break;
         }
         if (atomic_load(&s_abort) || run_job(job_merge_log, c, sizeof *c, WRITE_JOB_MS) != ESP_OK) {
-            return send_partial(req, 503, "busy", "The device was busy: the import stopped partway, check the log");
+            return send_partial(req, 503, "busy", PARTIAL_MSG);
         }
         if (c->err != HY_OK) {
-            hy_api_err_t ae;
-            hy_api_err_from(c->err, &ae);
-            return send_api_err(req, &ae);
+            return send_partial_err(req, c->err);
         }
     }
     /* gaps not stored yet */
@@ -834,7 +897,7 @@ static esp_err_t merge_commit(httpd_req_t *req, iwork_t *k)
             continue;
         }
         if (atomic_load(&s_abort) || run_job(job_gaps, c, sizeof *c, WRITE_JOB_MS) != ESP_OK || c->err != HY_OK) {
-            return send_partial(req, 503, "storage", "The untracked periods could not all be saved");
+            return send_partial(req, 503, "storage", PARTIAL_MSG);
         }
     }
     uint8_t none = 0;
@@ -861,6 +924,9 @@ static esp_err_t replace_commit(httpd_req_t *req, iwork_t *k, size_t bytes)
     if (atomic_load(&s_abort) || run_job(job_stage_begin, &b, sizeof b, WRITE_JOB_MS) != ESP_OK) {
         stage_abort();
         return send_err(req, 503, "busy", NULL, "The device is busy, try again");
+    }
+    if (b.pending) {   /* the staging area of that commit is kept as it is: stage_abort would not remove it either */
+        return send_err(req, 503, "storage", NULL, "An earlier import is unfinished. Restart the device");
     }
     if (b.err == HY_E_FULL) {
         return send_err(req, 409, "full", NULL, "Not enough free storage for this file");
@@ -925,9 +991,17 @@ static esp_err_t replace_commit(httpd_req_t *req, iwork_t *k, size_t bytes)
         return send_err(req, 409, "changed", NULL,
                         "Something was logged or edited on the device during the import: nothing was replaced");
     }
+    if (cm.untouched) {
+        ESP_LOGE(TAG, "import commit: %s before any change", hy_err_str(cm.err));
+        return send_err(req, 503, "storage", NULL, "The import could not be completed: nothing was replaced");
+    }
     if (cm.err != HY_OK || cm.reload != HY_OK) {
-        ESP_LOGE(TAG, "import commit: %s, reload: %s", hy_err_str(cm.err), hy_err_str(cm.reload));
-        return send_err(req, 503, "storage", NULL, "The import could not be completed: the previous data is in pre-import");
+        ESP_LOGE(TAG, "import commit: %s, reload: %s, unfinished: %d", hy_err_str(cm.err), hy_err_str(cm.reload),
+                 (int)cm.pending);
+        return send_err(req, 503, "storage", NULL,
+                        cm.pending ? "The import did not finish. Restart the device to complete it; the previous "
+                                     "data is kept in pre-import"
+                                   : "The import was written but the device could not reload it. Restart the device");
     }
     return ESP_OK;
 }
@@ -1033,6 +1107,10 @@ static void do_import(wjob_t *w)
         }
         k->diff.gaps_add = add;
     }
+    if (w->settings && k->imp.settings && strlen(k->imp.settings) >= sizeof k->u.set.json) {
+        send_err(req, 413, "too_large", "settings", "The settings in this file are too large to apply");
+        goto out;
+    }
     if (w->preview) {
         send_counts(req, w, &k->diff, k->imp.exported, false, false);
         goto out;
@@ -1062,11 +1140,11 @@ out:
     if (k) {
         hy_import_free(&k->imp);
         heap_caps_free(k->ix.v);
-        memset(&k->u, 0, sizeof k->u);
+        wipe(&k->u, sizeof k->u);
         heap_caps_free(k);
     }
     if (body) {
-        memset(body, 0, w->len);   /* the file can hold Wi-Fi passwords */
+        wipe(body, w->len);   /* the file can hold Wi-Fi passwords */
         heap_caps_free(body);
     }
 }
@@ -1096,6 +1174,11 @@ static esp_err_t start_worker(web_req_t *r, wjob_t *proto)
         return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
     }
     atomic_store(&s_abort, false);
+    if (atomic_load(&s_stopping)) {   /* after the claim: see web_backup_stop */
+        atomic_store(&s_state, 0);
+        web_send_busy(r);
+        return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
+    }
     wjob_t *w = malloc(sizeof *w);
     httpd_req_t *async = NULL;
     if (!w || httpd_req_async_handler_begin(r->req, &async) != ESP_OK) {

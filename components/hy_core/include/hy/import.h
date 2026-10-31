@@ -23,8 +23,8 @@
  *
  * Required: "v" (1, else HY_E_INVALID field "v") and "meds". Optional: next_id (absent: max id + 1), gaps,
  * settings, wifi, log. Every error is HY_E_INVALID with the member in err->field ("json" when the text is
- * not one object), except medicine rule failures (hy_med_validate codes with err->field from
- * hy_api_err_from) and too many medicines (HY_E_FULL).
+ * not one object, or nests deeper than 8 levels in the head or 2 in the log array), except medicine rule
+ * failures (hy_med_validate codes with err->field from hy_api_err_from) and too many medicines (HY_E_FULL).
  */
 
 #define HY_IMPORT_GAPS_MAX 1100      /* the store trims gaps.jsonl to 1000 after 1100 */
@@ -89,7 +89,7 @@ typedef bool (*hy_import_log_exists_t)(void *ctx, uint32_t med, int64_t ts, hy_s
  * different code, or an unknown id, is ADD under a fresh id with its log following it. A log entry is a
  * duplicate when (device medicine, ts, status) exists; entries of an ADD medicine are always added.
  * Replace: every medicine, entry and gap of the file is added under its own id; nothing is kept. Ids must be
- * unique and nonzero (log ids too; HY_E_INVALID field "meds" or "log").
+ * unique and nonzero (log ids also below 0xFFFFFFFF; HY_E_INVALID field "meds" or "log").
  * Both modes check the resulting medicine list with hy_med_validate and the limits (HY_E_FULL), so the commit
  * does not fail on a rule halfway.
  */

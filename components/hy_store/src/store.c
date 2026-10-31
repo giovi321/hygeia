@@ -918,16 +918,40 @@ static hy_err_t write_whole(const char *path, const char *text)
     return ok ? HY_OK : HY_E_IO;
 }
 
+bool hy_store_import_staging(void)
+{
+    return s_staging;
+}
+
+bool hy_store_import_pending(void)
+{
+    char marker[PATH_MAX_];
+    return s_base[0] && make_path(marker, MARKER) && exists_at(marker);
+}
+
+/* A staging area that holds the commit marker is never removed: it is the only copy of what the unfinished commit
+ * has not moved yet. */
 void hy_store_import_abort(void)
 {
     char stage[PATH_MAX_];
-    if (s_base[0] && make_path(stage, STAGE_DIR)) rm_tree(stage, 2);
+    if (s_base[0] && !hy_store_import_pending() && make_path(stage, STAGE_DIR)) rm_tree(stage, 2);
     s_staging = false;
 }
 
 hy_err_t hy_store_import_begin(size_t bytes)
 {
     if (!s_open) return HY_E_IO;
+    if (hy_store_import_pending()) {
+        /* An earlier commit stopped after its marker: finish it first, or refuse and keep everything. */
+        char pre[PATH_MAX_], stage[PATH_MAX_], base[BASE_MAX];
+        if (!make_path(pre, PRE_DIR) || !make_path(stage, STAGE_DIR)) return HY_E_IO;
+        if (mkdir(pre, 0775) != 0 && errno != EEXIST) return HY_E_IO;
+        if (!roll_forward() || !rm_tree(stage, 2)) return HY_E_IO;
+        s_staging = false;
+        strcpy(base, s_base);
+        hy_err_t r = hy_store_open(base);   /* the live files changed: month index and next id again */
+        if (r != HY_OK) return r;
+    }
     if (s_free_fn) {
         size_t need = bytes > ((size_t)-1) / 2 ? (size_t)-1 : bytes * 2;
         if (s_free_fn() < need) return HY_E_FULL;

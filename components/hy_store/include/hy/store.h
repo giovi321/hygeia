@@ -54,8 +54,16 @@ uint32_t hy_store_next_log_id(void);
  *   so hy_store_open finishes a commit that a reset interrupted after the marker, and discards a staging area
  *   without one. HY_E_IO when a rename failed: the open logic still runs; nothing is deleted except the older
  *   pre-import/.
- * - abort removes import.tmp. Calls outside begin..commit/abort give HY_E_INVALID.
+ * - abort removes import.tmp, except when it holds the commit marker: that staging area is the only copy of what
+ *   an unfinished commit has not moved yet, and nothing removes it. Calls outside begin..commit/abort give
+ *   HY_E_INVALID.
+ * - begin with a marker present (a commit whose renames failed) first repeats that commit and re-runs the open
+ *   logic; when that fails too it gives HY_E_IO and leaves everything in place (hy_store_import_pending stays
+ *   true). The caller must reload anything it read from the store when pending went from true to false.
  */
+bool     hy_store_import_pending(void);   /* import.tmp/commit exists: a commit is unfinished */
+bool     hy_store_import_staging(void);   /* between a successful begin and commit or abort: a commit that failed before
+                                            its marker keeps it true and changed nothing */
 hy_err_t hy_store_import_begin(size_t bytes);
 hy_err_t hy_store_import_meds(const hy_med_t *m, size_t n, uint32_t next_id);
 hy_err_t hy_store_import_log(const hy_log_t *e, size_t n);

@@ -35,21 +35,33 @@ static const char *string_end(const char *p)
     return NULL;
 }
 
-/* p at the first byte of a value: the position after it, NULL when it is cut off or unbalanced. Brackets inside
- * strings do not count. Scalars end at the next delimiter; cJSON or the codec checks their spelling later. */
-static const char *value_end(const char *p)
+/* Nesting limits. cJSON parses and deletes recursively and the import runs on a 4 KB stack, so deeper input is
+ * refused before any tree is built. A member of the backup object is at most 7 deep (meds, medicine, schedule,
+ * times), so the whole head stays within 8; the log array holds flat objects (2 with the array). */
+#define HEAD_DEPTH  7
+#define LOG_DEPTH   2
+#define ENTRY_DEPTH 1
+
+/* p at the first byte of a value: the position after it, NULL when it is cut off, unbalanced or nested deeper than
+ * max_depth (then *deep is set when deep is not NULL). Brackets inside strings do not count. Scalars end at the
+ * next delimiter; cJSON or the codec checks their spelling later. */
+static const char *value_end(const char *p, size_t max_depth, bool *deep)
 {
     if (*p == '"') return string_end(p);
     if (*p == '{' || *p == '[') {
-        char stack[64];
+        char stack[HEAD_DEPTH];
         size_t depth = 0;
+        if (max_depth > sizeof stack) max_depth = sizeof stack;
         for (; *p; p++) {
             if (*p == '"') {
                 p = string_end(p);
                 if (!p) return NULL;
                 p--;
             } else if (*p == '{' || *p == '[') {
-                if (depth >= sizeof stack) return NULL;
+                if (depth >= max_depth) {
+                    if (deep) *deep = true;
+                    return NULL;
+                }
                 stack[depth++] = *p == '{' ? '}' : ']';
             } else if (*p == '}' || *p == ']') {
                 if (depth == 0 || stack[depth - 1] != *p) return NULL;
@@ -69,10 +81,11 @@ typedef struct {
 } log_span_t;
 
 /* Walks the top-level object once. false when the text is not exactly one object. */
-static bool find_log(const char *json, log_span_t *out, bool *dup_log)
+static bool find_log(const char *json, log_span_t *out, bool *dup_log, bool *deep)
 {
     memset(out, 0, sizeof *out);
     *dup_log = false;
+    *deep = false;
     const char *p = skip_ws(json);
     if (*p != '{') return false;
     p = skip_ws(p + 1);
@@ -87,7 +100,7 @@ static bool find_log(const char *json, log_span_t *out, bool *dup_log)
         if (*p != ':') return false;
         p = skip_ws(p + 1);
         const char *v = p;
-        const char *ve = value_end(p);
+        const char *ve = value_end(p, is_log ? LOG_DEPTH : HEAD_DEPTH, deep);
         if (!ve) {
             if (is_log) {               /* a cut-off log array: the caller names it */
                 out->member = k; out->val = v; out->end = NULL;
@@ -112,10 +125,9 @@ static bool find_log(const char *json, log_span_t *out, bool *dup_log)
 static char *head_without_log(const char *json, const log_span_t *s)
 {
     size_t len = strlen(json);
-    char *h = malloc(len + 1);
-    if (!h) return NULL;
     if (!s->member) {
-        memcpy(h, json, len + 1);
+        char *h = malloc(len + 1);
+        if (h) memcpy(h, json, len + 1);
         return h;
     }
     const char *cut_a = s->member, *cut_b = s->end;
@@ -129,6 +141,8 @@ static char *head_without_log(const char *json, const log_span_t *s)
     }
     size_t a = (size_t)(cut_a - json);
     size_t b = (size_t)(cut_b - json);
+    char *h = malloc(a + (len - b) + 1);   /* the head only: the log array is not copied */
+    if (!h) return NULL;
     memcpy(h, json, a);
     memcpy(h + a, json + b, len - b + 1);
     return h;
@@ -157,7 +171,7 @@ int hy_import_log_next(hy_import_cursor_t *c, hy_log_t *out)
         p = skip_ws(p + 1);
     }
     if (*p != '{') return -1;
-    const char *e = value_end(p);
+    const char *e = value_end(p, ENTRY_DEPTH, NULL);
     if (!e || (size_t)(e - p) >= sizeof c->line) return -1;
     memcpy(c->line, p, (size_t)(e - p));
     c->line[e - p] = '\0';
@@ -189,6 +203,15 @@ static void wipe(void *p, size_t n)
 {
     volatile unsigned char *v = p;
     while (n--) *v++ = 0;
+}
+
+/* Wipes every string under o before the tree is deleted (the Wi-Fi member holds passwords). The depth is bounded
+ * by the scanner's limits. */
+static void wipe_strings(cJSON *o)
+{
+    if (!o) return;
+    if (cJSON_IsString(o) && o->valuestring) wipe(o->valuestring, strlen(o->valuestring));
+    for (cJSON *c = o->child; c; c = c->next) wipe_strings(c);
 }
 
 static hy_err_t parse_wifi(const cJSON *w, hy_backup_wifi_t *out, hy_api_err_t *err)
@@ -307,10 +330,10 @@ hy_err_t hy_import_parse(const char *json, hy_import_t *imp, hy_api_err_t *err)
     if (!json) return hy_api_fail(err, HY_E_INVALID, "json");
 
     log_span_t span;
-    bool dup_log;
-    if (!find_log(json, &span, &dup_log)) {
-        /* a cut-off log array is the usual way a file breaks: name it */
-        return hy_api_fail(err, HY_E_INVALID, span.member && !span.end ? "log" : "json");
+    bool dup_log, deep;
+    if (!find_log(json, &span, &dup_log, &deep)) {
+        /* a cut-off log array is the usual way a file breaks: name it. Too deep is "json". */
+        return hy_api_fail(err, HY_E_INVALID, !deep && span.member && !span.end ? "log" : "json");
     }
     if (dup_log || (span.member && *span.val != '[')) return hy_api_fail(err, HY_E_INVALID, "log");
 
@@ -326,6 +349,7 @@ hy_err_t hy_import_parse(const char *json, hy_import_t *imp, hy_api_err_t *err)
     }
     hy_err_t r = hy_api_reject_dups(root, err);
     if (r == HY_OK) r = parse_head(root, imp, err);
+    wipe_strings(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
     cJSON_Delete(root);
     if (r != HY_OK) {
         hy_import_free(imp);
@@ -483,7 +507,7 @@ hy_err_t hy_import_plan_parsed(hy_import_t *imp, hy_import_mode_t mode, const hy
             continue;
         }
         if (mode == HY_IMPORT_REPLACE) {
-            if (e.id == 0 || n_ids >= imp->n_log) {
+            if (e.id == 0 || e.id == 0xFFFFFFFFu || n_ids >= imp->n_log) {   /* the store refuses both */
                 r = hy_api_fail(err, HY_E_INVALID, "log");
                 goto out;
             }
@@ -587,6 +611,7 @@ char *hy_export_head_json(const hy_export_head_t *h)
     cJSON *root = cJSON_CreateObject();
     if (!root) return NULL;
     char *txt = build_head(root, h) ? cJSON_PrintUnformatted(root) : NULL;
+    wipe_strings(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
     cJSON_Delete(root);
     if (!txt) return NULL;
     size_t n = strlen(txt);

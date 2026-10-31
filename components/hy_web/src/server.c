@@ -469,6 +469,7 @@ static void server_stop(void)
     }
     web_backup_stop();   /* an export or import worker holds a request of this server */
     httpd_stop(h);   /* waits for a handler in progress (at most its job timeout) */
+    web_backup_allow();
     web_ws_detach();
     ESP_LOGI(TAG, "server stopped");
 }

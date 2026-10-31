@@ -814,6 +814,37 @@ void test_import_interrupted_commit_finished_at_open(void)
     TEST_ASSERT_TRUE(exists("pre-import/gaps.jsonl"));
 }
 
+void test_import_begin_keeps_pending_commit(void)
+{
+    old_data();
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(1000));
+    stage_new();
+    /* a commit that stopped after its marker, with a rename blocked by an item already in pre-import */
+    char a[160];
+    path(a, sizeof a, "pre-import");
+    TEST_ASSERT_EQUAL(0, mkdir(a, 0775));
+    write_raw("pre-import/meds.json", "blocker");
+    write_raw("import.tmp/commit", "1\n");
+    TEST_ASSERT_TRUE(hy_store_import_pending());
+    /* begin neither deletes the marker nor the staged data: it refuses */
+    TEST_ASSERT_EQUAL(HY_E_IO, hy_store_import_begin(10));
+    TEST_ASSERT_TRUE(exists("import.tmp/commit"));
+    TEST_ASSERT_TRUE(exists("import.tmp/meds.json"));
+    TEST_ASSERT_TRUE(exists("pre-import/meds.json"));
+    TEST_ASSERT_TRUE(exists("meds.json"));
+    hy_store_import_abort();
+    TEST_ASSERT_TRUE(exists("import.tmp/commit"));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_store_import_commit());
+    /* once the blocker is gone the next begin finishes that commit, then stages afresh */
+    path(a, sizeof a, "pre-import/meds.json");
+    TEST_ASSERT_EQUAL(0, unlink(a));
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(10));
+    TEST_ASSERT_FALSE(hy_store_import_pending());
+    hy_store_import_abort();
+    assert_new_data();
+    TEST_ASSERT_TRUE(exists("pre-import/meds.json"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -849,5 +880,6 @@ int main(void)
     RUN_TEST(test_import_space_check);
     RUN_TEST(test_import_staging_without_marker_dropped_at_open);
     RUN_TEST(test_import_interrupted_commit_finished_at_open);
+    RUN_TEST(test_import_begin_keeps_pending_commit);
     return UNITY_END();
 }
