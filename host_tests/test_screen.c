@@ -89,6 +89,35 @@ static void test_unplug_restarts_timer(void)
     TEST_ASSERT_EQUAL(HY_SCR_OFF, hy_screen_event(&s, HY_SE_TICK, S(600 + 120), &CFG));
 }
 
+/* Unplugged from an ON screen: DIM at dim_s and OFF at off_bat_s, both counted from the USB out. (The existing
+   unplug test starts from DIM; this one starts from ON.) */
+static void test_battery_off_after_usb_out_ticks(void)
+{
+    hy_screen_t s; hy_screen_init(&s, true, 0);
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(10), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_USB_OUT, S(10), &CFG));
+    TEST_ASSERT_FALSE(s.usb);
+    for (uint32_t t = 11; t < 10 + 30; t++) TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(t), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_DIM, hy_screen_event(&s, HY_SE_TICK, S(10 + 30), &CFG));
+    for (uint32_t t = 10 + 31; t < 10 + 120; t++) TEST_ASSERT_EQUAL(HY_SCR_DIM, hy_screen_event(&s, HY_SE_TICK, S(t), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_OFF, hy_screen_event(&s, HY_SE_TICK, S(10 + 120), &CFG));
+    TEST_ASSERT_TRUE(hy_screen_may_sleep(&s));
+}
+
+/* The same with a hold (a slider held, say) that starts and ends midway: the idle timer restarts at the hold end */
+static void test_battery_off_after_usb_out_with_hold(void)
+{
+    hy_screen_t s; hy_screen_init(&s, true, 0);
+    hy_screen_event(&s, HY_SE_USB_OUT, S(10), &CFG);
+    hy_screen_set_hold(&s, true, S(20));
+    for (uint32_t t = 20; t < 100; t += 10) TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(t), &CFG));
+    hy_screen_set_hold(&s, false, S(100));
+    TEST_ASSERT_EQUAL(HY_SCR_ON, hy_screen_event(&s, HY_SE_TICK, S(129), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_DIM, hy_screen_event(&s, HY_SE_TICK, S(130), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_DIM, hy_screen_event(&s, HY_SE_TICK, S(219), &CFG));
+    TEST_ASSERT_EQUAL(HY_SCR_OFF, hy_screen_event(&s, HY_SE_TICK, S(220), &CFG));
+}
+
 static void test_hold(void)
 {
     hy_screen_t s; hy_screen_init(&s, true, 0);   /* usb: CHIME wakes only on USB */
@@ -135,6 +164,8 @@ int main(void)
     RUN_TEST(test_wake_events);
     RUN_TEST(test_chime_on_battery_no_wake);
     RUN_TEST(test_unplug_restarts_timer);
+    RUN_TEST(test_battery_off_after_usb_out_ticks);
+    RUN_TEST(test_battery_off_after_usb_out_with_hold);
     RUN_TEST(test_hold);
     RUN_TEST(test_hold_restores_dim_keeps_off);
     RUN_TEST(test_wrap);
