@@ -99,7 +99,7 @@ typedef struct {
 } sleep_ctr_t;
 static RTC_NOINIT_ATTR sleep_ctr_t s_ctr;
 static int64_t s_stretch_t0_ms;
-static bool s_logged_asleep, s_logged_noreq;   /* an early return of enter_sleep was logged in this OFF stretch */
+static bool s_logged_noreq;                /* the missing request was logged in this OFF stretch */
 static bool s_stretch_open;                /* awake since a wake that left the screen OFF */
 
 static const char *reset_name(esp_reset_reason_t r)
@@ -469,10 +469,11 @@ static void enter_sleep(void)
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
     bool asleep_now = s_asleep, requested = sleep_requested();
     if (asleep_now || !requested) {
-        bool *logged = asleep_now ? &s_logged_asleep : &s_logged_noreq;   /* LVGL task only */
-        if (!*logged) {
-            *logged = true;
-            ESP_LOGW(TAG, "sleep mode: not entered, %s", asleep_now ? "already asleep" : "no request");
+        /* Asleep already is normal: the UI asks again in the pass that entered the mode. Only a missing request is
+           an anomaly. */
+        if (!asleep_now && !s_logged_noreq) {
+            s_logged_noreq = true;
+            ESP_LOGW(TAG, "sleep mode: not entered, no request");
         }
         xSemaphoreGive(s_sleep_mu);
         return;
@@ -561,7 +562,7 @@ void hy_power_screen_off(bool off)
     }
     portEXIT_CRITICAL(&s_mux);
     if (!off) {
-        s_logged_asleep = s_logged_noreq = false;   /* a new OFF stretch logs its early returns again */
+        s_logged_noreq = false;   /* a new OFF stretch logs a missing request again */
     }
     if (off) {
         enter_sleep();   /* the UI calls this from the LVGL task: LVGL pauses after this lv_timer_handler pass */
