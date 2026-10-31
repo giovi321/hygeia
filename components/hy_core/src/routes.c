@@ -8,7 +8,7 @@ static const hy_route_t TABLE[] = {
     { HY_M_POST,   "/api/pair/start",                 HY_R_PAIR_START,    HY_RF_OPEN, "Settings > Network" },
     { HY_M_POST,   "/api/pair",                       HY_R_PAIR,          HY_RF_OPEN, "" },
     { HY_M_GET,    "/api/browsers",                   HY_R_BROWSERS,      0, "Settings > Network" },
-    { HY_M_DELETE, "/api/browsers/{id}",              HY_R_BROWSERS_DEL,  0, "Settings > Network" },
+    { HY_M_DELETE, "/api/browsers",                   HY_R_BROWSERS_DEL,  0, "Settings > Network" },
     { HY_M_GET,    "/api/medicines",                  HY_R_MEDS,          0, "Medicines list" },
     { HY_M_POST,   "/api/medicines",                  HY_R_MED_NEW,       0, "Medicine form" },
     { HY_M_GET,    "/api/medicines/{id}",             HY_R_MED,           0, "Medicine detail" },

@@ -1,0 +1,10 @@
+body { margin: 0; font-family: system-ui, sans-serif; background: #fafafa; color: #111; }
+main { max-width: 32rem; margin: 0 auto; padding: 2rem 1rem; }
+h1 { font-size: 1.6rem; margin: 0 0 1rem; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; }
+dt { color: #666; }
+dd { margin: 0; }
+@media (prefers-color-scheme: dark) {
+  body { background: #111; color: #eee; }
+  dt { color: #999; }
+}

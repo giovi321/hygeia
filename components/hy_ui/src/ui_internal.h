@@ -356,6 +356,9 @@ void ui_battery_toast(int pct);
 void ui_battery_toast_flush(void);
 void toast_show_info(const char *text);  /* warning style, no Undo */
 void toast_show_ok(const char *text);    /* green tick, no Undo: a completed action */
+
+/* pair.c: registers the web server's screen callbacks (pairing overlay, toasts) */
+void pair_register(void);
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_undo_by_shake(void);          /* same, then an info toast says the shake undid it */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */

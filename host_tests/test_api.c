@@ -56,6 +56,12 @@ static void test_route_ids(void)
     TEST_ASSERT_NOT_NULL(r);
     TEST_ASSERT_EQUAL(HY_R_MED_ORDER, r->id);
     TEST_ASSERT_NULL(hy_route_match(HY_M_GET, "/api/medicines/order", &id));
+
+    /* browsers are forgotten by a body ({"index":n} or {"all":true}), not by a path segment */
+    r = hy_route_match(HY_M_DELETE, "/api/browsers", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_BROWSERS_DEL, r->id);
+    TEST_ASSERT_NULL(hy_route_match(HY_M_DELETE, "/api/browsers/1", &id));
 }
 
 static void test_route_table_complete(void)

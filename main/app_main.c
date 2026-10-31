@@ -23,6 +23,7 @@
 #include "hy/sched_run.h"
 #include "hy/store.h"
 #include "hy/ui.h"
+#include "hy/web.h"
 #include "nvs_flash.h"
 #include <sys/stat.h>
 
@@ -204,6 +205,17 @@ static void cmd_settz(const char *args)
 }
 static void cmd_settings(const char *args) { (void)args; hy_ui_debug_settings(); }
 static void cmd_wifi(const char *args) { hy_net_debug(args); }
+static void cmd_web(const char *args) { hy_web_debug(args); }
+static void cmd_webjob(const char *args) { hy_web_debug_job(args); }
+/* "pair": the running pairing code (console only) */
+static void cmd_pair(const char *args)
+{
+    if (args[0]) {
+        printf("usage: pair\n");
+        return;
+    }
+    hy_web_debug_pair();
+}
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -383,6 +395,8 @@ void app_main(void)
         ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
     }
     hy_net_start();   /* after hy_power_start: the radio rule reads USB from the power state */
+    esp_err_t werr = hy_web_start();   /* the server follows the network state */
+    ESP_LOGI(TAG, "hy_web_start: %s", esp_err_to_name(werr));
 
 #if CONFIG_HY_DEBUG_CONSOLE
     console_register("boardtest", cmd_boardtest);
@@ -431,6 +445,9 @@ void app_main(void)
     console_register("rot", cmd_rot);
     console_register("shake", cmd_shake);
     console_register("wifi", cmd_wifi);
+    console_register("web", cmd_web);
+    console_register("webjob", cmd_webjob);
+    console_register("pair", cmd_pair);
     console_start();
 #endif
 }

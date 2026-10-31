@@ -1,0 +1,2 @@
+# Scripts joined into app.js, in this order
+js/boot.js

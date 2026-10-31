@@ -27,6 +27,7 @@ idf_component_register(
         "src/settings.c"
         "src/timeset.c"
         "src/debug.c"
+        "src/pair.c"
         "fonts/hy_inter_14.c"
         "fonts/hy_inter_17.c"
         "fonts/hy_inter_b17.c"
@@ -55,5 +56,7 @@ idf_component_register(
         freertos
         hy_power
         hy_motion
+        hy_net
+        hy_web
         joltwallet__littlefs
 )

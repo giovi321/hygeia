@@ -505,6 +505,7 @@ esp_err_t hy_ui_start(void)
                                            .usb = power_usb,
                                            .wake = power_wake};
     hy_power_set_ui(&power_ui);
+    pair_register();
     hy_board_unlock();
 
     if (sub < 0) {
