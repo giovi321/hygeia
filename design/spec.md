@@ -305,7 +305,7 @@ REST API (JSON):
 | `DELETE /api/medicines/{id}` | archived medicines only; deletes the medicine and its log entries after a confirmation that shows the count |
 | `POST /api/medicines/{id}/archive`, `/unarchive` | archive or restore a medicine |
 | `PUT /api/medicines/order` | reorder medicines |
-| `POST /api/medicines/{id}/pills` | set or add to the pill count |
+| `POST /api/medicines/{id}/pills` | set (`{"left":n}`) or add to (`{"add":n}`) the pill count |
 | `POST /api/medicines/{id}/log` | log taken, optional `ts`, `note` |
 | `POST /api/medicines/{id}/skip`, `/snooze` | due-card actions |
 | `GET /api/log?from&to&med`, `POST /api/log`, `PUT/DELETE /api/log/{id}` | log |
@@ -318,7 +318,7 @@ REST API (JSON):
 | `GET /api/wifi` | mode, status, saved networks, AP settings (no passwords) |
 | `POST /api/wifi/mode` | client, ap, off |
 | `POST/DELETE /api/wifi/networks` | add or remove a saved network |
-| `PUT /api/wifi/ap` | access point SSID and password |
+| `PUT /api/wifi/ap` | access point password and host name (the SSID is fixed) |
 | `POST /api/webhook/test` | send a test event |
 | `POST /api/chime/test` | play the chime |
 | `POST /api/power/off` | power off the device |
