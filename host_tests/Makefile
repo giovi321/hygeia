@@ -9,6 +9,7 @@ CJSON_DIR := $(HERE)/third_party/cjson
 
 CC     ?= gcc
 CFLAGS := -std=c11 -Wall -Wextra -Werror -D_DEFAULT_SOURCE -g -O0
+CFLAGS += -DHY_TEST_DATA_DIR=\"$(HERE)/data\"
 # Third-party code is compiled without -Werror and without -Wextra noise.
 TP_CFLAGS := -std=c11 -D_DEFAULT_SOURCE -g -O0 -w
 
