@@ -3,20 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Hygeia</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<main>
-<h1>Hygeia</h1>
-<p id="status">Connecting to the device...</p>
-<dl id="info" hidden>
-<dt>Name</dt><dd id="name"></dd>
-<dt>Firmware</dt><dd id="fw"></dd>
-<dt>Paired</dt><dd id="paired"></dd>
-</dl>
-</main>
+<header class="top">
+<a class="logo" href="#/"><svg width="22" height="22" viewBox="0 0 256 256" aria-hidden="true"><path d="M173.8 78A82 82 0 1 1 82.2 78" fill="none" stroke="#D9DAD6" stroke-width="32" stroke-linecap="round"/><path fill="#D0646B" fill-rule="evenodd" transform="rotate(-12 128 34)" d="M106 14H150A20 20 0 0 1 150 54H106A20 20 0 0 1 106 14Z M124 14H132V54H124Z"/></svg>hygeia</a>
+<nav id="menu" aria-label="Main">
+<a href="#/" data-nav="dash">Dashboard</a>
+<a href="#/meds" data-nav="meds">Medicines</a>
+<a href="#/history" data-nav="history">History</a>
+<a href="#/schedule" data-nav="schedule">Schedule</a>
+<a href="#/settings" data-nav="settings">Settings</a>
+</nav>
+<div id="devline" class="devline"></div>
+</header>
+<main id="view"></main>
+<div id="toasts" aria-live="polite"></div>
+<noscript><p style="padding:16px">This page needs JavaScript.</p></noscript>
 <script src="/app.js"></script>
 </body>
 </html>

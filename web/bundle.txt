@@ -1,2 +1,10 @@
 # Scripts joined into app.js, in this order
-js/boot.js
+js/core.js
+js/api.js
+js/ws.js
+js/timesync.js
+js/p_pair.js
+js/p_dash.js
+js/p_meds.js
+js/p_medform.js
+js/app.js
