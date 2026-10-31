@@ -9,6 +9,7 @@
 #include "hy/nav.h"
 #include "hy/power_run.h"
 #include "hy/screen.h"
+#include "hy/motion.h"
 #include "esp_err.h"
 #include "strings.h"
 
@@ -293,6 +294,16 @@ void idle_brightness_stop(void);                 /* whoever sets the brightness 
 #if CONFIG_HY_DEBUG_CONSOLE
 void screen_debug(const char *arg);              /* `scr [off|nousb|usb]` */
 #endif
+
+/* rotate.c: the orientation follows the device. The motion task asks through rotate_request; a rotation applies only
+ * when the splash is over, the touch is released and the screen is not OFF. */
+void rotate_init(void);                          /* after screen_init: starts the motion task with the applied rotation */
+void rotate_screen_state(hy_scr_t st);           /* idle.c apply(): ON and DIM enable the motion task, OFF disables it */
+void rotate_request(hy_rot_t r);                 /* motion callback: pending = r; rotate_poll applies it */
+void rotate_poll(void);                          /* LVGL timer, 50 ms: applies the pending rotation when allowed */
+void rotate_set_lock(bool on);                   /* saves rot_lock and rot, tells the motion task */
+bool rotate_locked(void);
+void rotate_force(hy_rot_t r);                   /* debug: apply now, also while locked; saves rot */
 
 /* splash.c */
 int  splash_remaining_ms(void);                  /* ms until the splash has run 1000 ms, 0 when over or not running */

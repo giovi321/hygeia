@@ -5,6 +5,7 @@ idf_component_register(
         "src/topbar.c"
         "src/input.c"
         "src/idle.c"
+        "src/rotate.c"
         "src/slide.c"
         "src/poweroff.c"
         "src/splash.c"
@@ -53,5 +54,6 @@ idf_component_register(
         esp_timer
         freertos
         hy_power
+        hy_motion
         joltwallet__littlefs
 )
