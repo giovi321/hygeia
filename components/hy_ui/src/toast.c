@@ -228,6 +228,8 @@ static bool undo(bool by_shake)
     ui_log_hwm("undo");
     if (err == HY_E_UNDO_EXPIRED) {
         toast_show_info(HY_S_UNDO_EXPIRED);
+    } else if (err != HY_OK) {
+        toast_show_info(ui_err_text(err));
     } else if (by_shake) {
         toast_show_info(HY_S_UNDONE_SHAKE);   /* info toast: it does not arm the shake and does not wake the screen */
     } else {
