@@ -31,8 +31,17 @@ Settings has these entries:
 - Time zone: two rollers, region and city, from a table of time zones built into the firmware, so the zone can change with no network. Set stores the zone and its POSIX rule
 - Date and time: the same rollers as the "Set the time" screen
 - Sound: a volume slider and a Play chime button
-- Display: brightness
+- Display: brightness, and Rotation lock under the brightness slider
 - Wi-Fi: not available yet
 - About: version, clock sync state, storage used and free, and the number of active and archived medicines
 
 The Time zone page changes the zone for future occurrences. Scheduled times keep their wall-clock time in the new zone. See [Scheduling rules](../../reference/scheduling/).
+
+## Rotation lock
+
+The screen turns to follow the device. Rotation lock, in Settings under Display, stops that.
+
+- On: the screen keeps the orientation it shows at that moment, also after a restart
+- Off: the screen turns again once the device has stayed still in a new position for about 1 second
+
+Rotation lock is not in quick settings. Defaults: Rotation lock off, orientation upright.
