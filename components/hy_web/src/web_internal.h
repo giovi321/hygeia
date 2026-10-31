@@ -54,6 +54,9 @@ esp_err_t web_send_err(web_req_t *r, int status, const char *code, const char *f
 esp_err_t web_send_hy_err(web_req_t *r, hy_err_t e, const char *message);
 /* 503 "busy" with Retry-After 2: a job timed out */
 esp_err_t web_send_busy(web_req_t *r);
+/* A refusal from a handler that reads its own body (import, firmware update): the error answer (Retry-After 2 on a
+ * 503), then ESP_FAIL when more than 16 KB of body is unread so the socket closes, else ESP_OK */
+esp_err_t web_refuse(web_req_t *r, int status, const char *code, const char *field, const char *msg);
 const char *web_status_line(int status);
 
 /* Route handlers. h_core.c answers info, state, pairing and browsers, then asks each family below; NULL from all of
@@ -102,6 +105,8 @@ void web_ui_toast_info(const char *text);
 /* Calls the registered power_off callback in the LVGL task (hy_power_off() when none is registered). false when it
  * could not be queued (LVGL busy): the caller retries. */
 bool web_ui_power_off(void);
+/* esp_restart in the LVGL task, so no store write is cut halfway; false when it could not be queued */
+bool web_ui_restart(void);
 /* The registered callbacks or NULL; read it only from the LVGL task */
 const hy_web_ui_t *web_ui(void);
 

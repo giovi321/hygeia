@@ -8,6 +8,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -106,6 +107,15 @@ esp_err_t web_send_hy_err(web_req_t *r, hy_err_t err, const char *message)
         snprintf(buf, sizeof buf, "{\"error\":\"internal\"}");
     }
     return web_send_json(r, e.http, buf);
+}
+
+esp_err_t web_refuse(web_req_t *r, int status, const char *code, const char *field, const char *msg)
+{
+    if (status == 503) {
+        httpd_resp_set_hdr(r->req, "Retry-After", "2");
+    }
+    web_send_err(r, status, code, field, msg);
+    return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;   /* a large unread body: close */
 }
 
 esp_err_t web_send_busy(web_req_t *r)
@@ -602,7 +612,14 @@ static void a_power_off(void *arg)
     }
 }
 
+static void a_restart(void *arg)
+{
+    (void)arg;
+    esp_restart();
+}
+
 const hy_web_ui_t *web_ui(void) { return s_ui; }
+bool web_ui_restart(void) { return ui_post(a_restart, NULL); }
 bool web_ui_power_off(void) { return ui_post(a_power_off, NULL); }
 void web_ui_pair_show(void) { ui_post(a_pair_show, NULL); }
 void web_ui_pair_hide(int reason) { ui_post(a_pair_hide, (void *)(intptr_t)reason); }

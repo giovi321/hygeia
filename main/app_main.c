@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "hy/audio.h"
 #include "hy/board.h"
@@ -232,8 +233,38 @@ static void cmd_ui(const char *args)
 /* ---- firmware confirmation after an update ---- */
 
 #define OTA_NVS_NS "ota"
-#define OTA_NVS_FAIL "fail"
+#define OTA_NVS_FAIL "fail"          /* 1: abort before confirming, 2: hang before confirming */
 #define CONFIRM_WAIT_MS 120000
+#define CONFIRM_DEADLINE_MS 150000   /* a new firmware that has not confirmed itself by then is restarted */
+
+static esp_timer_handle_t s_confirm_deadline;
+
+/* The idle tasks the task watchdog watches (CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPUn) */
+static uint32_t twdt_idle_mask(void)
+{
+    uint32_t m = 0;
+#if CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
+    m |= 1u << 0;
+#endif
+#if CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+    m |= 1u << 1;
+#endif
+    return m;
+}
+
+static void twdt_panic(bool on)
+{
+#if CONFIG_ESP_TASK_WDT_INIT
+    const esp_task_wdt_config_t c = {.timeout_ms = CONFIG_ESP_TASK_WDT_TIMEOUT_S * 1000,
+                                     .idle_core_mask = twdt_idle_mask(), .trigger_panic = on};
+    esp_err_t e = esp_task_wdt_reconfigure(&c);
+    if (e != ESP_OK) {
+        ESP_LOGW(TAG, "task watchdog reconfigure: %s", esp_err_to_name(e));
+    }
+#else
+    (void)on;
+#endif
+}
 
 static const char *ota_state_name(esp_ota_img_states_t st)
 {
@@ -248,35 +279,37 @@ static const char *ota_state_name(esp_ota_img_states_t st)
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
-/* The otafail flag, read and cleared once: true when it was set. */
-static bool ota_fail_take(void)
+/* The otafail flag, read and cleared once: 0 none, 1 abort, 2 hang. */
+static uint8_t ota_fail_take(void)
 {
     nvs_handle_t h;
     uint8_t v = 0;
     if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
-        return false;
+        return 0;
     }
     if (nvs_get_u8(h, OTA_NVS_FAIL, &v) == ESP_OK) {
         nvs_erase_key(h, OTA_NVS_FAIL);
         nvs_commit(h);
     }
     nvs_close(h);
-    return v != 0;
+    return v;
 }
 
 /* "otafail": the next boot of an uploaded firmware stops (abort) just before it would confirm itself, so the
- * bootloader goes back to the previous firmware. "otafail off" clears the flag. Both print the slots. */
+ * bootloader goes back to the previous firmware. "otafail hang": it blocks there instead, so the confirmation
+ * deadline restarts it. "otafail off" clears the flag. All print the slots. */
 static void cmd_otafail(const char *args)
 {
     bool off = strcmp(args, "off") == 0;
-    if (args[0] && !off) {
-        printf("usage: otafail [off]\n");
+    bool hang = strcmp(args, "hang") == 0;
+    if (args[0] && !off && !hang) {
+        printf("usage: otafail [hang|off]\n");
         return;
     }
     nvs_handle_t h;
     esp_err_t e = nvs_open(OTA_NVS_NS, NVS_READWRITE, &h);
     if (e == ESP_OK) {
-        e = off ? nvs_erase_key(h, OTA_NVS_FAIL) : nvs_set_u8(h, OTA_NVS_FAIL, 1);
+        e = off ? nvs_erase_key(h, OTA_NVS_FAIL) : nvs_set_u8(h, OTA_NVS_FAIL, hang ? 2 : 1);
         if (e == ESP_ERR_NVS_NOT_FOUND) {
             e = ESP_OK;
         }
@@ -285,7 +318,9 @@ static void cmd_otafail(const char *args)
         }
         nvs_close(h);
     }
-    printf("otafail %s: %s\n", off ? "cleared" : "set, the next uploaded firmware will not confirm itself",
+    printf("otafail %s: %s\n",
+           off ? "cleared" : hang ? "set, the next uploaded firmware will hang before it confirms itself"
+                                  : "set, the next uploaded firmware will abort before it confirms itself",
            esp_err_to_name(e));
     const esp_partition_t *run = esp_ota_get_running_partition();
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
@@ -306,10 +341,50 @@ static void cmd_otafail(const char *args)
 }
 #endif
 
+static bool running_pending(void)
+{
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    esp_ota_img_states_t st;
+    return run && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
+static void deadline_cb(void *arg)
+{
+    (void)arg;
+    ESP_LOGE(TAG, "firmware did not confirm itself in time, restarting into the previous firmware");
+    esp_restart();
+}
+
+/* First thing in app_main: a new firmware gets CONFIRM_DEADLINE_MS to confirm itself, and the task watchdog panics
+ * (reset) instead of warning until then. A confirmed firmware never arms either, so there is no restart loop. */
+static void arm_confirm_deadline(void)
+{
+    if (!running_pending()) {
+        return;
+    }
+    const esp_timer_create_args_t a = {.callback = deadline_cb, .name = "ota_deadline"};
+    if (esp_timer_create(&a, &s_confirm_deadline) != ESP_OK ||
+        esp_timer_start_once(s_confirm_deadline, CONFIRM_DEADLINE_MS * 1000ULL) != ESP_OK) {
+        ESP_LOGE(TAG, "confirmation deadline not armed");
+    }
+    twdt_panic(true);
+}
+
+static void disarm_confirm_deadline(void)
+{
+    if (s_confirm_deadline) {
+        esp_timer_stop(s_confirm_deadline);
+        esp_timer_delete(s_confirm_deadline);
+        s_confirm_deadline = NULL;
+    }
+    twdt_panic(false);
+}
+
 /* A firmware written by the web update boots pending verification. It confirms itself only after the store opened,
  * the screen started and the scheduler made its first pass (an evaluation, or the "clock invalid" pass when the
- * clock is not set, so a device without the time still confirms). Until then any reset (crash, watchdog, power)
- * makes the bootloader start the previous firmware. */
+ * clock is not set, so a device without the time still confirms). Until then any reset (crash, watchdog, the
+ * confirmation deadline, power) makes the bootloader start the previous firmware; a firmware that cannot confirm
+ * restarts at once. */
 static void confirm_firmware(bool store_ok, bool ui_ok)
 {
     const esp_partition_t *bad = esp_ota_get_last_invalid_partition();
@@ -326,21 +401,28 @@ static void confirm_firmware(bool store_ok, bool ui_ok)
     ESP_LOGI(TAG, "firmware %s in %s is new: confirming after the first scheduler pass",
              esp_app_get_description()->version, run->label);
     if (!store_ok || !ui_ok) {
-        ESP_LOGE(TAG, "firmware not confirmed (store %s, screen %s): the next reset starts the previous firmware",
+        ESP_LOGE(TAG, "firmware not confirmed (store %s, screen %s): restarting into the previous firmware",
                  store_ok ? "ok" : "failed", ui_ok ? "ok" : "failed");
-        return;
+        esp_restart();
     }
     int64_t t0 = esp_timer_get_time();
     while (hy_sched_generation() == 0) {
         if (esp_timer_get_time() - t0 > CONFIRM_WAIT_MS * 1000LL) {
-            ESP_LOGE(TAG, "firmware not confirmed: no scheduler pass in %d s; the next reset starts the previous "
-                          "firmware", CONFIRM_WAIT_MS / 1000);
-            return;
+            ESP_LOGE(TAG, "firmware not confirmed: no scheduler pass in %d s; restarting into the previous firmware",
+                     CONFIRM_WAIT_MS / 1000);
+            esp_restart();
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 #if CONFIG_HY_DEBUG_CONSOLE
-    if (ota_fail_take()) {
+    uint8_t fail = ota_fail_take();
+    if (fail == 2) {
+        ESP_LOGW(TAG, "otafail hang: blocking before the firmware confirms itself");
+        for (;;) {
+            vTaskDelay(portMAX_DELAY);
+        }
+    }
+    if (fail) {
         ESP_LOGW(TAG, "otafail: stopping before the firmware confirms itself");
         abort();
     }
@@ -348,6 +430,9 @@ static void confirm_firmware(bool store_ok, bool ui_ok)
     esp_err_t e = esp_ota_mark_app_valid_cancel_rollback();
     ESP_LOGI(TAG, "firmware confirmed after %lld ms: %s", (long long)((esp_timer_get_time() - t0) / 1000),
              esp_err_to_name(e));
+    if (e == ESP_OK) {
+        disarm_confirm_deadline();
+    }
 }
 
 #define MEDS_FILE "/data/meds.json"
@@ -476,6 +561,7 @@ static void boot_rotation(const hy_settings_t *settings)
 void app_main(void)
 {
     ESP_LOGI(TAG, "hygeia %s", esp_app_get_description()->version);
+    arm_confirm_deadline();
 
     esp_err_t err = hy_board_init();
     ESP_LOGI(TAG, "hy_board_init: %s", esp_err_to_name(err));

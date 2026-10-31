@@ -13,7 +13,8 @@
  * becomes the boot slot. The answer is {"reboot_in_s":2} and the device restarts 2 s later.
  *
  * The new image boots pending verification. app_main confirms it once the store, the screen and the first scheduler
- * pass have run; a reset before that (crash, watchdog, power) makes the bootloader start the previous slot. */
+ * pass have run, within 150 s or it restarts; a reset before that (crash, watchdog, that deadline, power) makes the
+ * bootloader start the previous slot. */
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -51,15 +52,6 @@ bool web_ota_restarting(void)
 
 /* ---------------------------------------------------------------- httpd task */
 
-static esp_err_t refuse(web_req_t *r, int status, const char *code, const char *field, const char *msg)
-{
-    if (status == 503) {
-        httpd_resp_set_hdr(r->req, "Retry-After", "2");
-    }
-    web_send_err(r, status, code, field, msg);
-    return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;   /* a large unread body: close */
-}
-
 static bool battery_low(void)
 {
     hy_power_state_t ps;
@@ -80,22 +72,22 @@ esp_err_t web_ota_handler(web_req_t *r)
     size_t len = r->req->content_len;
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     if (atomic_load(&s_restarting)) {
-        return refuse(r, 409, "busy", NULL, "A firmware update finished, the device is restarting");
+        return web_refuse(r, 409, "busy", NULL, "A firmware update finished, the device is restarting");
     }
     if (len == 0) {
-        return refuse(r, 400, "invalid", "body", "Send the firmware file as the request body");
+        return web_refuse(r, 400, "invalid", "body", "Send the firmware file as the request body");
     }
     if (!next) {
-        return refuse(r, 503, "storage", NULL, "No firmware slot to write to");
+        return web_refuse(r, 503, "storage", NULL, "No firmware slot to write to");
     }
     if (len > next->size) {
-        return refuse(r, 413, "too_large", NULL, "The file is larger than the firmware slot");
+        return web_refuse(r, 413, "too_large", NULL, "The file is larger than the firmware slot");
     }
     if (running_unconfirmed()) {
-        return refuse(r, 503, "busy", NULL, "The device is still checking its own firmware, try again shortly");
+        return web_refuse(r, 503, "busy", NULL, "The device is still checking its own firmware, try again shortly");
     }
     if (battery_low()) {
-        return refuse(r, 409, "battery", NULL, "Battery below 30 %: connect USB before updating");
+        return web_refuse(r, 409, "battery", NULL, "Battery below 30 %: connect USB before updating");
     }
     return web_ota_start(r, len);
 }
@@ -197,11 +189,15 @@ static const char *check_head(const uint8_t *buf, size_t n, esp_app_desc_t *desc
     return NULL;
 }
 
+/* The restart runs in the LVGL task, the only task that writes the store, so no medicine or log write is cut
+ * halfway. Without the screen task (or when it is busy for a second) it restarts from here. */
 static void restart_cb(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "restarting into the new firmware");
-    esp_restart();
+    if (!web_ui_restart()) {
+        esp_restart();
+    }
 }
 
 static void schedule_restart(void)

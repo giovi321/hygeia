@@ -1237,12 +1237,6 @@ static esp_err_t h_export_json(web_req_t *r)
     return h_export(r, W_JSON);
 }
 
-static esp_err_t refuse(web_req_t *r, int status, const char *code, const char *field, const char *msg)
-{
-    web_send_err(r, status, code, field, msg);
-    return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;   /* a large unread body: close */
-}
-
 static esp_err_t h_import(web_req_t *r)
 {
     char v[12] = "";
@@ -1251,20 +1245,20 @@ static esp_err_t h_import(web_req_t *r)
         if (strcmp(v, "replace") == 0) {
             w.mode = HY_IMPORT_REPLACE;
         } else if (strcmp(v, "merge") != 0) {
-            return refuse(r, 400, "invalid", "mode", "mode is merge or replace");
+            return web_refuse(r, 400, "invalid", "mode", "mode is merge or replace");
         }
     }
     w.preview = web_query_get(r, "preview", v, sizeof v) && strcmp(v, "1") == 0;
     w.settings = web_query_get(r, "settings", v, sizeof v) && strcmp(v, "1") == 0;
     size_t len = r->req->content_len;
     if (len == 0) {
-        return refuse(r, 400, "invalid", "body", "Send the backup file as the request body");
+        return web_refuse(r, 400, "invalid", "body", "Send the backup file as the request body");
     }
     if (len > IMPORT_MAX) {
-        return refuse(r, 413, "too_large", NULL, "The file is above 4 MB");
+        return web_refuse(r, 413, "too_large", NULL, "The file is above 4 MB");
     }
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < len + PSRAM_MARGIN) {
-        return refuse(r, 413, "too_large", NULL, "Not enough memory for this file");
+        return web_refuse(r, 413, "too_large", NULL, "Not enough memory for this file");
     }
     w.len = len;
     return start_worker(r, &w);

@@ -2,7 +2,7 @@
 """Development server that stands in for the device while the web UI is built.
 
     python tools/webmock.py [--port 8484] [--unpaired] [--slow] [--stale] [--clock-invalid] [--skew SECONDS] [--zone NAME] [--busy]
-                            [--low-battery]
+                            [--low-battery] [--ota-pending]
 
 Serves the bundle made by tools/web_bundle.py from web/ (rebuilt on every request, so edits show on reload) and
 answers /api/* from the sample files in tools/webmock/samples/ plus in-memory changes. Routes the firmware does not
@@ -19,6 +19,7 @@ uploaded image's version in /api/info.
   --zone NAME      the device time zone (default Europe/Zurich)
   --busy           writes answer 503 busy; the first GET of each read route answers 503 once
   --low-battery    POST /api/ota answers 409 battery (on battery below 30 %)
+  --ota-pending    POST /api/ota answers 503 busy (the running firmware has not confirmed itself yet)
 """
 
 import argparse
@@ -106,6 +107,7 @@ class Device:
         self.fw = "0.0.0-mock"
         self.restart_at = 0.0   # an upload finished: unreachable from restart_at for OTA_BOOT_S
         self.next_fw = None
+        self.ota_busy = False   # an upload body is being read (outside the device lock)
 
     def restarting(self):
         """True while the mock plays the restart after an upload; the new version shows once it is over."""
@@ -298,6 +300,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/api/"):
             if self.dev.args.slow:
                 time.sleep(1.5)
+            self.ota_body = self.read_ota_body(u.path)
             with self.dev.lock:
                 try:
                     status, body, headers = self.api(u.path, parse_qs(u.query))
@@ -728,25 +731,55 @@ class Handler(BaseHTTPRequestHandler):
         return 200, Raw(data, "application/json"), {"Content-Disposition": self.export_name("json")}
 
     # ---- firmware update: the device's checks on the first bytes, no flash ----
+    def read_ota_body(self, path):
+        """Reads an upload body before the device lock is taken, so other requests are served meanwhile (the device
+        reads it in a worker). None when nothing was read: not an upload, a refusal that needs no body, or another
+        upload is being read (busy)."""
+        dev = self.dev
+        n = int(self.headers.get("Content-Length") or 0)
+        if (path != "/api/ota" or self.command != "POST" or not n or n > OTA_SLOT or dev.args.low_battery
+                or dev.args.ota_pending or self.headers.get("X-Hygeia") != "1"
+                or (dev.args.unpaired and self.session() not in dev.sessions)):
+            return None
+        with dev.lock:
+            if dev.ota_busy or dev.restart_at:
+                return None
+            dev.ota_busy = True
+        try:
+            return self.rfile.read(n)
+        finally:
+            with dev.lock:
+                dev.ota_busy = False
+
     def ota(self):
         dev = self.dev
         n = int(self.headers.get("Content-Length") or 0)
+        data = self.ota_body
         if dev.restart_at:
+            self.close_connection = data is None
             return 409, err(409, "busy", None, "A firmware update finished, the device is restarting")[1], {}
         if not n:
             return 400, err(400, "invalid", "body", "Send the firmware file as the request body")[1], {}
         if n > OTA_SLOT:
             self.close_connection = True   # the device closes on a large unread body
             return 413, err(413, "too_large", None, "The file is larger than the firmware slot")[1], {}
+        if dev.args.ota_pending:
+            self.close_connection = True
+            return 503, err(503, "busy", None, "The device is still checking its own firmware, try again shortly")[1], \
+                {"Retry-After": "2"}
         if dev.args.low_battery:
             self.close_connection = True
             return 409, err(409, "battery", None, "Battery below 30 %: connect USB before updating")[1], {}
-        data = self.rfile.read(n)
+        if data is None:   # another upload was being read
+            self.close_connection = True
+            return 409, err(409, "busy", None, "An export, import or firmware update is running")[1], {}
         if len(data) < n:
             self.close_connection = True
             return 408, err(408, "timeout", None, "The file did not arrive in time")[1], {}
-        # esp_image_header_t (24 bytes), a segment header (8), then esp_app_desc_t
-        ok = (len(data) >= 32 + 256 and data[0] == 0xE9 and struct.unpack_from("<H", data, 12)[0] == 0x0009
+        # esp_image_header_t (24 bytes: magic, segment count, ..., chip id at 12), a segment header (8), then
+        # esp_app_desc_t
+        ok = (len(data) >= 32 + 256 and data[0] == 0xE9 and data[1] > 0
+              and struct.unpack_from("<H", data, 12)[0] == 0x0009
               and struct.unpack_from("<I", data, 32)[0] == 0xABCD5432
               and data[80:112].split(b"\0", 1)[0] == b"hygeia")
         if not ok:
@@ -993,6 +1026,7 @@ def main(argv=None):
     ap.add_argument("--zone", default="")
     ap.add_argument("--busy", action="store_true")
     ap.add_argument("--low-battery", action="store_true")
+    ap.add_argument("--ota-pending", action="store_true")
     args = ap.parse_args(argv)
     Handler.dev = Device(args)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
