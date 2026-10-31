@@ -241,7 +241,10 @@ static void motion_task(void *arg)
                 continue;
             }
             imu_bad_logged = false;
-            vTaskDelay(pdMS_TO_TICKS(30));   /* first valid sample about 20 ms after power up */
+            esp_err_t rerr = hy_board_imu_wait_ready(100);   /* the first conversion, not a fixed delay */
+            if (rerr != ESP_OK) {
+                ESP_LOGW(TAG, "motion: no first sample after power up: %s", esp_err_to_name(rerr));
+            }
             powered = true;
             s_powered = true;
             hy_orient_resume(&o);

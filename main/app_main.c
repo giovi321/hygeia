@@ -282,14 +282,22 @@ static void boot_rotation(const hy_settings_t *settings)
 {
     hy_rot_t rot = (hy_rot_t)(settings->rot & 3);
     const char *why = "saved";
+    char detail[64];
     if (settings->rot_lock) {
         why = "locked";
     } else {
         int16_t mg[3];
         hy_rot_t cand;
-        if (hy_board_imu_sample_once(mg) == ESP_OK && hy_orient_candidate((hy_accel_t){mg[0], mg[1], mg[2]}, &cand)) {
+        esp_err_t serr = hy_board_imu_sample_once(mg);
+        if (serr == ESP_OK && hy_orient_candidate((hy_accel_t){mg[0], mg[1], mg[2]}, &cand)) {
             rot = cand;
             why = "imu";
+        } else if (serr == ESP_OK) {
+            snprintf(detail, sizeof detail, "saved; imu %d %d %d mg, no candidate", mg[0], mg[1], mg[2]);
+            why = detail;
+        } else {
+            snprintf(detail, sizeof detail, "saved; imu error %s", esp_err_to_name(serr));
+            why = detail;
         }
     }
     if (hy_board_lock(1000)) {
