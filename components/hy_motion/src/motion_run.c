@@ -241,17 +241,11 @@ static void motion_task(void *arg)
                 continue;
             }
             imu_bad_logged = false;
-            /* Wait for data, drop that sample (it may be stale or unsettled), wait for the next one */
-            int16_t drop[3];
-            esp_err_t rerr = hy_board_imu_wait_ready(100);
-            if (rerr == ESP_OK) {
-                rerr = hy_board_imu_read(drop);
-            }
-            if (rerr == ESP_OK) {
-                rerr = hy_board_imu_wait_ready(100);
-            }
+            /* The first samples after power up are not usable: wait for a settled one */
+            int16_t first[3];
+            esp_err_t rerr = hy_board_imu_wait_settled(300, first);
             if (rerr != ESP_OK) {
-                ESP_LOGW(TAG, "motion: no first sample after power up: %s", esp_err_to_name(rerr));
+                ESP_LOGW(TAG, "motion: no settled sample after power up: %s", esp_err_to_name(rerr));
             }
             powered = true;
             s_powered = true;

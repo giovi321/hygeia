@@ -23,6 +23,24 @@ bool hy_orient_candidate(hy_accel_t a, hy_rot_t *out)
     return true;
 }
 
+static bool plausible_mag(hy_accel_t a)
+{
+    int64_t m2 = (int64_t)a.x * a.x + (int64_t)a.y * a.y + (int64_t)a.z * a.z;
+    return m2 >= (int64_t)HY_OR_MAG_MIN_MG * HY_OR_MAG_MIN_MG && m2 <= (int64_t)HY_OR_MAG_MAX_MG * HY_OR_MAG_MAX_MG;
+}
+
+static int32_t absdiff(int16_t a, int16_t b)
+{
+    int32_t d = (int32_t)a - b;
+    return d < 0 ? -d : d;
+}
+
+bool hy_accel_settled(hy_accel_t prev, hy_accel_t cur)
+{
+    return plausible_mag(prev) && plausible_mag(cur) && absdiff(prev.x, cur.x) <= HY_OR_SETTLE_DELTA_MG &&
+           absdiff(prev.y, cur.y) <= HY_OR_SETTLE_DELTA_MG && absdiff(prev.z, cur.z) <= HY_OR_SETTLE_DELTA_MG;
+}
+
 void hy_orient_init(hy_orient_t *o, hy_rot_t cur)
 {
     *o = (hy_orient_t){ .cur = cur, .cand = cur };

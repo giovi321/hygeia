@@ -17,6 +17,7 @@ typedef enum { HY_ROT_0 = 0, HY_ROT_90, HY_ROT_180, HY_ROT_270 } hy_rot_t;
 #define HY_OR_PLANE_MIN_MG    500   /* x^2 + y^2 >= 500^2 */
 #define HY_OR_MAG_MIN_MG      800   /* 800^2 <= x^2 + y^2 + z^2 <= 1200^2 */
 #define HY_OR_MAG_MAX_MG     1200
+#define HY_OR_SETTLE_DELTA_MG 150   /* hy_accel_settled: largest per-axis step between two samples */
 #define HY_OR_TAN_PERMILLE    577   /* within 30 degrees of an axis: |minor| * 1000 <= |major| * 577 */
 
 /* quick_since_ms is the time of the first sample after hy_orient_resume. */
@@ -31,6 +32,10 @@ typedef struct {
 
 /* The orientation the sample points to, false when none (flat, moving, near a diagonal). Integer math only. */
 bool     hy_orient_candidate(hy_accel_t a, hy_rot_t *out);
+/* True when two consecutive samples are a usable reading after power up: both magnitudes within
+   HY_OR_MAG_MIN_MG..HY_OR_MAG_MAX_MG and no axis differing by more than HY_OR_SETTLE_DELTA_MG. A sensor that just
+   started converting reports values far from 1 g that change from sample to sample. Integer math only. */
+bool     hy_accel_settled(hy_accel_t prev, hy_accel_t cur);
 /* Starts with the full HY_OR_DWELL_MS dwell (quick is false); only hy_orient_resume enables the short one. */
 void     hy_orient_init(hy_orient_t *o, hy_rot_t cur);
 /* After the IMU was off: forgets the candidate and the last sample; the next switch needs HY_OR_WAKE_DWELL_MS. */

@@ -14,6 +14,7 @@
  *   STATUS0 0x2E bit 0 accel data available   SensorLib (STATUS0_ACCEL_AVAIL; getDataReady masks 0x01 for accel only)
  *   +-8 g scale 4096 LSB/g                     both */
 #include "hy/board.h"
+#include "hy/motion.h"
 
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
@@ -42,7 +43,7 @@ static const char *TAG = "imu";
 #define QMI_CTRL7_ACCEL   0x01
 #define QMI_LSB_PER_G     4096
 #define QMI_IO_TIMEOUT_MS 50
-#define QMI_READY_MAX_MS  100
+#define QMI_SETTLE_MAX_MS 300
 
 /* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. The sensor is mounted mirrored: y is negated */
 static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
@@ -228,6 +229,37 @@ esp_err_t hy_board_imu_wait_ready(int timeout_ms)
     }
 }
 
+esp_err_t hy_board_imu_wait_settled(int timeout_ms, int16_t mg[3])
+{
+    int64_t t0 = esp_timer_get_time();
+    int16_t prev[3] = { 0 };
+    bool have_prev = false;
+    for (;;) {
+        int64_t left_ms = timeout_ms - (esp_timer_get_time() - t0) / 1000;
+        if (left_ms <= 0) {
+            return ESP_ERR_TIMEOUT;
+        }
+        esp_err_t err = hy_board_imu_wait_ready((int)left_ms);
+        int16_t cur[3];
+        if (err == ESP_OK) {
+            err = hy_board_imu_read(cur);
+        }
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (have_prev && hy_accel_settled((hy_accel_t){prev[0], prev[1], prev[2]}, (hy_accel_t){cur[0], cur[1], cur[2]})) {
+            for (int i = 0; i < 3; i++) {
+                mg[i] = cur[i];
+            }
+            return ESP_OK;
+        }
+        for (int i = 0; i < 3; i++) {
+            prev[i] = cur[i];
+        }
+        have_prev = true;
+    }
+}
+
 esp_err_t hy_board_imu_sample_once(int16_t mg[3])
 {
     if (s_state != ESP_OK) {
@@ -237,19 +269,7 @@ esp_err_t hy_board_imu_sample_once(int16_t mg[3])
     if (err != ESP_OK) {
         return err;
     }
-    /* The first conversion after the oscillator starts may not be settled: wait for data, drop that sample, wait for
-       the next one and use it */
-    int16_t first[3];
-    err = hy_board_imu_wait_ready(QMI_READY_MAX_MS);
-    if (err == ESP_OK) {
-        err = hy_board_imu_read(first);
-    }
-    if (err == ESP_OK) {
-        err = hy_board_imu_wait_ready(QMI_READY_MAX_MS);
-    }
-    if (err == ESP_OK) {
-        err = hy_board_imu_read(mg);
-    }
+    err = hy_board_imu_wait_settled(QMI_SETTLE_MAX_MS, mg);
     hy_board_imu_power(false); /* on every path after a successful power-on */
     return err;
 }
