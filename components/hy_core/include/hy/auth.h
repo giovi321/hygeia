@@ -25,7 +25,8 @@ typedef struct {
 
 void hy_pair_init(hy_pair_t *p);
 
-/* code = rnd % 1000000 as 6 digits, zero-padded; replaces a running code and resets the fail count.
+/* code = rnd % 1000000 as 6 digits, zero-padded; replaces a running code. The fail count is kept: it resets
+ * on a successful pair, or here when a block has ended (the first start at or after blocked_until).
  * HY_E_INVALID while now < blocked_until. now is monotonic seconds (the wall clock may be invalid). */
 hy_err_t hy_pair_start(hy_pair_t *p, uint32_t rnd, int64_t now);
 
@@ -47,8 +48,12 @@ bool hy_cookie_get(const char *header, const char *name, char *out, size_t len);
 bool hy_token_well_formed(const char *t);
 
 /* Host header value, with an optional ":port" removed, compared case-insensitively and in full against the
- * allowed names. */
+ * allowed names. A host starting with "[" is never allowed. */
 bool hy_host_allowed(const char *host, const char *const *allowed, size_t n);
+
+/* True when the host (port removed, case-insensitive) equals `label` or starts with `label` followed by
+ * ".". A host starting with "[" or an empty host is false. */
+bool hy_host_first_label_is(const char *host, const char *label);
 
 typedef enum { HY_GUARD_OK = 0, HY_GUARD_UNPAIRED, HY_GUARD_FORBIDDEN } hy_guard_t;
 

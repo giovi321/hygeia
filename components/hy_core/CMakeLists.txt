@@ -23,6 +23,7 @@ idf_component_register(
         "src/shake.c"
         "src/netcfg.c"
         "src/dns.c"
+        "src/auth.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

@@ -76,18 +76,54 @@ static void test_pair_lockout(void)
     TEST_ASSERT_EQUAL(HY_OK, hy_pair_try(&p, "482913", 161));
 }
 
-static void test_pair_restart_resets_fails(void)
+static void test_pair_restart_keeps_fails(void)
+{
+    hy_pair_t p;
+    hy_pair_init(&p);
+    hy_pair_start(&p, 482913, 0);
+    for (int i = 0; i < 4; i++)
+        TEST_ASSERT_EQUAL(HY_E_INVALID, hy_pair_try(&p, "111111", 1));
+    TEST_ASSERT_EQUAL(HY_OK, hy_pair_start(&p, 555555, 2));
+    TEST_ASSERT_EQUAL_UINT8(4, p.fails);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_pair_try(&p, "111111", 3)); /* fifth overall: block to 63 */
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_pair_start(&p, 555555, 62));
+    TEST_ASSERT_EQUAL(HY_OK, hy_pair_start(&p, 555555, 63));
+    TEST_ASSERT_EQUAL_UINT8(0, p.fails);
+    TEST_ASSERT_EQUAL(HY_OK, hy_pair_try(&p, "555555", 64));
+}
+
+static void test_pair_success_resets_fails(void)
 {
     hy_pair_t p;
     hy_pair_init(&p);
     hy_pair_start(&p, 482913, 0);
     for (int i = 0; i < 4; i++)
         hy_pair_try(&p, "111111", 1);
-    hy_pair_start(&p, 555555, 2);
+    TEST_ASSERT_EQUAL(HY_OK, hy_pair_try(&p, "482913", 2));
     TEST_ASSERT_EQUAL_UINT8(0, p.fails);
-    for (int i = 0; i < 4; i++)
-        TEST_ASSERT_EQUAL(HY_E_INVALID, hy_pair_try(&p, "111111", 3));
-    TEST_ASSERT_EQUAL(HY_OK, hy_pair_try(&p, "555555", 4));
+}
+
+static void test_host_first_label(void)
+{
+    TEST_ASSERT_TRUE(hy_host_first_label_is("hygeia", "hygeia"));
+    TEST_ASSERT_TRUE(hy_host_first_label_is("hygeia.local", "hygeia"));
+    TEST_ASSERT_TRUE(hy_host_first_label_is("HYGEIA.lan:80", "hygeia"));
+    TEST_ASSERT_TRUE(hy_host_first_label_is("hygeia:80", "hygeia"));
+    TEST_ASSERT_TRUE(hy_host_first_label_is("hygeia.", "hygeia"));
+    TEST_ASSERT_FALSE(hy_host_first_label_is("hygeia-x.lan", "hygeia"));
+    TEST_ASSERT_FALSE(hy_host_first_label_is("xhygeia.lan", "hygeia"));
+    TEST_ASSERT_FALSE(hy_host_first_label_is("hyge", "hygeia"));
+    TEST_ASSERT_FALSE(hy_host_first_label_is("", "hygeia"));
+    TEST_ASSERT_FALSE(hy_host_first_label_is(NULL, "hygeia"));
+    TEST_ASSERT_FALSE(hy_host_first_label_is("[hygeia]", "hygeia"));
+    TEST_ASSERT_FALSE(hy_host_first_label_is("hygeia", ""));
+}
+
+static void test_host_bracket_rejected(void)
+{
+    const char *allowed[] = {"[", "[::1]"};
+    TEST_ASSERT_FALSE(hy_host_allowed("[::1]:80", allowed, 2));
+    TEST_ASSERT_FALSE(hy_host_allowed("[", allowed, 2));
 }
 
 static void test_ct_equal(void)
@@ -230,6 +266,24 @@ static void test_guard_open_route(void)
     TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(&g));
 }
 
+static void test_guard_odd_origins(void)
+{
+    hy_guard_in_t g = base(HY_M_POST);
+    g.origin = "http://192.168.1.23.evil.com";
+    TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(&g));
+    g.origin = "http://192.168.1.23@evil.com";
+    TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(&g));
+    g.origin = "http://";
+    TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(&g));
+    g.origin = "http://[::1]:80";
+    g.host = "[::1]:80";
+    TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(&g));
+    g.origin = "http://192.168.1.23";
+    g.host = "";
+    TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(&g));
+    TEST_ASSERT_EQUAL(HY_GUARD_FORBIDDEN, hy_auth_guard(NULL));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -238,7 +292,8 @@ int main(void)
     RUN_TEST(test_pair_expiry);
     RUN_TEST(test_pair_spaces);
     RUN_TEST(test_pair_lockout);
-    RUN_TEST(test_pair_restart_resets_fails);
+    RUN_TEST(test_pair_restart_keeps_fails);
+    RUN_TEST(test_pair_success_resets_fails);
     RUN_TEST(test_ct_equal);
     RUN_TEST(test_cookie_get);
     RUN_TEST(test_token_form);
@@ -247,5 +302,8 @@ int main(void)
     RUN_TEST(test_guard_origin_mismatch);
     RUN_TEST(test_guard_get_unpaired);
     RUN_TEST(test_guard_open_route);
+    RUN_TEST(test_guard_odd_origins);
+    RUN_TEST(test_host_first_label);
+    RUN_TEST(test_host_bracket_rejected);
     return UNITY_END();
 }

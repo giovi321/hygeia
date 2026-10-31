@@ -33,6 +33,10 @@ hy_err_t hy_pair_start(hy_pair_t *p, uint32_t rnd, int64_t now)
 {
     if (now < p->blocked_until)
         return HY_E_INVALID;
+    if (p->blocked_until != 0) { /* the block has ended */
+        p->blocked_until = 0;
+        p->fails = 0;
+    }
     uint32_t v = rnd % 1000000u;
     for (int i = PAIR_DIGITS - 1; i >= 0; i--) {
         p->code[i] = (char)('0' + v % 10u);
@@ -40,7 +44,6 @@ hy_err_t hy_pair_start(hy_pair_t *p, uint32_t rnd, int64_t now)
     }
     p->code[PAIR_DIGITS] = '\0';
     p->expires = now + HY_PAIR_TTL_S;
-    p->fails = 0;
     return HY_OK;
 }
 
@@ -80,7 +83,6 @@ hy_err_t hy_pair_try(hy_pair_t *p, const char *code, int64_t now)
 
     if (++p->fails >= HY_PAIR_MAX_FAILS) {
         memset(p->code, 0, sizeof p->code);
-        p->fails = 0;
         p->blocked_until = now + HY_PAIR_BLOCK_S;
     }
     return HY_E_INVALID;
@@ -139,7 +141,7 @@ bool hy_token_well_formed(const char *t)
 
 bool hy_host_allowed(const char *host, const char *const *allowed, size_t n)
 {
-    if (host == NULL || allowed == NULL)
+    if (host == NULL || allowed == NULL || host[0] == '[')
         return false;
     size_t hlen = host_len(host);
     if (hlen == 0)
@@ -151,8 +153,21 @@ bool hy_host_allowed(const char *host, const char *const *allowed, size_t n)
     return false;
 }
 
+bool hy_host_first_label_is(const char *host, const char *label)
+{
+    if (host == NULL || label == NULL || host[0] == '[')
+        return false;
+    size_t llen = strlen(label);
+    size_t hlen = host_len(host);
+    if (llen == 0 || hlen < llen || !ieq(host, llen, label, llen))
+        return false;
+    return hlen == llen || host[llen] == '.';
+}
+
 hy_guard_t hy_auth_guard(const hy_guard_in_t *in)
 {
+    if (in == NULL)
+        return HY_GUARD_FORBIDDEN;
     if (in->m != HY_M_GET) {
         if (in->x_hygeia == NULL || strcmp(in->x_hygeia, "1") != 0)
             return HY_GUARD_FORBIDDEN;
@@ -161,6 +176,8 @@ hy_guard_t hy_auth_guard(const hy_guard_in_t *in)
             if (in->host == NULL || strncmp(in->origin, scheme, sizeof scheme - 1) != 0)
                 return HY_GUARD_FORBIDDEN;
             const char *o = in->origin + sizeof scheme - 1;
+            if (o[0] == '[' || in->host[0] == '[')
+                return HY_GUARD_FORBIDDEN;
             size_t olen = 0;
             while (o[olen] != '\0' && o[olen] != ':' && o[olen] != '/')
                 olen++;
