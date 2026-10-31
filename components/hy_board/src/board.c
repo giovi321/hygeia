@@ -113,6 +113,47 @@ static esp_err_t panel_cmd(uint8_t cmd, const void *param, size_t len)
     return esp_lcd_panel_io_tx_param(s_io, (0x02 << 24) | ((int)cmd << 8), param, len);
 }
 
+/* ---- Rotation. LVGL keeps one unrotated 480 x 480 logical frame (the adapter never rotates on interface OTHER).
+ * The panel stores it turned through MADCTL (0x36: MY 0x80, MX 0x40, MV 0x20), and the touch driver's swap and
+ * mirror flags turn the touch points back to logical coordinates. MADCTL is written with panel_cmd, never with
+ * esp_lcd_panel_mirror / esp_lcd_panel_swap_xy: esp_lcd_co5300 caches its own MADCTL value (0xA0 from the BSP init
+ * table) and would rewrite the other bits from that copy.
+ *
+ * Touch flags per row: T_k = R_k^-1 o T_0, where T_0 is the verified row 0 transform and R_k the logical turn of
+ * row k (k x 90 degrees clockwise). This depends only on the rotation, not on the panel, so the touch columns hold
+ * for whichever MADCTL value shows that rotation. They also equal the MADCTL bits (swap = MV, mirror_x = MX,
+ * mirror_y = MY) when the touch frame matches the panel memory frame, as row 0 shows.
+ *
+ * The 2-pixel rounder (even start, odd end) is kept by every row: a swap exchanges the two axes, which have the
+ * same rule, and a mirror of a 480-wide axis maps an even start to 479 - even = odd (the end) and back. A gap must
+ * be even, or every flushed area would start on an odd address. */
+#define PANEL_CMD_MADCTL 0x36
+
+typedef struct {
+    uint8_t madctl;
+    bool swap, mx, my;
+    int16_t x_gap, y_gap;
+} hy_rot_row_t;
+
+/* Index = hy_rot_t (0, 90, 180, 270: the UI turned clockwise on the panel). Row 0 is verified on the board. Rows 1
+ * to 3 to be confirmed on the board: MADCTL from the BSP's own rotation table moved to our zero (BSP 270 = 0xA0 is
+ * our 0, so our 90 = BSP 0 = 0x00, our 180 = BSP 90 = 0x60, our 270 = BSP 180 = 0xC0), which assumes the BSP turns
+ * clockwise. If 0x00 shows the UI turned counterclockwise instead, exchange the madctl values of rows 1 and 3 and
+ * keep their touch flags. */
+static const hy_rot_row_t HY_ROT_TABLE[4] = {
+    {0xA0, true, false, true, 0, 0},     /* 0: MV MY */
+    {0x00, false, false, false, 0, 0},   /* 90 */
+    {0x60, true, true, false, 0, 0},     /* 180: MV MX */
+    {0xC0, false, true, true, 0, 0},     /* 270: MY MX */
+};
+
+static esp_lcd_touch_handle_t s_tp;
+static uint8_t s_rot;                 /* index into HY_ROT_TABLE; boot = 0 = the BSP init's MADCTL 0xA0 */
+static bool s_rot_custom;             /* a debug row is applied: the next hy_board_set_rotation always applies */
+static uint8_t s_madctl_now = 0xA0;   /* the MADCTL value the panel should hold */
+static volatile bool s_madctl_pending; /* written while the panel was off: sent after the next Sleep Out */
+static int64_t s_rot_us;              /* time of the last MADCTL write, until the brightness returns */
+
 #if CONFIG_HY_PM_SCREEN_ON_DFS
 /* CPU max for one LVGL refresh (render and the waits on the flushes inside it), LVGL task only. Without it the
  * frequency would switch on every flush wait inside a frame. Paired by LVGL: REFR_START and REFR_READY in
@@ -156,8 +197,12 @@ static void refr_ready_cb(lv_event_t *e)
     }
     s_bri_hold = false;
     bsp_display_brightness_set(s_bri_want);
-    ESP_LOGI(TAG, "display: first frame sent, brightness %u at %lld ms", (unsigned)s_bri_want,
-             (long long)(esp_timer_get_time() / 1000));
+    int64_t now = esp_timer_get_time();
+    ESP_LOGI(TAG, "display: first frame sent, brightness %u at %lld ms", (unsigned)s_bri_want, (long long)(now / 1000));
+    if (s_rot_us) {
+        ESP_LOGI(TAG, "rot: madctl write to brightness back %lld ms", (long long)((now - s_rot_us) / 1000));
+        s_rot_us = 0;
+    }
 }
 
 static void touch_cb(lv_event_t *e)
@@ -580,15 +625,16 @@ static esp_err_t board_init_once(void)
     lv_display_set_flush_cb(s_disp, flush_wrap);
 
     bsp_display_cfg_t tcfg = {
-        .touch_flags = {.swap_xy = 1, .mirror_x = 0, .mirror_y = 1},
+        /* row 0, the BSP default: the BSP init table sets MADCTL 0xA0 */
+        .touch_flags = {.swap_xy = HY_ROT_TABLE[0].swap, .mirror_x = HY_ROT_TABLE[0].mx,
+                        .mirror_y = HY_ROT_TABLE[0].my},
     };
-    esp_lcd_touch_handle_t tp = NULL;
-    err = bsp_touch_new(&tcfg, &tp);
+    err = bsp_touch_new(&tcfg, &s_tp);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "touch init: %s", esp_err_to_name(err));
         return err;
     }
-    esp_lv_adapter_touch_config_t touch_cfg = ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(s_disp, tp);
+    esp_lv_adapter_touch_config_t touch_cfg = ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(s_disp, s_tp);
     touch_cfg.callbacks.on_interrupt = touch_isr;
     s_indev = esp_lv_adapter_register_touch(&touch_cfg);
     if (!s_indev) {
@@ -633,8 +679,14 @@ void hy_board_display_power(bool on)
         s_wake_flushed = false;
         e1 = panel_cmd(PANEL_CMD_SLPOUT, NULL, 0);
         vTaskDelay(pdMS_TO_TICKS(PANEL_SLEEP_GAP_US / 1000));
-        e2 = panel_cmd(PANEL_CMD_DISPON, NULL, 0);
         e3 = ESP_OK;
+        if (s_madctl_pending) {   /* a rotation while off: the full invalidate below redraws in it */
+            uint8_t m = s_madctl_now;
+            e3 = panel_cmd(PANEL_CMD_MADCTL, &m, 1);
+            s_madctl_pending = false;
+            ESP_LOGI(TAG, "rot: madctl 0x%02x sent at wake", m);
+        }
+        e2 = panel_cmd(PANEL_CMD_DISPON, NULL, 0);
         s_panel_off = false;
         /* redraw everything: the caller does it too, this covers the power-off fallback */
         if (s_disp) {
@@ -651,6 +703,7 @@ void hy_board_display_power(bool on)
         }
         s_panel_off = true;   /* first: later flushes are dropped */
         s_bri_hold = false;
+        s_rot_us = 0;         /* a rotation's timing ends here; the wake is not counted as its frame */
         e1 = bsp_display_brightness_set(0);
         e2 = panel_cmd(PANEL_CMD_DISPOFF, NULL, 0);
         e3 = panel_cmd(PANEL_CMD_SLPIN, NULL, 0);
@@ -665,6 +718,79 @@ void hy_board_display_power(bool on)
         ESP_LOGI(TAG, "display power %s (sleep %s), %d ms", on ? "on" : "off", on ? "out" : "in", ms);
     }
 }
+
+/* LVGL task or holding hy_board_lock, outside a refresh: hy_render is not held here and is not touched. */
+static void rot_apply(const hy_rot_row_t *r, const char *what)
+{
+    esp_err_t err = ESP_OK;
+    s_madctl_now = r->madctl;
+    if (s_panel_off) {
+        /* store only: Sleep Out sends MADCTL, the wake's full invalidate redraws; touches and gaps take the new
+         * row now, since the next frame shown is drawn in it */
+        s_madctl_pending = true;
+    } else {
+        s_bri_hold = true;   /* refr_ready_cb returns the brightness after the first full frame */
+        s_wake_flushed = false;
+        bsp_display_brightness_set(0);
+        s_rot_us = esp_timer_get_time();
+        uint8_t m = r->madctl;
+        err = panel_cmd(PANEL_CMD_MADCTL, &m, 1);   /* waits for the queued colour transfers */
+    }
+    esp_lcd_panel_set_gap(s_panel, r->x_gap, r->y_gap);   /* stored by the driver, used by the next draw */
+    esp_lcd_touch_set_swap_xy(s_tp, r->swap);
+    esp_lcd_touch_set_mirror_x(s_tp, r->mx);
+    esp_lcd_touch_set_mirror_y(s_tp, r->my);
+    if (!s_panel_off) {
+        lv_obj_invalidate(lv_display_get_screen_active(s_disp));
+        lv_obj_invalidate(lv_layer_top());
+        lv_obj_invalidate(lv_layer_sys());
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rot: madctl write: %s", esp_err_to_name(err));
+    }
+    ESP_LOGI(TAG, "rot: %s madctl 0x%02x touch s%d mx%d my%d gap %d %d%s at %lld ms", what, r->madctl, r->swap, r->mx,
+             r->my, r->x_gap, r->y_gap, s_panel_off ? " (panel off, sent at wake)" : "",
+             (long long)(esp_timer_get_time() / 1000));
+}
+
+void hy_board_set_rotation(uint8_t rot)
+{
+    if (!s_ready) {
+        return;
+    }
+    if (rot >= sizeof HY_ROT_TABLE / sizeof HY_ROT_TABLE[0]) {
+        ESP_LOGE(TAG, "rot: %u out of range", (unsigned)rot);
+        return;
+    }
+    if (rot == s_rot && !s_rot_custom) {
+        return;
+    }
+    static const char *const deg[4] = {"0", "90", "180", "270"};
+    s_rot = rot;
+    s_rot_custom = false;
+    rot_apply(&HY_ROT_TABLE[rot], deg[rot]);
+}
+
+uint8_t hy_board_rotation(void)
+{
+    return s_rot;
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+void hy_board_debug_madctl(uint8_t madctl, bool swap, bool mx, bool my, int16_t x_gap, int16_t y_gap)
+{
+    if (!s_ready) {
+        return;
+    }
+    if ((x_gap & 1) || (y_gap & 1)) {
+        ESP_LOGE(TAG, "rot: gaps must be even (the 2-pixel rounder), got %d %d", x_gap, y_gap);
+        return;
+    }
+    hy_rot_row_t r = {madctl, swap, mx, my, x_gap, y_gap};
+    s_rot_custom = true;
+    rot_apply(&r, "debug");
+}
+#endif
 
 /* An armed wake pin fired: back to its falling-edge interrupt before the low-level type re-triggers the ISR */
 static void IRAM_ATTR wake_pin_fired(uint32_t pin)
