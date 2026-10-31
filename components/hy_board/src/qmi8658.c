@@ -39,7 +39,7 @@ static const char *TAG = "imu";
 #define QMI_LSB_PER_G     4096
 #define QMI_IO_TIMEOUT_MS 50
 
-/* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. Identity until a pose reading says otherwise */
+/* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. Identity: the mount turn below does the rest; a sign here fixes a mirrored mount */
 static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
     { 0, 1 }, { 1, 1 }, { 2, 1 },
 };
@@ -53,7 +53,7 @@ static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
  * The value is provisional, set from one upright reading (top bar up: sensor x -945 mg, y -388 mg, z +33 mg). To
  * confirm it, run `imu` in four poses (top bar up, right edge up, bottom edge up, left edge up) and expect about
  * (0, -1000), (1000, 0), (0, 1000), (-1000, 0) for (x, y). If the right-edge-up pose reads (-1000, 0) instead, the
- * mount is mirrored, not turned: set the value back to 0 and fix the per-axis signs in HY_IMU_MAP instead. */
+ * mount is mirrored, not turned: keep the value 1 and set HY_IMU_MAP[1].sign to -1 (then sx = y, sy = x). */
 #define HY_IMU_MOUNT_QUARTER_TURNS 1
 
 static i2c_master_dev_handle_t s_dev;
@@ -148,10 +148,9 @@ esp_err_t hy_board_imu_power(bool on)
         }
         return ESP_OK;
     }
-    if ((err = reg_write(QMI_REG_CTRL7, 0x00)) != ESP_OK) {
-        return err;
-    }
-    return reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE);
+    esp_err_t e1 = reg_write(QMI_REG_CTRL7, 0x00);
+    esp_err_t e2 = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE);
+    return e1 != ESP_OK ? e1 : e2;
 }
 
 esp_err_t hy_board_imu_read_raw(int16_t mg[3])

@@ -306,8 +306,8 @@ bool rotate_locked(void);
 void shake_event(void);                          /* motion callback and debug: undoes the dose while the Undo toast shows */
 #if CONFIG_HY_DEBUG_CONSOLE
 void rotate_debug_state(void);                   /* debug: applied, pending and lock, logged */
-#endif
 void rotate_force(hy_rot_t r);                   /* debug: apply now, also while locked; saves rot */
+#endif
 
 /* splash.c */
 int  splash_remaining_ms(void);                  /* ms until the splash has run 1000 ms, 0 when over or not running */

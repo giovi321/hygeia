@@ -1,5 +1,5 @@
 /* Settings and its sub-views: Time zone (region and city rollers), Sound (volume slider, Play chime), Display
- * (brightness slider, rotation lock) and About. Date and time is timeset.c, Wi-Fi is a placeholder until plan 4.
+ * (brightness slider, rotation lock) and About. Date and time is timeset.c, Wi-Fi is a placeholder until Wi-Fi support is built.
  * The list scrolls and consumes its scroll strokes; every row acts on a still tap only. */
 
 #include <stdio.h>
