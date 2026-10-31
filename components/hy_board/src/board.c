@@ -719,22 +719,37 @@ void hy_board_display_power(bool on)
     }
 }
 
-/* LVGL task or holding hy_board_lock, outside a refresh: hy_render is not held here and is not touched. */
-static void rot_apply(const hy_rot_row_t *r, const char *what)
+/* LVGL task or holding hy_board_lock, outside a refresh: hy_render is not held here and is not touched. Returns false
+ * when the MADCTL write failed: the previous row stays in force and nothing else was changed. */
+static bool rot_apply(const hy_rot_row_t *r, const char *what)
 {
-    esp_err_t err = ESP_OK;
-    s_madctl_now = r->madctl;
     if (s_panel_off) {
         /* store only: Sleep Out sends MADCTL, the wake's full invalidate redraws; touches and gaps take the new
          * row now, since the next frame shown is drawn in it */
+        s_madctl_now = r->madctl;
         s_madctl_pending = true;
     } else {
+        bool prev_hold = s_bri_hold, prev_flushed = s_wake_flushed;
         s_bri_hold = true;   /* refr_ready_cb returns the brightness after the first full frame */
         s_wake_flushed = false;
-        bsp_display_brightness_set(0);
+        esp_err_t eb = bsp_display_brightness_set(0);
+        if (eb != ESP_OK) {
+            ESP_LOGE(TAG, "rot: brightness 0 write: %s", esp_err_to_name(eb));
+        }
         s_rot_us = esp_timer_get_time();
         uint8_t m = r->madctl;
-        err = panel_cmd(PANEL_CMD_MADCTL, &m, 1);   /* waits for the queued colour transfers */
+        esp_err_t err = panel_cmd(PANEL_CMD_MADCTL, &m, 1);   /* waits for the queued colour transfers */
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "rot: madctl write: %s, keeping madctl 0x%02x", esp_err_to_name(err), s_madctl_now);
+            s_rot_us = 0;
+            s_bri_hold = prev_hold;
+            s_wake_flushed = prev_flushed;
+            if (!prev_hold) {
+                bsp_display_brightness_set(s_bri_want);   /* the blank is undone: no frame follows */
+            }
+            return false;
+        }
+        s_madctl_now = r->madctl;
     }
     esp_lcd_panel_set_gap(s_panel, r->x_gap, r->y_gap);   /* stored by the driver, used by the next draw */
     esp_lcd_touch_set_swap_xy(s_tp, r->swap);
@@ -745,12 +760,10 @@ static void rot_apply(const hy_rot_row_t *r, const char *what)
         lv_obj_invalidate(lv_layer_top());
         lv_obj_invalidate(lv_layer_sys());
     }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "rot: madctl write: %s", esp_err_to_name(err));
-    }
     ESP_LOGI(TAG, "rot: %s madctl 0x%02x touch s%d mx%d my%d gap %d %d%s at %lld ms", what, r->madctl, r->swap, r->mx,
              r->my, r->x_gap, r->y_gap, s_panel_off ? " (panel off, sent at wake)" : "",
              (long long)(esp_timer_get_time() / 1000));
+    return true;
 }
 
 void hy_board_set_rotation(uint8_t rot)
@@ -766,9 +779,10 @@ void hy_board_set_rotation(uint8_t rot)
         return;
     }
     static const char *const deg[4] = {"0", "90", "180", "270"};
-    s_rot = rot;
-    s_rot_custom = false;
-    rot_apply(&HY_ROT_TABLE[rot], deg[rot]);
+    if (rot_apply(&HY_ROT_TABLE[rot], deg[rot])) {
+        s_rot = rot;
+        s_rot_custom = false;
+    }
 }
 
 uint8_t hy_board_rotation(void)
@@ -787,8 +801,9 @@ void hy_board_debug_madctl(uint8_t madctl, bool swap, bool mx, bool my, int16_t 
         return;
     }
     hy_rot_row_t r = {madctl, swap, mx, my, x_gap, y_gap};
-    s_rot_custom = true;
-    rot_apply(&r, "debug");
+    if (rot_apply(&r, "debug")) {
+        s_rot_custom = true;
+    }
 }
 #endif
 
