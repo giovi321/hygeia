@@ -39,9 +39,9 @@ static const char *TAG = "imu";
 #define QMI_LSB_PER_G     4096
 #define QMI_IO_TIMEOUT_MS 50
 
-/* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. Identity: the mount turn below does the rest; a sign here fixes a mirrored mount */
+/* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. The sensor is mounted mirrored: y is negated */
 static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
-    { 0, 1 }, { 1, 1 }, { 2, 1 },
+    { 0, 1 }, { 1, -1 }, { 2, 1 },
 };
 
 /* Mount of the sensor in the screen plane, in quarter turns (0 to 3), applied to (x, y) after HY_IMU_MAP; z is kept.
@@ -50,11 +50,9 @@ static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
  *   1: sx = -y, sy =  x
  *   2: sx = -x, sy = -y
  *   3: sx =  y, sy = -x
- * The value is provisional, set from one upright reading (top bar up: sensor x -945 mg, y -388 mg, z +33 mg). To
- * confirm it, run `imu` in four poses (top bar up, right edge up, bottom edge up, left edge up) and expect about
- * (0, -1000), (1000, 0), (0, 1000), (-1000, 0) for (x, y). If the right-edge-up pose reads (-1000, 0) instead, the
- * mount is mirrored, not turned: keep the value 1 and set HY_IMU_MAP[1].sign to -1 (then sx = y, sy = x). */
-#define HY_IMU_MOUNT_QUARTER_TURNS 1
+ * Measured in two poses with the screen frame expected at (0, -1000) top bar up and (-1000, 0) left edge up: raw
+ * (0, +940) top bar up and (-985, -104) left edge up, so the mount is mirrored (y negated above) and not turned. */
+#define HY_IMU_MOUNT_QUARTER_TURNS 0
 
 static i2c_master_dev_handle_t s_dev;
 static esp_err_t s_state = ESP_ERR_INVALID_STATE; /* ESP_OK after a good init, else what every call returns */
