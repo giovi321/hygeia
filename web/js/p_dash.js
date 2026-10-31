@@ -51,9 +51,9 @@ HY.route("/", function (params, view) {
     busy = true;
     return promise.then(function (r) {
       busy = false;
-      if (r && r.id && undoable) {
+      if (r && r.log_id && undoable) {
         HY.toast(okText, function () {
-          HY.api("POST", "/api/log/" + r.id + "/undo").then(load, function (e) { HY.toast(HY.errText(e)); load(); });
+          HY.api("POST", "/api/log/" + r.log_id + "/undo").then(load, function (e) { HY.toast(HY.errText(e)); load(); });
         });
       } else {
         HY.toast(okText);

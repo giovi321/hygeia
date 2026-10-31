@@ -417,6 +417,8 @@ class Handler(BaseHTTPRequestHandler):
             if not act and m == "GET":
                 return 200, med
             if not act and m == "PUT":
+                if "If-Match" not in self.headers:
+                    return 428, err(428, "precondition_required", None, "Send If-Match with the etag from the last read")[1]
                 if dev.args.stale or self.headers.get("If-Match", "").strip('"') != med["etag"]:
                     return 412, err(412, "stale", None, "This medicine was changed on the device")[1]
                 bad = validate_med(dev, body, med["id"])
@@ -431,7 +433,7 @@ class Handler(BaseHTTPRequestHandler):
                 n = len([e for e in dev.log if e["med_id"] == med["id"]])
                 if q.get("confirm") != ["1"]:
                     return 409, err(409, "confirm", None, "Deleting also deletes %d log entries" % n,
-                                    log_count=n)[1]
+                                    log_entries=n)[1]
                 dev.log = [e for e in dev.log if e["med_id"] != med["id"]]
                 dev.meds.remove(med)
                 dev.broadcast("meds_changed")
@@ -448,7 +450,10 @@ class Handler(BaseHTTPRequestHandler):
                 dev.broadcast("meds_changed")
                 return 200, med
             if act == "pills" and m == "POST":
-                med["pill_count"]["remaining"] = int(body.get("remaining", med["pill_count"]["remaining"]))
+                if "add" in body:
+                    med["pill_count"]["remaining"] = max(0, min(9999, med["pill_count"]["remaining"] + int(body["add"])))
+                else:
+                    med["pill_count"]["remaining"] = int(body.get("left", med["pill_count"]["remaining"]))
                 return 200, med
             if act in ("log", "skip", "snooze") and m == "POST":
                 return self.dose(med, act, body)
@@ -493,7 +498,7 @@ class Handler(BaseHTTPRequestHandler):
         if act == "log" and med["pill_count"]["enabled"] and med["pill_count"]["remaining"] > 0:
             med["pill_count"]["remaining"] -= 1
         dev.broadcast("taken" if act == "log" else "skipped")
-        return 201, {"id": entry["id"], "status": entry["status"], "ts": now}
+        return 200, {"log_id": entry["id"], "undo_until": now + 5}
 
 
 def main(argv=None):

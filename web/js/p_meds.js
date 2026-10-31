@@ -97,9 +97,9 @@ HY.route("/meds", function (params, view) {
     if (busy) { return; }
     busy = true;
     HY.api("DELETE", "/api/medicines/" + m.id).then(done, function (e) {
-      if (e.status === 409 && e.data && typeof e.data.log_count === "number") {
+      if (e.status === 409 && e.data && typeof e.data.log_entries === "number") {
         busy = false;
-        var n = e.data.log_count;
+        var n = e.data.log_entries;
         HY.confirm("Delete " + m.name + "?",
           "This also deletes " + n + (n === 1 ? " log entry" : " log entries") + ". It cannot be undone.",
           true, "Delete").then(function (yes) {
