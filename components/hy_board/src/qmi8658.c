@@ -39,10 +39,22 @@ static const char *TAG = "imu";
 #define QMI_LSB_PER_G     4096
 #define QMI_IO_TIMEOUT_MS 50
 
-/* Screen frame <- sensor axes: out[i] = sign * raw[src]. Identity until the bring-up pose readings are taken */
+/* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. Identity until a pose reading says otherwise */
 static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
     { 0, 1 }, { 1, 1 }, { 2, 1 },
 };
+
+/* Mount of the sensor in the screen plane, in quarter turns (0 to 3), applied to (x, y) after HY_IMU_MAP; z is kept.
+ * For the mapped sensor values (x, y) the screen values (sx, sy) are:
+ *   0: sx =  x, sy =  y
+ *   1: sx = -y, sy =  x
+ *   2: sx = -x, sy = -y
+ *   3: sx =  y, sy = -x
+ * The value is provisional, set from one upright reading (top bar up: sensor x -945 mg, y -388 mg, z +33 mg). To
+ * confirm it, run `imu` in four poses (top bar up, right edge up, bottom edge up, left edge up) and expect about
+ * (0, -1000), (1000, 0), (0, 1000), (-1000, 0) for (x, y). If the right-edge-up pose reads (-1000, 0) instead, the
+ * mount is mirrored, not turned: set the value back to 0 and fix the per-axis signs in HY_IMU_MAP instead. */
+#define HY_IMU_MOUNT_QUARTER_TURNS 1
 
 static i2c_master_dev_handle_t s_dev;
 static esp_err_t s_state = ESP_ERR_INVALID_STATE; /* ESP_OK after a good init, else what every call returns */
@@ -166,9 +178,29 @@ esp_err_t hy_board_imu_read(int16_t mg[3])
     if (err != ESP_OK) {
         return err;
     }
+    int16_t m[3];
     for (int i = 0; i < 3; i++) {
-        mg[i] = (int16_t)(HY_IMU_MAP[i].sign * r[HY_IMU_MAP[i].src]);
+        m[i] = (int16_t)(HY_IMU_MAP[i].sign * r[HY_IMU_MAP[i].src]);
     }
+    switch (HY_IMU_MOUNT_QUARTER_TURNS & 3) {
+    case 0:
+        mg[0] = m[0];
+        mg[1] = m[1];
+        break;
+    case 1:
+        mg[0] = (int16_t)-m[1];
+        mg[1] = m[0];
+        break;
+    case 2:
+        mg[0] = (int16_t)-m[0];
+        mg[1] = (int16_t)-m[1];
+        break;
+    default:
+        mg[0] = m[1];
+        mg[1] = (int16_t)-m[0];
+        break;
+    }
+    mg[2] = m[2];
     return ESP_OK;
 }
 
