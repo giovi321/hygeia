@@ -16,7 +16,10 @@
  *            refuses with 409 "changed" when a dose was logged (next log id) or a medicine changed since the begin,
  *            else commits, reloads the actions and invalidates the scheduler.
  * Every job owns a copy of its input, so a job that runs late after a timeout never reads freed memory. While a
- * commit runs, other web writes answer 409 busy. */
+ * commit runs, other web writes answer 409 busy.
+ *
+ * The firmware upload (h_ota.c) runs in the same worker slot, so an upload, an export and an import exclude each
+ * other. */
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -45,6 +48,7 @@ static const char *TAG = "web_backup";
 #define IMPORT_MAX        (4 * 1024 * 1024)
 #define PSRAM_MARGIN      (1024 * 1024)
 #define WORKER_STACK      4096
+#define OTA_WORKER_STACK  6144         /* esp_ota_end verifies the whole image on this stack */
 #define WORKER_PRIO       4            /* below the httpd task */
 #define EXPORT_ROWS       128
 #define INDEX_ROWS        128
@@ -60,7 +64,7 @@ static const char *TAG = "web_backup";
 #define LOG_FROM          (-62167219200LL)   /* 0000-01-01 UTC */
 #define LOG_TO            253402300800LL      /* 10000-01-01 UTC */
 
-typedef enum { W_CSV = 1, W_JSON, W_IMPORT } wkind_t;
+typedef enum { W_CSV = 1, W_JSON, W_IMPORT, W_OTA } wkind_t;
 
 typedef struct {
     wkind_t kind;
@@ -106,6 +110,11 @@ void web_backup_stop(void)
 void web_backup_allow(void)
 {
     atomic_store(&s_stopping, false);
+}
+
+bool web_backup_aborting(void)
+{
+    return atomic_load(&s_abort);
 }
 
 /* A wipe the compiler cannot drop before the following free. */
@@ -1155,6 +1164,8 @@ static void worker(void *arg)
     wjob_t *w = arg;
     if (w->kind == W_IMPORT) {
         do_import(w);
+    } else if (w->kind == W_OTA) {
+        web_ota_run(w->req, w->len);
     } else {
         do_export(w);
     }
@@ -1171,11 +1182,11 @@ static esp_err_t start_worker(web_req_t *r, wjob_t *proto)
 {
     int idle = 0;
     if (!atomic_compare_exchange_strong(&s_state, &idle, (int)proto->kind)) {
-        web_send_err(r, 409, "busy", NULL, "An export or import is running");
+        web_send_err(r, 409, "busy", NULL, "An export, import or firmware update is running");
         return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
     }
     atomic_store(&s_abort, false);
-    if (atomic_load(&s_stopping)) {   /* after the claim: see web_backup_stop */
+    if (atomic_load(&s_stopping) || web_ota_restarting()) {   /* after the claim: see web_backup_stop */
         atomic_store(&s_state, 0);
         web_send_busy(r);
         return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
@@ -1191,7 +1202,8 @@ static esp_err_t start_worker(web_req_t *r, wjob_t *proto)
     *w = *proto;
     w->req = async;
     r->status = 202;   /* for the request log: the worker answers */
-    if (xTaskCreate(worker, "web_bak", WORKER_STACK, w, WORKER_PRIO, NULL) != pdPASS) {
+    uint32_t stack = w->kind == W_OTA ? OTA_WORKER_STACK : WORKER_STACK;
+    if (xTaskCreate(worker, w->kind == W_OTA ? "web_ota" : "web_bak", stack, w, WORKER_PRIO, NULL) != pdPASS) {
         web_req_t ar = {.req = async};
         web_send_busy(&ar);
         httpd_sess_trigger_close(async->handle, httpd_req_to_sockfd(async));
@@ -1258,12 +1270,19 @@ static esp_err_t h_import(web_req_t *r)
     return start_worker(r, &w);
 }
 
+esp_err_t web_ota_start(web_req_t *r, size_t len)
+{
+    wjob_t w = {.kind = W_OTA, .len = len};
+    return start_worker(r, &w);
+}
+
 web_handler_t web_data_route(hy_route_id_t id)
 {
     switch (id) {
     case HY_R_EXPORT_CSV: return h_export_csv;
     case HY_R_EXPORT_JSON: return h_export_json;
     case HY_R_IMPORT: return h_import;
+    case HY_R_OTA: return web_ota_handler;
     default: return NULL;
     }
 }

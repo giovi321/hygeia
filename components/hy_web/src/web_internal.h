@@ -72,6 +72,17 @@ web_handler_t web_data_route(hy_route_id_t id);       /* export, import, firmwar
 bool web_backup_busy(void);
 void web_backup_stop(void);
 void web_backup_allow(void);
+/* The server is stopping: a running worker ends at its next step (worker task) */
+bool web_backup_aborting(void);
+
+/* Firmware update (h_ota.c). The handler checks the request in the httpd task, then web_ota_start detaches it to the
+ * backup worker slot (409 "busy" while an export, import or another upload runs), which calls web_ota_run with the
+ * async request. restarting: an image was written and the device restarts shortly; new uploads, exports and imports
+ * answer busy. */
+esp_err_t web_ota_handler(web_req_t *r);
+esp_err_t web_ota_start(web_req_t *r, size_t len);
+void      web_ota_run(httpd_req_t *req, size_t len);
+bool      web_ota_restarting(void);
 
 /* Host name, IP literals and AP mode of the moment (hy_net_status copy). */
 typedef struct {

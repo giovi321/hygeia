@@ -11,6 +11,7 @@
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "hy/audio.h"
 #include "hy/board.h"
@@ -24,6 +25,7 @@
 #include "hy/store.h"
 #include "hy/ui.h"
 #include "hy/web.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include <sys/stat.h>
 
@@ -218,6 +220,127 @@ static void cmd_pair(const char *args)
 }
 #endif
 
+/* ---- firmware confirmation after an update ---- */
+
+#define OTA_NVS_NS "ota"
+#define OTA_NVS_FAIL "fail"
+#define CONFIRM_WAIT_MS 120000
+
+static const char *ota_state_name(esp_ota_img_states_t st)
+{
+    switch (st) {
+    case ESP_OTA_IMG_NEW: return "new";
+    case ESP_OTA_IMG_PENDING_VERIFY: return "pending verify";
+    case ESP_OTA_IMG_VALID: return "valid";
+    case ESP_OTA_IMG_INVALID: return "invalid";
+    case ESP_OTA_IMG_ABORTED: return "aborted";
+    default: return "undefined";
+    }
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+/* The otafail flag, read and cleared once: true when it was set. */
+static bool ota_fail_take(void)
+{
+    nvs_handle_t h;
+    uint8_t v = 0;
+    if (nvs_open(OTA_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+        return false;
+    }
+    if (nvs_get_u8(h, OTA_NVS_FAIL, &v) == ESP_OK) {
+        nvs_erase_key(h, OTA_NVS_FAIL);
+        nvs_commit(h);
+    }
+    nvs_close(h);
+    return v != 0;
+}
+
+/* "otafail": the next boot of an uploaded firmware stops (abort) just before it would confirm itself, so the
+ * bootloader goes back to the previous firmware. "otafail off" clears the flag. Both print the slots. */
+static void cmd_otafail(const char *args)
+{
+    bool off = strcmp(args, "off") == 0;
+    if (args[0] && !off) {
+        printf("usage: otafail [off]\n");
+        return;
+    }
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(OTA_NVS_NS, NVS_READWRITE, &h);
+    if (e == ESP_OK) {
+        e = off ? nvs_erase_key(h, OTA_NVS_FAIL) : nvs_set_u8(h, OTA_NVS_FAIL, 1);
+        if (e == ESP_ERR_NVS_NOT_FOUND) {
+            e = ESP_OK;
+        }
+        if (e == ESP_OK) {
+            e = nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+    printf("otafail %s: %s\n", off ? "cleared" : "set, the next uploaded firmware will not confirm itself",
+           esp_err_to_name(e));
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    esp_ota_img_states_t st = ESP_OTA_IMG_UNDEFINED;
+    if (run) {
+        esp_ota_get_state_partition(run, &st);
+    }
+    printf("running: %s, %s, firmware %s\n", run ? run->label : "-", ota_state_name(st),
+           esp_app_get_description()->version);
+    esp_app_desc_t d;
+    if (next && esp_ota_get_partition_description(next, &d) == ESP_OK) {
+        st = ESP_OTA_IMG_UNDEFINED;
+        esp_ota_get_state_partition(next, &st);
+        printf("other slot: %s, %s, firmware %.32s\n", next->label, ota_state_name(st), d.version);
+    } else {
+        printf("other slot: %s, no firmware\n", next ? next->label : "-");
+    }
+}
+#endif
+
+/* A firmware written by the web update boots pending verification. It confirms itself only after the store opened,
+ * the screen started and the scheduler made its first pass (an evaluation, or the "clock invalid" pass when the
+ * clock is not set, so a device without the time still confirms). Until then any reset (crash, watchdog, power)
+ * makes the bootloader start the previous firmware. */
+static void confirm_firmware(bool store_ok, bool ui_ok)
+{
+    const esp_partition_t *bad = esp_ota_get_last_invalid_partition();
+    esp_app_desc_t d;
+    if (bad && esp_ota_get_partition_description(bad, &d) == ESP_OK) {
+        ESP_LOGW(TAG, "firmware %.32s in %s did not confirm itself and was rolled back", d.version, bad->label);
+    }
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    esp_ota_img_states_t st = ESP_OTA_IMG_UNDEFINED;
+    if (!run || esp_ota_get_state_partition(run, &st) != ESP_OK || st != ESP_OTA_IMG_PENDING_VERIFY) {
+        ESP_LOGI(TAG, "running %s, %s", run ? run->label : "-", ota_state_name(st));
+        return;
+    }
+    ESP_LOGI(TAG, "firmware %s in %s is new: confirming after the first scheduler pass",
+             esp_app_get_description()->version, run->label);
+    if (!store_ok || !ui_ok) {
+        ESP_LOGE(TAG, "firmware not confirmed (store %s, screen %s): the next reset starts the previous firmware",
+                 store_ok ? "ok" : "failed", ui_ok ? "ok" : "failed");
+        return;
+    }
+    int64_t t0 = esp_timer_get_time();
+    while (hy_sched_generation() == 0) {
+        if (esp_timer_get_time() - t0 > CONFIRM_WAIT_MS * 1000LL) {
+            ESP_LOGE(TAG, "firmware not confirmed: no scheduler pass in %d s; the next reset starts the previous "
+                          "firmware", CONFIRM_WAIT_MS / 1000);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (ota_fail_take()) {
+        ESP_LOGW(TAG, "otafail: stopping before the firmware confirms itself");
+        abort();
+    }
+#endif
+    esp_err_t e = esp_ota_mark_app_valid_cancel_rollback();
+    ESP_LOGI(TAG, "firmware confirmed after %lld ms: %s", (long long)((esp_timer_get_time() - t0) / 1000),
+             esp_err_to_name(e));
+}
+
 #define MEDS_FILE "/data/meds.json"
 
 /* First boot: the three example medicines, added through the actions so validation applies. */
@@ -268,7 +391,8 @@ static void json_free(void *p)
     heap_caps_free(p);
 }
 
-static void init_storage(void)
+/* true when the store opened */
+static bool init_storage(void)
 {
     cJSON_Hooks hooks = {.malloc_fn = json_malloc, .free_fn = json_free};
     cJSON_InitHooks(&hooks);
@@ -276,13 +400,13 @@ static void init_storage(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storage unavailable, no persistence: %s", esp_err_to_name(err));
         hy_ui_set_storage_ok(false);
-        return;
+        return false;
     }
     hy_err_t oerr = hy_store_open("/data");
     ESP_LOGI(TAG, "hy_store_open: %s", hy_err_str(oerr));
     if (oerr != HY_OK) {
         hy_ui_set_storage_ok(false);
-        return;
+        return false;
     }
     struct stat st;
     bool first_boot = stat(MEDS_FILE, &st) != 0;
@@ -294,6 +418,7 @@ static void init_storage(void)
     }
     const hy_med_t *ms;
     ESP_LOGI(TAG, "medicines loaded: %u", (unsigned)hy_meds(&ms));
+    return true;
 }
 
 static void init_nvs(void)
@@ -372,7 +497,7 @@ void app_main(void)
         ESP_LOGI(TAG, "hy_clock_init: %s, clock valid: %s", esp_err_to_name(cerr), hy_clock_valid() ? "yes" : "no");
     }
 
-    init_storage();
+    bool store_ok = init_storage();
     esp_err_t nerr = hy_net_init();   /* NVS is up: networks, access point password; the radio stays off */
     ESP_LOGI(TAG, "hy_net_init: %s", esp_err_to_name(nerr));
     hy_net_set_keep_batt(settings.wifi_keep_batt);
@@ -387,9 +512,11 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "hy_sched_run_init: %s: reminders are OFF", esp_err_to_name(rerr));
     }
+    bool ui_ok = false;
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
         ESP_LOGI(TAG, "hy_ui_start: %s", esp_err_to_name(uerr));
+        ui_ok = uerr == ESP_OK;
         hy_power_start();
         esp_err_t aerr = hy_audio_init();   /* about 0.4 s: not on the splash's path */
         ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
@@ -448,6 +575,8 @@ void app_main(void)
     console_register("web", cmd_web);
     console_register("webjob", cmd_webjob);
     console_register("pair", cmd_pair);
+    console_register("otafail", cmd_otafail);
     console_start();
 #endif
+    confirm_firmware(store_ok, ui_ok);
 }

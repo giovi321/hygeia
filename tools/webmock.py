@@ -2,11 +2,14 @@
 """Development server that stands in for the device while the web UI is built.
 
     python tools/webmock.py [--port 8484] [--unpaired] [--slow] [--stale] [--clock-invalid] [--skew SECONDS] [--zone NAME] [--busy]
+                            [--low-battery]
 
 Serves the bundle made by tools/web_bundle.py from web/ (rebuilt on every request, so edits show on reload) and
 answers /api/* from the sample files in tools/webmock/samples/ plus in-memory changes. Routes the firmware does not
 implement yet answer 501 like the device. Nothing is stored on disk. Export and import follow the device shapes
-(import works on the in-memory data; nothing is written to disk).
+(import works on the in-memory data; nothing is written to disk). POST /api/ota checks the image header like the
+device, answers {"reboot_in_s":2}, drops every request from 2 s to 7 s later (the restart) and then reports the
+uploaded image's version in /api/info.
 
   --unpaired       every /api route except info and pairing answers 401 until the code 123456 is posted
   --slow           adds 1.5 s to every /api answer
@@ -15,6 +18,7 @@ implement yet answer 501 like the device. Nothing is stored on disk. Export and 
   --skew SECONDS   the device clock runs this many seconds ahead of the host
   --zone NAME      the device time zone (default Europe/Zurich)
   --busy           writes answer 503 busy; the first GET of each read route answers 503 once
+  --low-battery    POST /api/ota answers 409 battery (on battery below 30 %)
 """
 
 import argparse
@@ -40,6 +44,9 @@ SAMPLES = os.path.join(HERE, "webmock", "samples")
 SAMPLE_NOW = 1793181600     # utc_ms / 1000 in samples/state.json
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 PAIR_CODE = "123456"
+OTA_SLOT = 3 * 1024 * 1024  # the size of one firmware slot in partitions.csv
+OTA_RESTART_S = 2           # {"reboot_in_s":2}
+OTA_BOOT_S = 5              # the mock is unreachable this long after the restart starts
 BUILD_EPOCH = 1700000000
 
 
@@ -96,6 +103,23 @@ class Device:
         self.pair_until = 0
         self.blocked_until = 0
         self.clients = []
+        self.fw = "0.0.0-mock"
+        self.restart_at = 0.0   # an upload finished: unreachable from restart_at for OTA_BOOT_S
+        self.next_fw = None
+
+    def restarting(self):
+        """True while the mock plays the restart after an upload; the new version shows once it is over."""
+        with self.lock:
+            if not self.restart_at:
+                return False
+            t = time.time()
+            if t < self.restart_at:
+                return False
+            if t < self.restart_at + OTA_BOOT_S:
+                return True
+            self.fw, self.next_fw, self.restart_at = self.next_fw, None, 0.0
+            self.clients = []
+            return False
 
     @staticmethod
     def etag(m):
@@ -266,6 +290,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_any(self):
         u = urlsplit(self.path)
+        if self.dev.restarting():
+            self.close_connection = True   # the device is restarting: no answer at all
+            return
         if u.path == "/ws":
             return self.ws()
         if u.path.startswith("/api/"):
@@ -344,6 +371,8 @@ class Handler(BaseHTTPRequestHandler):
                 return 503, err(503, "busy", None, "The device is busy, try again")[1], {}
         if path == "/api/import" and m == "POST":
             return self.backup_import(q)
+        if path == "/api/ota" and m == "POST":
+            return self.ota()
         body = self.read_body() if m in ("POST", "PUT", "DELETE") else {}
         if body is None:
             return 400, err(400, "invalid", None, "The body is not valid JSON")[1], {}
@@ -361,7 +390,7 @@ class Handler(BaseHTTPRequestHandler):
             return extra
 
         if path == "/api/info" and m == "GET":
-            return 200, {"api": 1, "fw": "0.0.0-mock", "name": "hygeia",
+            return 200, {"api": 1, "fw": dev.fw, "name": "hygeia",
                          "paired": (not dev.args.unpaired) or self.session() in dev.sessions,
                          "utc_ms": dev.now_ms(), "clock_valid": dev.clock_valid}
 
@@ -698,6 +727,36 @@ class Handler(BaseHTTPRequestHandler):
         data = json.dumps(doc, separators=(",", ":")).encode("utf-8")
         return 200, Raw(data, "application/json"), {"Content-Disposition": self.export_name("json")}
 
+    # ---- firmware update: the device's checks on the first bytes, no flash ----
+    def ota(self):
+        dev = self.dev
+        n = int(self.headers.get("Content-Length") or 0)
+        if dev.restart_at:
+            return 409, err(409, "busy", None, "A firmware update finished, the device is restarting")[1], {}
+        if not n:
+            return 400, err(400, "invalid", "body", "Send the firmware file as the request body")[1], {}
+        if n > OTA_SLOT:
+            self.close_connection = True   # the device closes on a large unread body
+            return 413, err(413, "too_large", None, "The file is larger than the firmware slot")[1], {}
+        if dev.args.low_battery:
+            self.close_connection = True
+            return 409, err(409, "battery", None, "Battery below 30 %: connect USB before updating")[1], {}
+        data = self.rfile.read(n)
+        if len(data) < n:
+            self.close_connection = True
+            return 408, err(408, "timeout", None, "The file did not arrive in time")[1], {}
+        # esp_image_header_t (24 bytes), a segment header (8), then esp_app_desc_t
+        ok = (len(data) >= 32 + 256 and data[0] == 0xE9 and struct.unpack_from("<H", data, 12)[0] == 0x0009
+              and struct.unpack_from("<I", data, 32)[0] == 0xABCD5432
+              and data[80:112].split(b"\0", 1)[0] == b"hygeia")
+        if not ok:
+            return 422, err(422, "not_hygeia", None, "This file is not a hygeia firmware image")[1], {}
+        if len(data) < 64 * 1024:   # stands in for esp_ota_end's image check: a real image is far larger
+            return 422, err(422, "corrupt", None, "The firmware file is damaged or incomplete")[1], {}
+        dev.next_fw = data[48:80].split(b"\0", 1)[0].decode("utf-8", "replace") or "unknown"
+        dev.restart_at = time.time() + OTA_RESTART_S
+        return 200, {"reboot_in_s": OTA_RESTART_S}, {}
+
     def backup_import(self, q):
         dev = self.dev
         mode = (q.get("mode") or ["merge"])[0]
@@ -933,6 +992,7 @@ def main(argv=None):
     ap.add_argument("--skew", type=float, default=0.0)
     ap.add_argument("--zone", default="")
     ap.add_argument("--busy", action="store_true")
+    ap.add_argument("--low-battery", action="store_true")
     args = ap.parse_args(argv)
     Handler.dev = Device(args)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
