@@ -42,7 +42,8 @@ HY.timesync = (function () {
         onDone();
       }, function (e) {
         use.disabled = false;
-        HY.toast(HY.errText(e));
+        var t = HY.errText(e);
+        if (t) { HY.toast(t); }
       });
     } }, "Use " + mine);
     var no = HY.h("button", { class: "btn", type: "button", onclick: function () {

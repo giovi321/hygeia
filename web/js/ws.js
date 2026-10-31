@@ -1,6 +1,6 @@
 // Live updates: any event from the device, or a resync, refetches the current page's data.
 HY.ws = (function () {
-  var sock = null, timer = null, wait = null, tries = 0, running = false;
+  var sock = null, stable = null, timer = null, wait = null, tries = 0, running = false;
   var delays = [1000, 2000, 5000, 10000];
 
   function poke() {
@@ -20,9 +20,13 @@ HY.ws = (function () {
     if (!running) { return; }
     var url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
     try { sock = new WebSocket(url); } catch (e) { retry(); return; }
-    sock.onopen = function () { tries = 0; poke(); };
-    sock.onmessage = function () { poke(); };
-    sock.onclose = function () { sock = null; retry(); };
+    sock.onopen = function () {
+      clearTimeout(stable);
+      stable = setTimeout(function () { tries = 0; }, 5000);   // a socket that drops at once keeps backing off
+      poke();
+    };
+    sock.onmessage = function () { tries = 0; poke(); };
+    sock.onclose = function () { clearTimeout(stable); sock = null; retry(); };
     sock.onerror = function () { /* onclose follows */ };
   }
 

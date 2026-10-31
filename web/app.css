@@ -132,11 +132,12 @@ label, .lbl { display: block; color: var(--mut); font-size: 13px; margin: 12px 0
 
 /* tables; cards below 600 px */
 .tbl { width: 100%; border-collapse: collapse; }
-.tbl td, .tbl th { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.tbl td, .tbl th { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .tbl th { color: var(--mut); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
 .tbl tr:last-child td { border-bottom: 0; }
-.tbl .actions { margin: 0; flex-wrap: nowrap; }
+.tbl .actions { margin: 0; flex-wrap: wrap; }
 .tbl .actions .btn { flex: none; }
+.tbl td.c-act { min-width: 0; }
 .mv { display: flex; gap: 4px; }
 details.arch summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
 details.arch[open] summary { margin-bottom: 6px; }

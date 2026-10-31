@@ -82,7 +82,7 @@ HY.route("/meds", function (params, view) {
 
   function archive(m) {
     HY.confirm("Archive " + m.name + "?",
-      "It leaves the home screen and stops reminding. Its history stays.", true, "Archive")
+      HY.ARCHIVE_BODY, true, "Archive")
       .then(function (yes) { if (yes) { post(m, "archive", m.name + " archived"); } });
   }
 

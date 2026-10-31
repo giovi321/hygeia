@@ -14,6 +14,7 @@
     HY.info = info;
     if (info.paired) { HY.ws.start(); }
     HY.navigate();
+    if (info.paired) { HY.timesync.run().then(function (changed) { if (changed) { HY.refresh(); } }); }
   }, function (e) {
     HY.info = { paired: true };
     var v = document.getElementById("view");

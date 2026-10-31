@@ -236,7 +236,7 @@
     var archiveBtn = null;
     if (!isNew && !med.archived) {
       archiveBtn = HY.h("button", { class: "btn", type: "button", onclick: function () {
-        HY.confirm("Archive " + med.name + "?", "It leaves the home screen and stops reminding. Its history stays.", true, "Archive")
+        HY.confirm("Archive " + med.name + "?", HY.ARCHIVE_BODY, true, "Archive")
           .then(function (yes) {
             if (!yes) { return; }
             HY.api("POST", "/api/medicines/" + med.id + "/archive").then(function () {

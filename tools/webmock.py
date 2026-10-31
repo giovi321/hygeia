@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Development server that stands in for the device while the web UI is built.
 
-    python tools/webmock.py [--port 8484] [--unpaired] [--slow] [--stale] [--clock-invalid] [--skew SECONDS]
+    python tools/webmock.py [--port 8484] [--unpaired] [--slow] [--stale] [--clock-invalid] [--skew SECONDS] [--zone NAME] [--busy]
 
 Serves the bundle made by tools/web_bundle.py from web/ (rebuilt on every request, so edits show on reload) and
 answers /api/* from the sample files in tools/webmock/samples/ plus in-memory changes. Routes the firmware does not
@@ -12,6 +12,8 @@ implement yet answer 501 like the device. Nothing is stored on disk.
   --stale          PUT /api/medicines/{id} answers 412
   --clock-invalid  starts with an invalid clock until POST /api/time
   --skew SECONDS   the device clock runs this many seconds ahead of the host
+  --zone NAME      the device time zone (default Europe/Zurich)
+  --busy           writes answer 503 busy; the first GET of each read route answers 503 once
 """
 
 import argparse
@@ -82,7 +84,8 @@ class Device:
             d["slot"] += shift
         self.clock_valid = not args.clock_invalid
         self.skew = args.skew
-        self.zone = st["zone"]
+        self.zone = args.zone or st["zone"]
+        self.busy_seen = set()
         self.sync = {"src": "browser", "at": int(time.time()) - 180}
         self.sessions = set()
         self.fails = 0
@@ -267,14 +270,14 @@ class Handler(BaseHTTPRequestHandler):
     # ---- websocket ----
     def ws(self):
         key = self.headers.get("Sec-WebSocket-Key")
+        if os.environ.get("WEBMOCK_VERBOSE"):
+            print("ws upgrade, origin", self.headers.get("Origin"), file=sys.stderr, flush=True)
         if not key or (self.dev.args.unpaired and self.session() not in self.dev.sessions):
             return self.send(401, {"error": "unpaired", "field": None, "message": "This browser is not paired"})
         acc = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
-        self.send_response(101)
-        self.send_header("Upgrade", "websocket")
-        self.send_header("Connection", "Upgrade")
-        self.send_header("Sec-WebSocket-Accept", acc)
-        self.end_headers()
+        # browsers insist on HTTP/1.1 in the upgrade answer
+        head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        self.wfile.write((head + "Sec-WebSocket-Accept: " + acc + "\r\n\r\n").encode())
         self.wfile.flush()
         sock = self.connection
         self.dev.clients.append(sock)
@@ -309,6 +312,12 @@ class Handler(BaseHTTPRequestHandler):
             return 403, err(403, "forbidden", None, "Write requests need X-Hygeia: 1")[1], {}
         if dev.args.unpaired and not open_route and self.session() not in dev.sessions:
             return 401, err(401, "unpaired", None, "This browser is not paired")[1], {}
+        if dev.args.busy and open_route is False:
+            if m != "GET" and path != "/api/time":
+                return 503, err(503, "busy", None, "The device is busy, try again")[1], {}
+            if m == "GET" and path not in dev.busy_seen:
+                dev.busy_seen.add(path)
+                return 503, err(503, "busy", None, "The device is busy, try again")[1], {}
         body = self.read_body() if m in ("POST", "PUT") else {}
         if body is None:
             return 400, err(400, "invalid", None, "The body is not valid JSON")[1], {}
@@ -495,6 +504,8 @@ def main(argv=None):
     ap.add_argument("--stale", action="store_true")
     ap.add_argument("--clock-invalid", action="store_true")
     ap.add_argument("--skew", type=float, default=0.0)
+    ap.add_argument("--zone", default="")
+    ap.add_argument("--busy", action="store_true")
     args = ap.parse_args(argv)
     Handler.dev = Device(args)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)

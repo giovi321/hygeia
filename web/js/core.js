@@ -175,8 +175,11 @@ HY.fmtAgo = function (utc) {
   var s = Math.floor(Date.now() / 1000) - utc;
   if (s < 90) { return "just now"; }
   if (s < 3600) { return Math.round(s / 60) + " min ago"; }
-  if (s < 86400) { return Math.floor(s / 3600) + " h " + Math.round((s % 3600) / 60) + " min ago"; }
+  if (s < 86400) { return Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min ago"; }
   return Math.floor(s / 86400) + " d ago";
 };
+
+// Same wording as the device's archive card.
+HY.ARCHIVE_BODY = "It leaves the home screen and stops reminding. Its history is kept. Someone can bring it back in the web UI.";
 
 HY.medColor = function (i) { return HY.colors[(i | 0) % 10] || HY.colors[0]; };

@@ -155,7 +155,7 @@ HY.route("/", function (params, view) {
         fix.disabled = true;
         HY.api("POST", "/api/time", { utc_ms: Date.now() }).then(load, function (e) {
           fix.disabled = false;
-          HY.toast(HY.errText(e));
+          var t = HY.errText(e); if (t) { HY.toast(t); }
         });
       } }, "Set from this browser");
       root.appendChild(HY.h("div", { class: "banner bad" },
