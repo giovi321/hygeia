@@ -38,8 +38,8 @@ static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_want;            /* hy_motion_enable */
 static bool s_lock;
 static bool s_arm;
-static bool s_set_req;
-static hy_rot_t s_set_rot;
+static uint32_t s_set_seq;     /* bumped by hy_motion_set_current; the task remembers the last one it handled */
+static hy_rot_t s_applied;     /* the rotation the UI last confirmed through hy_motion_set_current (or init) */
 static uint32_t s_gen;         /* bumped at every disable: drops callbacks queued before it */
 #if CONFIG_HY_DEBUG_CONSOLE
 static int64_t s_dbg_arm_until_ms;
@@ -85,10 +85,10 @@ static void async_cb(void *p)
 }
 
 /* Motion task. lv_async_call is not thread safe: queue it under the LVGL lock, drop on failure */
-static void post(int ev, hy_rot_t r)
+static bool post(int ev, hy_rot_t r)
 {
     if (!hy_board_display()) {
-        return;
+        return false;
     }
     portENTER_CRITICAL(&s_mux);
     uint32_t gen = s_gen & 0xffffff;
@@ -96,12 +96,14 @@ static void post(int ev, hy_rot_t r)
     uintptr_t arg = ((uintptr_t)gen << 8) | ((uintptr_t)ev << 4) | (uintptr_t)r;
     if (!hy_board_lock(POST_LOCK_MS)) {
         ESP_LOGE(TAG, "post: lvgl lock timeout");
-        return;
+        return false;
     }
-    if (lv_async_call(async_cb, (void *)arg) != LV_RESULT_OK) {
+    bool ok = lv_async_call(async_cb, (void *)arg) == LV_RESULT_OK;
+    if (!ok) {
         ESP_LOGE(TAG, "post: lv_async_call failed");
     }
     hy_board_unlock();
+    return ok;
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -155,11 +157,13 @@ static void motion_task(void *arg)
     hy_shake_t sh;
     bool shake_on = false, powered = false, fail_logged = false, imu_bad_logged = false;
     int fails = 0;
+    uint32_t seen_seq = 0;
     TickType_t last = xTaskGetTickCount();
 
     for (;;) {
         bool want, lock, arm, set_req;
-        hy_rot_t set_rot;
+        hy_rot_t applied;
+        uint32_t seq;
 #if CONFIG_HY_DEBUG_CONSOLE
         bool dbg_only = false;
 #endif
@@ -167,11 +171,9 @@ static void motion_task(void *arg)
         want = s_want;
         lock = s_lock;
         arm = s_arm;
-        set_req = want && s_set_req;
-        set_rot = s_set_rot;
-        if (set_req) {
-            s_set_req = false;
-        }
+        seq = s_set_seq;
+        set_req = want && seq != seen_seq;   /* handled below; a request is not lost if the power up fails */
+        applied = s_applied;
 #if CONFIG_HY_DEBUG_CONSOLE
         if (!arm && s_dbg_arm_until_ms > 0 && now_ms() < s_dbg_arm_until_ms) {
             arm = true;
@@ -198,12 +200,14 @@ static void motion_task(void *arg)
         }
 
         if (!powered) {
-            if (hy_board_imu_power(true) != ESP_OK) {
+            esp_err_t perr = hy_board_imu_power(true);
+            if (perr != ESP_OK) {
                 if (!imu_bad_logged) {
-                    ESP_LOGE(TAG, "motion: imu power up failed");
+                    ESP_LOGE(TAG, "motion: imu power up failed: %s", esp_err_to_name(perr));
                     imu_bad_logged = true;
                 }
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(RETRY_MS));
+                /* No IMU at all cannot succeed later: block with no timeout. Transient bus errors retry. */
+                ulTaskNotifyTake(pdTRUE, perr == ESP_ERR_INVALID_STATE ? portMAX_DELAY : pdMS_TO_TICKS(RETRY_MS));
                 continue;
             }
             imu_bad_logged = false;
@@ -211,6 +215,14 @@ static void motion_task(void *arg)
             powered = true;
             s_powered = true;
             hy_orient_resume(&o);
+            /* Resync with the panel: a post dropped before the screen went off must not leave the state ahead of it.
+               The wake dwell stays unless a forced rotation is waiting. */
+            if (hy_orient_current(&o) != applied) {
+                hy_orient_set(&o, applied);
+                if (set_req) {
+                    o.quick = false;
+                }
+            }
             shake_on = false;
             fails = 0;
             ESP_LOGI(TAG, "motion: on");
@@ -220,11 +232,12 @@ static void motion_task(void *arg)
         if (set_req) {
             /* A forced or locked rotation is a deliberate choice: the 250 ms wake dwell must not undo it.
                hy_orient_set keeps the quick flag, so it is cleared here when the rotation actually changes. */
-            if (hy_orient_current(&o) != set_rot) {
-                hy_orient_set(&o, set_rot);
+            if (hy_orient_current(&o) != applied) {
+                hy_orient_set(&o, applied);
                 o.quick = false;
             }
             s_orient_cur = hy_orient_current(&o);
+            seen_seq = seq;
         }
 
         int16_t mg[3];
@@ -248,8 +261,11 @@ static void motion_task(void *arg)
         hy_accel_t a = {mg[0], mg[1], mg[2]};
 
         if (!lock && hy_orient_feed(&o, t, a)) {
+            hy_rot_t next = hy_orient_current(&o);
+            if (!post(EV_ROTATE, next)) {
+                hy_orient_set(&o, applied);   /* never ahead of the panel: a held pose switches again after the dwell */
+            }
             s_orient_cur = hy_orient_current(&o);
-            post(EV_ROTATE, hy_orient_current(&o));
         }
         if (arm && !shake_on) {
             hy_shake_reset(&sh, t);
@@ -280,6 +296,7 @@ esp_err_t hy_motion_init(const hy_motion_ui_t *ui, hy_rot_t cur)
     if (ui) {
         s_ui = *ui;
     }
+    s_applied = cur;
     ESP_LOGI(TAG, "heap free: internal %u before hy_motion_init",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -290,6 +307,10 @@ esp_err_t hy_motion_init(const hy_motion_ui_t *ui, hy_rot_t cur)
 #endif
     if (xTaskCreate(motion_task, "motion", TASK_STACK, (void *)(uintptr_t)cur, TASK_PRIO, &s_task) != pdPASS) {
         s_task = NULL;
+#if CONFIG_HY_DEBUG_CONSOLE
+        vSemaphoreDelete(s_idone);
+        s_idone = NULL;
+#endif
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "heap free: internal %u after hy_motion_init",
@@ -322,8 +343,8 @@ void hy_motion_set_lock(bool locked)
 void hy_motion_set_current(hy_rot_t r)
 {
     portENTER_CRITICAL(&s_mux);
-    s_set_rot = r;
-    s_set_req = true;
+    s_applied = r;
+    s_set_seq++;
     portEXIT_CRITICAL(&s_mux);
     wake_task();
 }
@@ -350,8 +371,8 @@ void hy_motion_debug(const char *args)
     portENTER_CRITICAL(&s_mux);
     bool want = s_want, lock = s_lock, arm = s_arm;
     portEXIT_CRITICAL(&s_mux);
-    ESP_LOGI(TAG, "state: enabled %d imu on %d lock %d arm %d orient %u deg", want, s_powered, lock, arm,
-             (unsigned)s_orient_cur * 90);
+    ESP_LOGI(TAG, "state: enabled %d imu on %d lock %d arm %d orient %u deg, stack free min %u bytes", want,
+             s_powered, lock, arm, (unsigned)s_orient_cur * 90, (unsigned)uxTaskGetStackHighWaterMark(s_task));
 }
 
 void hy_motion_imu(bool raw, bool rec, int samples)

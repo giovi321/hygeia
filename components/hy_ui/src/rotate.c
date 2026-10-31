@@ -33,6 +33,7 @@ static void apply(hy_rot_t r, const char *how)
     hy_board_set_rotation((uint8_t)r);
     if (hy_board_rotation() != (uint8_t)r) {
         ESP_LOGW(TAG, "%u not applied", (unsigned)r * 90);   /* the panel write failed: the old one stays */
+        hy_motion_set_current((hy_rot_t)hy_board_rotation());   /* tell the motion task what the panel shows */
         return;
     }
     hy_motion_set_current(r);
