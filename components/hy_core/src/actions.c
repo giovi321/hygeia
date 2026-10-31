@@ -9,6 +9,7 @@
 #define QUERY_MAX 128
 #define PURGE_LOG_END 4102444800LL   /* 2100-01-01 UTC */
 #define LOOKBACK_S (8 * 86400LL)
+#define LOG_TS_MAX 253402300799LL   /* 9999-12-31 UTC: the latest month the store accepts */
 
 typedef struct {
     bool used;
@@ -219,6 +220,8 @@ static hy_err_t remove_med_logs(uint32_t med_id, size_t *count)
     size_t removed = 0;
     if (store->purge_med) {
         removed = store->purge_med(store_ctx, med_id);
+        /* The port reports a count only: a month that failed to rewrite leaves entries behind. */
+        if (store->query_log(store_ctx, 0, PURGE_LOG_END, med_id, qbuf, 1) != 0) result = HY_E_IO;
     } else {
         for (;;) {
             size_t q = store->query_log(store_ctx, 0, PURGE_LOG_END, med_id, qbuf, QUERY_MAX);
@@ -308,12 +311,16 @@ hy_err_t hy_act_med_delete(uint32_t id, size_t *n_deleted)
         if (meds[i].id != id) scratch[out++] = meds[i];
     uint32_t next = next_med_id;
     if (next < cur->id + 1 && cur->id != 0xFFFFFFFFu) next = cur->id + 1;
-    if (persist_meds(scratch, out, next) != HY_OK) return HY_E_IO;
+    int64_t now = clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0;
+    if (persist_meds(scratch, out, next) != HY_OK) {
+        /* the log is already gone: views of it must refresh */
+        if (removed) publish(HY_EV_LOG_EDITED, now, id, 0, 0);
+        return HY_E_IO;
+    }
     memcpy(meds, scratch, out * sizeof meds[0]);
     memset(&meds[out], 0, (n_meds - out) * sizeof meds[0]);
     n_meds = out;
     next_med_id = next;
-    int64_t now = clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0;
     publish(HY_EV_MEDS_CHANGED, now, id, 0, 0);
     publish(HY_EV_LOG_EDITED, now, id, 0, 0);
     return HY_OK;
@@ -680,7 +687,8 @@ hy_err_t hy_act_log_edit(const hy_log_t *e)
     if (!inited || !e) return HY_E_INVALID;
     hy_log_t upd = *e;
     upd.edited = true;
-    if (store->update_log(store_ctx, &upd) != HY_OK) return HY_E_IO;
+    hy_err_t ue = store->update_log(store_ctx, &upd);
+    if (ue != HY_OK) return (ue == HY_E_INVALID || ue == HY_E_FULL) ? ue : HY_E_IO;
     undo_forget(upd.id);
     publish(HY_EV_LOG_EDITED, upd.ts, upd.med_id, upd.id, upd.slot);
     return HY_OK;
@@ -705,8 +713,9 @@ hy_err_t hy_act_log_update(uint32_t id, const hy_api_logreq_t *req)
     bool clock_ok = clk->valid(clk_ctx);
     int64_t now = clock_ok ? clk->now(clk_ctx) : 0;
     bool retime = false;
+    bool was_missed = e.status == HY_MISSED;
     if (req->has_ts) {
-        if (req->ts <= 0) return HY_E_INVALID;
+        if (req->ts <= 0 || req->ts > LOG_TS_MAX) return HY_E_INVALID;
         if (clock_ok && req->ts > now + 60) return HY_E_INVALID;
         if (req->ts != e.ts) retime = true;
         e.ts = req->ts;
@@ -727,6 +736,7 @@ hy_err_t hy_act_log_update(uint32_t id, const hy_api_logreq_t *req)
     }
 
     hy_med_t *med = find_med(e.med_id);
+    if (was_missed && e.status != HY_MISSED) retime = true;   /* a missed entry becoming a dose gets its slot */
     if (retime && med && med->type == HY_SCHED_FIXED && (e.status == HY_TAKEN || e.status == HY_SKIPPED)) {
         int64_t hi = e.ts + (int64_t)med->early_window_min * 60;
         if (clock_ok && now > hi) hi = now;

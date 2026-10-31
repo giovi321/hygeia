@@ -423,10 +423,10 @@ hy_err_t hy_meds_from_json_next(const char *json, hy_med_t *out, size_t max, siz
     cJSON *v = cJSON_GetObjectItemCaseSensitive(root, "v");
     cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "meds");
     cJSON *nx = cJSON_GetObjectItemCaseSensitive(root, "next_id");
-    bool nx_ok = !next_id || !nx || cJSON_IsNull(nx) ||
-                 (cJSON_IsNumber(nx) && nx->valuedouble >= 0 && nx->valuedouble <= 4294967295.0 &&
-                  nx->valuedouble == (double)(uint32_t)nx->valuedouble);
-    if (nx_ok && cJSON_IsObject(root) && cJSON_IsNumber(v) && v->valuedouble == HY_SCHEMA_VERSION &&
+    /* a damaged next_id counts as absent: it must never keep the medicines from loading */
+    bool nx_ok = cJSON_IsNumber(nx) && nx->valuedouble >= 0 && nx->valuedouble <= 4294967295.0 &&
+                 nx->valuedouble == (double)(uint32_t)nx->valuedouble;
+    if (cJSON_IsObject(root) && cJSON_IsNumber(v) && v->valuedouble == HY_SCHEMA_VERSION &&
         cJSON_IsArray(arr)) {
         size_t count = (size_t)cJSON_GetArraySize(arr);
         if (count > max) {
@@ -443,7 +443,7 @@ hy_err_t hy_meds_from_json_next(const char *json, hy_med_t *out, size_t max, siz
             if (r == HY_OK) {
                 *n = count;
                 if (next_id) {
-                    *next_id = (nx && cJSON_IsNumber(nx)) ? (uint32_t)nx->valuedouble : default_next_id(out, count);
+                    *next_id = nx_ok ? (uint32_t)nx->valuedouble : default_next_id(out, count);
                 }
             }
         }

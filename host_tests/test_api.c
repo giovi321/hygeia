@@ -688,6 +688,23 @@ static hy_settings_t full_settings(void)
     return s;
 }
 
+static void assert_settings_eq(const hy_settings_t *a, const hy_settings_t *b)
+{
+    TEST_ASSERT_EQUAL(a->sound, b->sound);
+    TEST_ASSERT_EQUAL(a->dnd, b->dnd);
+    TEST_ASSERT_EQUAL_UINT8(a->volume, b->volume);
+    TEST_ASSERT_EQUAL_UINT8(a->brightness, b->brightness);
+    TEST_ASSERT_EQUAL_UINT16(a->snooze_min, b->snooze_min);
+    TEST_ASSERT_EQUAL_UINT16(a->dim_s, b->dim_s);
+    TEST_ASSERT_EQUAL_UINT16(a->off_bat_s, b->off_bat_s);
+    TEST_ASSERT_EQUAL_UINT32(a->off_usb_s, b->off_usb_s);
+    TEST_ASSERT_EQUAL(a->rot_lock, b->rot_lock);
+    TEST_ASSERT_EQUAL_UINT8(a->rot, b->rot);
+    TEST_ASSERT_EQUAL_UINT16(a->quiet_from, b->quiet_from);
+    TEST_ASSERT_EQUAL_UINT16(a->quiet_to, b->quiet_to);
+    TEST_ASSERT_EQUAL(a->wifi_keep_batt, b->wifi_keep_batt);
+}
+
 static void test_settings_roundtrip(void)
 {
     hy_settings_t s = full_settings(), cur, out;
@@ -723,13 +740,13 @@ static void test_settings_merge_partial(void)
     TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"volume\":30}", &cur, &out, &err));
     TEST_ASSERT_EQUAL_UINT8(30, out.volume);
     cur.volume = 30;
-    TEST_ASSERT_EQUAL_MEMORY(&cur, &out, sizeof cur);
+    assert_settings_eq(&cur, &out);
     /* null counts as absent */
     TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"volume\":null,\"dnd\":null}", &cur, &out, &err));
-    TEST_ASSERT_EQUAL_MEMORY(&cur, &out, sizeof cur);
+    assert_settings_eq(&cur, &out);
     /* unknown members are ignored */
     TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"nope\":1,\"rot\":3}", &cur, &out, &err));
-    TEST_ASSERT_EQUAL_MEMORY(&cur, &out, sizeof cur);
+    assert_settings_eq(&cur, &out);
 }
 
 static void test_settings_quiet_null(void)
@@ -764,7 +781,7 @@ static void test_settings_bad_type(void)
     TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json("{\"volume\":\"x\"}", &cur, &out, &err));
     TEST_ASSERT_EQUAL_STRING("volume", err.field);
     TEST_ASSERT_EQUAL_INT(400, err.http);
-    TEST_ASSERT_EQUAL_MEMORY(&keep, &out, sizeof out);   /* untouched on failure */
+    assert_settings_eq(&keep, &out);   /* untouched on failure */
     const char *bad[][2] = {
         { "{\"sound\":1}", "sound" }, { "{\"dnd\":\"yes\"}", "dnd" }, { "{\"brightness\":1.5}", "brightness" },
         { "{\"snooze_min\":-1}", "snooze_min" }, { "{\"dim_s\":[]}", "dim_s" }, { "{\"off_bat_s\":{}}", "off_bat_s" },

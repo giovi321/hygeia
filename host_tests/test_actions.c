@@ -93,6 +93,7 @@ static uint32_t s_load_next(void *c) { (void)c; return st.med_next_id; }
 static size_t s_purge(void *c, uint32_t med_id)
 {
     (void)c; st.purges++;
+    if (st.fail_purge) return 0;
     size_t removed = 0, w = 0;
     for (size_t i = 0; i < st.n_logs; i++) {
         if (st.logs[i].med_id == med_id) removed++;
@@ -1250,6 +1251,39 @@ static void test_delete_archived_plain_port(void)
     TEST_ASSERT_EQUAL_UINT32(5, nm.id);
 }
 
+static void test_delete_purge_failure_keeps_med(void)
+{
+    add_archived_z();
+    add_z_logs(3);
+    st.fail_purge = true;
+    size_t nd = 99;
+    int saves = st.saves;
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_med_delete(4, &nd));
+    TEST_ASSERT_NOT_NULL(med_by_id(4));
+    TEST_ASSERT_EQUAL_INT(saves, st.saves);
+    TEST_ASSERT_EQUAL_size_t(3, st.n_logs);
+    uint32_t ids[] = {4};
+    size_t removed = 7;
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_med_purge(ids, 1, &removed, NULL));
+    TEST_ASSERT_EQUAL_size_t(0, removed);
+    TEST_ASSERT_NOT_NULL(med_by_id(4));
+    st.fail_purge = false;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_med_delete(4, &nd));
+    TEST_ASSERT_EQUAL_size_t(3, nd);
+}
+
+static void test_delete_save_failure_publishes_log_edit(void)
+{
+    add_archived_z();
+    add_z_logs(2);
+    st.fail_save = true;
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_med_delete(4, NULL));
+    bool log_ev = false;
+    for (int i = 0; i < n_evs; i++) if (evs[i].type == HY_EV_LOG_EDITED) log_ev = true;
+    TEST_ASSERT_TRUE(log_ev);
+    TEST_ASSERT_NOT_NULL(med_by_id(4));
+}
+
 static void test_delete_log_failure_keeps_med(void)
 {
     add_archived_z();
@@ -1333,6 +1367,33 @@ static void test_log_update_status_change(void)
     TEST_ASSERT_EQUAL_INT64(D0 + H(8, 0), e->slot);
     TEST_ASSERT_EQUAL_INT32(10, e->delta_min);
     TEST_ASSERT_TRUE(e->edited);
+}
+
+static void test_log_update_missed_to_taken_recomputes(void)
+{
+    two_time_a();
+    uint32_t id = add_taken(1, D0 + H(10, 0), D0 + H(8, 0), 120);
+    for (size_t i = 0; i < st.n_logs; i++) if (st.logs[i].id == id) st.logs[i].status = HY_MISSED;
+    hy_api_logreq_t rq; memset(&rq, 0, sizeof rq);
+    rq.orig_ts = D0 + H(10, 0); rq.has_status = true; rq.status = HY_TAKEN;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_update(id, &rq));
+    const hy_log_t *e = log_by_id(id);
+    TEST_ASSERT_EQUAL(HY_TAKEN, e->status);
+    TEST_ASSERT_EQUAL_INT32((int32_t)((e->ts - e->slot) / 60), e->delta_min);
+}
+
+static void test_log_update_ts_range_and_full(void)
+{
+    two_time_a();
+    uint32_t id = add_taken(1, D0 + H(8, 10), D0 + H(8, 0), 10);
+    hy_api_logreq_t rq; memset(&rq, 0, sizeof rq);
+    rq.orig_ts = D0 + H(8, 10); rq.has_ts = true;
+    clk.valid = false;
+    rq.ts = 253402300800LL;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_update(id, &rq));
+    rq.ts = -5;
+    TEST_ASSERT_EQUAL_INT(HY_E_INVALID, hy_act_log_update(id, &rq));
+    TEST_ASSERT_EQUAL_INT(0, st.updates);
 }
 
 static void test_log_update_note_and_errors(void)
@@ -1483,6 +1544,10 @@ int main(void)
     RUN_TEST(test_delete_archived);
     RUN_TEST(test_delete_archived_plain_port);
     RUN_TEST(test_delete_log_failure_keeps_med);
+    RUN_TEST(test_delete_purge_failure_keeps_med);
+    RUN_TEST(test_delete_save_failure_publishes_log_edit);
+    RUN_TEST(test_log_update_missed_to_taken_recomputes);
+    RUN_TEST(test_log_update_ts_range_and_full);
     RUN_TEST(test_log_update_recomputes_slot);
     RUN_TEST(test_log_update_future_refused);
     RUN_TEST(test_log_update_status_change);

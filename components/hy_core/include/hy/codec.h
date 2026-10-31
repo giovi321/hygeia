@@ -52,9 +52,7 @@ hy_err_t hy_meds_from_json(const char *json, hy_med_t *out, size_t max, size_t *
 
 /* The medicines file also carries "next_id": the id the next new medicine takes, so a deleted id is never
  * reused. hy_meds_to_json writes max id + 1; the _next form writes the given value. On decode it is optional
- * (absent: max id + 1, capped at 0xFFFFFFFF), a non-number or a value outside 0..0xFFFFFFFF gives
- * HY_E_INVALID when next_id is non-NULL. next_id may be NULL (the field is then not looked at); hy_meds_from_json
- * ignores it. */
+ * (absent or malformed: max id + 1, capped at 0xFFFFFFFF). next_id may be NULL; hy_meds_from_json ignores it. */
 char    *hy_meds_to_json_next(const hy_med_t *meds, size_t n, uint32_t next_id);
 hy_err_t hy_meds_from_json_next(const char *json, hy_med_t *out, size_t max, size_t *n, uint32_t *next_id);
 

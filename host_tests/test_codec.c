@@ -227,9 +227,15 @@ void test_next_id_roundtrip(void)
     TEST_ASSERT_EQUAL(HY_OK, hy_meds_from_json_next(js, d, 8, &n, &next));
     TEST_ASSERT_EQUAL_UINT32(mx + 1, next);
     free(js);
-    /* wrong type */
-    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_meds_from_json_next("{\"v\":1,\"meds\":[],\"next_id\":\"x\"}", d, 8, &n, &next));
-    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_meds_from_json_next("{\"v\":1,\"meds\":[],\"next_id\":-1}", d, 8, &n, &next));
+    /* a malformed value counts as absent: the medicines still load */
+    const char *bad[] = { "\"x\"", "-1", "1.5", "5000000000", "[]" };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        char doc[128];
+        snprintf(doc, sizeof doc, "{\"v\":1,\"meds\":[{\"id\":3,\"code\":\"A\",\"name\":\"a\"}],\"next_id\":%s}", bad[i]);
+        next = 0;
+        TEST_ASSERT_EQUAL_MESSAGE(HY_OK, hy_meds_from_json_next(doc, d, 8, &n, &next), bad[i]);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, next, bad[i]);
+    }
 }
 
 void test_next_id_absent_default(void)

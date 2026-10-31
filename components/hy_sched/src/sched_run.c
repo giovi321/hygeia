@@ -319,12 +319,16 @@ static int local_minute_now(void)
 static void play_chime(void)
 {
     const hy_settings_t *st = hy_settings();
-    int lm = st->quiet_from != st->quiet_to ? local_minute_now() : -1;
+    bool quiet = false;
+    if (st->sound && !st->dnd && st->quiet_from != st->quiet_to) {
+        int lm = local_minute_now();
+        quiet = lm >= 0 && hy_quiet_now(st->quiet_from, st->quiet_to, (uint16_t)lm);
+    }
     if (!st->sound) {
         ESP_LOGI(TAG, "chime silent (sound off)");
     } else if (st->dnd) {
         ESP_LOGI(TAG, "chime silent (do not disturb)");
-    } else if (lm >= 0 && hy_quiet_now(st->quiet_from, st->quiet_to, (uint16_t)lm)) {
+    } else if (quiet) {
         ESP_LOGI(TAG, "chime silent (quiet hours)");
     } else {
         if (!hy_audio_ok()) {
