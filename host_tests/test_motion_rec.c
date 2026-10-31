@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,7 +24,12 @@ static bool load(const char *name, rec_t *r)
     r->s = NULL;
     r->n = 0;
     FILE *f = fopen(path, "r");
-    if (!f) return false;
+    if (!f) {
+        if (errno == ENOENT) return false;   /* only a missing file is ignored */
+        char msg[640];
+        snprintf(msg, sizeof msg, "cannot open %s: %s", path, strerror(errno));
+        TEST_FAIL_MESSAGE(msg);
+    }
     char line[128];
     TEST_ASSERT_NOT_NULL_MESSAGE(fgets(line, sizeof line, f), name);
     TEST_ASSERT_EQUAL_STRING_MESSAGE("t_ms,x,y,z", strtok(line, "\r\n"), name);
@@ -34,6 +40,10 @@ static bool load(const char *name, rec_t *r)
         unsigned long t;
         int x, y, z;
         TEST_ASSERT_EQUAL_MESSAGE(4, sscanf(line, "%lu,%d,%d,%d", &t, &x, &y, &z), name);
+        TEST_ASSERT_TRUE_MESSAGE(x >= INT16_MIN && x <= INT16_MAX && y >= INT16_MIN && y <= INT16_MAX &&
+                                 z >= INT16_MIN && z <= INT16_MAX, "value outside int16 range");
+        if (r->n > 0)
+            TEST_ASSERT_TRUE_MESSAGE((uint32_t)t - t0 > r->s[r->n - 1].t, "t_ms not increasing");
         if (r->n == cap) {
             cap = cap ? cap * 2 : 1024;
             r->s = realloc(r->s, (size_t)cap * sizeof *r->s);
@@ -56,14 +66,29 @@ static void unload(rec_t *r)
 #define LOAD_OR_IGNORE(name, r) \
     do { if (!load(name, &(r))) TEST_IGNORE_MESSAGE("missing data/motion/" name); } while (0)
 
-/* Number of detections over the whole file; the detector is reset at the first sample. */
-static int shake_count(const rec_t *r)
+/* Number of detections over the whole file; the detector is reset at the first sample. Prints one margin line:
+   shakes, the largest peak count reached (a detection counts as HY_SHK_PEAKS) and the largest |hp| on any axis,
+   hp = sample - base taken from the detector state just before the feed (0 on the first sample). */
+static int shake_count(const char *name, const rec_t *r)
 {
     hy_shake_t s;
     hy_shake_reset(&s, r->s[0].t);
-    int n = 0;
-    for (int i = 0; i < r->n; i++)
-        if (hy_shake_feed(&s, r->s[i].t, r->s[i].a)) n++;
+    int n = 0, max_count = 0, max_hp = 0;
+    for (int i = 0; i < r->n; i++) {
+        int32_t v[3] = {r->s[i].a.x, r->s[i].a.y, r->s[i].a.z};
+        for (int k = 0; k < 3; k++) {
+            int hp = s.primed ? (int)(v[k] - s.base[k]) : 0;
+            if (hp < 0) hp = -hp;
+            if (hp > max_hp) max_hp = hp;
+        }
+        if (hy_shake_feed(&s, r->s[i].t, r->s[i].a)) {
+            n++;
+            max_count = HY_SHK_PEAKS;
+        } else if (s.count > max_count) {
+            max_count = s.count;
+        }
+    }
+    printf("motion rec %s: shakes %d, max count %d, max hp %d mg\n", name, n, max_count, max_hp);
     return n;
 }
 
@@ -101,7 +126,7 @@ static void check_no_shake(const char *name)
 {
     rec_t r;
     if (!load(name, &r)) TEST_IGNORE_MESSAGE(name);
-    int n = shake_count(&r);
+    int n = shake_count(name, &r);
     unload(&r);
     TEST_ASSERT_EQUAL_MESSAGE(0, n, name);
 }
@@ -111,6 +136,7 @@ static void check_no_switch(const char *name)
     rec_t r;
     sw_t w;
     if (!load(name, &r)) TEST_IGNORE_MESSAGE(name);
+    (void)shake_count(name, &r);
     orient_run(&r, &w);
     unload(&r);
     TEST_ASSERT_EQUAL_MESSAGE(0, w.n, name);
@@ -120,7 +146,7 @@ static void test_shake_firm(void)
 {
     rec_t r;
     LOAD_OR_IGNORE("shake_firm.csv", r);
-    int n = shake_count(&r);
+    int n = shake_count("shake_firm.csv", &r);
     unload(&r);
     TEST_ASSERT_EQUAL(3, n);
 }
@@ -129,9 +155,8 @@ static void test_shake_light(void)
 {
     rec_t r;
     LOAD_OR_IGNORE("shake_light.csv", r);
-    int n = shake_count(&r);
+    (void)shake_count("shake_light.csv", &r);   /* informative: the margin line is the output */
     unload(&r);
-    printf("shake_light.csv: %d shakes (informative)\n", n);
 }
 
 static void test_tap_desk(void)     { check_no_shake("tap_desk.csv"); }
@@ -146,6 +171,7 @@ static void test_rotate_cycle(void)
     rec_t r;
     sw_t w;
     LOAD_OR_IGNORE("rotate_cycle.csv", r);
+    (void)shake_count("rotate_cycle.csv", &r);
     orient_run(&r, &w);
     TEST_ASSERT_EQUAL(4, w.n);
     hy_rot_t prev = w.init;
