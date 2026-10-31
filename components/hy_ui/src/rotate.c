@@ -110,6 +110,18 @@ bool rotate_locked(void)
     return s_locked;
 }
 
+#if CONFIG_HY_DEBUG_CONSOLE
+void rotate_debug_state(void)
+{
+    if (s_has_pending) {
+        ESP_LOGI(TAG, "state: applied %u, pending %u, lock %d", (unsigned)hy_board_rotation() * 90,
+                 (unsigned)s_pending * 90, s_locked);
+    } else {
+        ESP_LOGI(TAG, "state: applied %u, pending none, lock %d", (unsigned)hy_board_rotation() * 90, s_locked);
+    }
+}
+#endif
+
 void rotate_force(hy_rot_t r)
 {
     s_has_pending = false;

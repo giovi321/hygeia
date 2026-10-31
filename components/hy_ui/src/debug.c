@@ -829,11 +829,17 @@ static void job_madctl(const char *arg)
 static void job_rot(const char *arg)
 {
     int r;
-    if (sscanf(arg, "%d", &r) != 1 || r < 0 || r > 3) {
-        ESP_LOGI(TAG, "rot: %u (usage: rot <0-3>)", (unsigned)hy_board_rotation());
-        return;
+    if (arg[0] == '\0') {
+        rotate_debug_state();
+    } else if (strcmp(arg, "lock on") == 0) {
+        rotate_set_lock(true);
+    } else if (strcmp(arg, "lock off") == 0) {
+        rotate_set_lock(false);
+    } else if (sscanf(arg, "%d", &r) == 1 && r >= 0 && r <= 3) {
+        rotate_force((hy_rot_t)r);
+    } else {
+        ESP_LOGW(TAG, "usage: rot | rot lock on|off | rot <0-3>");
     }
-    rotate_force((hy_rot_t)r);
 }
 
 static void run_job(void *arg)
