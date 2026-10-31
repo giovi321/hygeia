@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "cJSON.h"
 #include "esp_http_server.h"
 #include "hy/api.h"
 #include "hy/routes.h"
@@ -80,6 +81,10 @@ void web_ui_pair_show(void);
 void web_ui_pair_hide(int reason);
 void web_ui_toast_ok(const char *text);
 void web_ui_toast_info(const char *text);
+/* Calls the registered power_off callback in the LVGL task (hy_power_off() when none is registered) */
+void web_ui_power_off(void);
+/* The registered callbacks or NULL; read it only from the LVGL task */
+const hy_web_ui_t *web_ui(void);
 
 /* ---- pairing state (h_core.c) ---- */
 
@@ -134,3 +139,52 @@ void      web_ws_debug(void);
 /* true when the Host header is allowed; else sends 302 to the portal (AP mode) or 421 and returns false. api: JSON
  * error body with no-store. */
 bool web_host_check(httpd_req_t *req, const web_net_t *net, bool api);
+
+/* ---- REST helpers (h_util.c) ---- */
+
+#include "bridge.h"
+#include "hy/store.h"
+
+/* A job whose context starts with "const char *body" (set to a private copy of the request body, valid as long as the
+ * job runs, which can outlive the handler after a timeout) followed by the handler's own fields. ctx_size covers the
+ * whole struct. NULL on no memory. */
+hy_job_t *web_job_new(web_req_t *r, void (*fn)(void *), size_t ctx_size);
+/* hy_job_run on a job from web_job_new, after the handler filled its input fields in the context. Returns the
+ * context; on a timeout the 503 busy answer is already sent in *sent, the job is released and NULL comes back.
+ * Otherwise the caller reads the context and then calls hy_job_put(j). */
+void *web_job_go(web_req_t *r, hy_job_t *j, uint32_t timeout_ms, esp_err_t *sent);
+/* 500 "internal" for a failed web_job_new */
+esp_err_t web_oom(web_req_t *r);
+
+/* hy_api_err_from mapping with a readable message */
+esp_err_t web_fail(web_req_t *r, hy_err_t e);
+esp_err_t web_fail_api(web_req_t *r, const hy_api_err_t *e);
+/* Prints o, deletes it and sends it; o NULL gives 500 */
+esp_err_t web_send_cjson(web_req_t *r, int status, cJSON *o);
+/* "{}" when the request has no body, so a body-less action parses as an empty object */
+const char *web_body_or_empty(const web_req_t *r);
+/* Value of a query parameter of the request URI, false when absent or longer than len - 1 */
+bool web_query_get(const web_req_t *r, const char *key, char *out, size_t len);
+/* The query string of the request URI without the "?", "" when none */
+const char *web_query(const web_req_t *r);
+/* hy_store query_log of one medicine (0 = all) keeping the newest entries: a full buffer narrows the window from its
+ * old end until the answer fits (LVGL task) */
+size_t web_log_window(uint32_t med_id, int64_t from, int64_t to, hy_log_t *out, size_t cap);
+
+/* Growing PSRAM text buffer for answers too large for the stack */
+typedef struct {
+    char *p;
+    size_t len, cap;
+    bool bad;
+} web_sb_t;
+void web_sb_add(web_sb_t *b, const char *s, size_t n);
+void web_sb_str(web_sb_t *b, const char *s);
+void web_sb_fmt(web_sb_t *b, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+/* A JSON string literal of s (quotes, backslash and control bytes escaped) */
+void web_sb_jstr(web_sb_t *b, const char *s);
+void web_sb_free(web_sb_t *b);
+/* Sends the buffer as JSON (500 when it ran out of memory) and frees it */
+esp_err_t web_sb_send(web_req_t *r, int status, web_sb_t *b);
+
+/* YYYYMMDD as "YYYY-MM-DD" */
+void web_date_str(int32_t ymd, char out[11]);

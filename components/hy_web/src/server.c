@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/net.h"
+#include "hy/power_run.h"
 #include "lvgl.h"
 #include "lwip/ip4_addr.h"
 #include "bridge.h"
@@ -537,7 +538,7 @@ void hy_web_set_ui(const hy_web_ui_t *ui)
 
 static void ui_post(void (*fn)(void *), void *arg)
 {
-    if (!s_ui || !hy_board_display()) {
+    if (!hy_board_display()) {
         return;
     }
     if (!hy_board_lock(1000)) {
@@ -582,6 +583,18 @@ static void a_toast_info(void *arg)
     }
 }
 
+static void a_power_off(void *arg)
+{
+    (void)arg;
+    if (s_ui && s_ui->power_off) {
+        s_ui->power_off();
+    } else {
+        hy_power_off();
+    }
+}
+
+const hy_web_ui_t *web_ui(void) { return s_ui; }
+void web_ui_power_off(void) { ui_post(a_power_off, NULL); }
 void web_ui_pair_show(void) { ui_post(a_pair_show, NULL); }
 void web_ui_pair_hide(int reason) { ui_post(a_pair_hide, (void *)(intptr_t)reason); }
 void web_ui_toast_ok(const char *text) { ui_post(a_toast_ok, (void *)text); }

@@ -5,6 +5,11 @@ idf_component_register(
         "src/session.c"
         "src/ws.c"
         "src/h_core.c"
+        "src/h_util.c"
+        "src/h_meds.c"
+        "src/h_log.c"
+        "src/h_settings.c"
+        "src/h_wifi.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -20,11 +25,13 @@ idf_component_register(
         lwip
         mbedtls
         nvs_flash
+        hy_audio
         hy_board
         hy_clock
         hy_net
         hy_power
         hy_sched
+        hy_store
         lvgl__lvgl
         espressif__cjson
     WHOLE_ARCHIVE
