@@ -9,7 +9,6 @@
 #include "hy/tzdb.h"
 #include "hy/tzlock.h"
 
-
 static const struct { hy_err_t e; int http; const char *code; const char *field; } ERR_MAP[] = {
     { HY_E_INVALID,      400, "invalid",       "" },
     { HY_E_CODE,         422, "code",          "code" },

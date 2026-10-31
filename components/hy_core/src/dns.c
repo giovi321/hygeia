@@ -41,8 +41,8 @@ size_t hy_dns_answer(const uint8_t *q, size_t qlen, uint32_t ip_be, uint8_t *out
 
     out[0] = q[0];
     out[1] = q[1];
-    out[2] = (uint8_t)(0x84 | (q[2] & 0x01)); /* QR, AA, RD echoed */
-    out[3] = 0x80;                            /* RA, RCODE 0 */
+    out[2] = (uint8_t)(0x84 | (q[2] & 0x01)); /* QR, AA, RD echoed; TC clear */
+    out[3] = 0x80;                            /* RA; Z, AD, CD clear; RCODE 0 */
     out[4] = 0; out[5] = 1;                   /* QDCOUNT */
     out[6] = 0; out[7] = answer ? 1 : 0;      /* ANCOUNT */
     memset(out + 8, 0, 4);                    /* NSCOUNT, ARCOUNT */

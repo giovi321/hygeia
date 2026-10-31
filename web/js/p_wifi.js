@@ -36,6 +36,14 @@
     function fail(e) { var t = HY.errText(e); if (t) { HY.toast(t); } }
 
     function hostUrl(host) { return "http://" + host + ".local"; }
+    var AP_URL = "http://192.168.4.1";   // name lookup through .local works in Wi-Fi mode only
+
+    // True when this page was opened by the device's host name (not by its IP address).
+    function openedByName(host) {
+      var h = location.hostname.toLowerCase();
+      host = String(host || "").toLowerCase();
+      return !!host && (h === host || h.indexOf(host + ".") === 0);
+    }
 
     // Where to find the device after a mode change; the page loses its connection.
     function warning(target) {
@@ -44,7 +52,7 @@
           " and open " + hostUrl(w.host);
       }
       if (target === "ap") {
-        return "The page will lose its connection. Join the access point " + w.ap_ssid + " and open " + hostUrl(w.host);
+        return "The page will lose its connection. Join the access point " + w.ap_ssid + " and open " + AP_URL;
       }
       return "The page will lose its connection. Turn Wi-Fi on again from the device or its power button";
     }
@@ -154,14 +162,25 @@
       var setP = HY.h("button", { class: "btn p", type: "button", onclick: function () {
         eP.textContent = "";
         if (pass.value.length < 8 || pass.value.length > 63) { eP.textContent = "The password is 8 to 63 characters"; return; }
-        setP.disabled = true;
-        HY.api("PUT", "/api/wifi/ap", { password: pass.value }).then(function () {
-          pass.value = ""; pass.type = "password"; show.textContent = "Show"; show.disabled = true; setP.disabled = false;
-          HY.toast("Access point password changed");
-        }, function (e) {
-          setP.disabled = false;
-          if (e.field === "password") { eP.textContent = e.message; } else { fail(e); }
-        });
+        var send = function () {
+          setP.disabled = true;
+          HY.api("PUT", "/api/wifi/ap", { password: pass.value }).then(function () {
+            pass.value = ""; pass.type = "password"; show.textContent = "Show"; show.disabled = true; setP.disabled = false;
+            HY.toast("Access point password changed");
+            if (w.mode === "ap") {
+              noteBox.hidden = false;
+              noteBox.textContent = "The access point restarts with the new password. Join " + w.ap_ssid + " again with it and open " + AP_URL;
+            }
+          }, function (e) {
+            setP.disabled = false;
+            if (e.field === "password") { eP.textContent = e.message; } else { fail(e); }
+          });
+        };
+        if (w.mode !== "ap") { send(); return; }
+        // This page runs over the access point: it restarts and every phone and computer has to join again.
+        HY.confirm("Change the access point password?", "The page will lose its connection. Join " + w.ap_ssid +
+          " again with the new password, then open " + AP_URL, true, "Change")
+          .then(function (yes) { if (yes) { send(); } });
       } }, "Change password");
       var host = HY.h("input", { id: "w-host", type: "text", maxlength: "32", value: w.host, autocomplete: "off", autocapitalize: "off", spellcheck: "false" });
       var eH = HY.h("div", { class: "ferr", role: "alert" });
@@ -171,9 +190,17 @@
           eH.textContent = "1 to 32 of a to z, 0 to 9 and -, not starting with -"; return;
         }
         setH.disabled = true;
+        var old = w.host;
         HY.api("PUT", "/api/wifi/ap", { host: host.value }).then(function (r) {
           setH.disabled = false;
           HY.toast("Host name is now " + r.host);
+          if (openedByName(old)) {
+            // The old name no longer answers, and the session cookie belongs to it.
+            noteBox.hidden = false;
+            noteBox.textContent = "Open " + (w.mode === "ap" ? AP_URL : hostUrl(r.host)) + ". The browser treats the new name as a new site, so you may " +
+              "need to pair this browser again there";
+            return;
+          }
           load();
         }, function (e) {
           setH.disabled = false;

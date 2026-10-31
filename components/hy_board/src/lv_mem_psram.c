@@ -46,6 +46,7 @@ void lv_free_core(void *p)
     heap_caps_free(p);
 }
 
+/* Reports the whole PSRAM heap only: not LVGL's share of it, and not LVGL blocks that fell back to internal RAM. */
 void lv_mem_monitor_core(lv_mem_monitor_t *mon_p)
 {
     multi_heap_info_t info;

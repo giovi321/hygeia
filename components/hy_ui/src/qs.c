@@ -103,7 +103,7 @@ static void toggle_dnd(void)
     refresh();
 }
 
-static void net_mode(hy_net_mode_t m)
+static bool net_mode(hy_net_mode_t m)
 {
     esp_err_t err = hy_net_set_mode(m, NULL);   /* on battery this counts as starting the radio there */
     ESP_LOGI(TAG, "net mode %d: %s", (int)m, esp_err_to_name(err));
@@ -111,6 +111,7 @@ static void net_mode(hy_net_mode_t m)
         toast_show_info(HY_S_NET_ERR);
     }
     net_ui_refresh();
+    return err == ESP_OK;
 }
 
 /* Wi-Fi: a client in any step gives off; off, paused or the access point gives the client */
@@ -131,8 +132,9 @@ static void toggle_ap(void)
         net_mode(HY_NET_OFF);
         return;
     }
-    net_mode(HY_NET_AP);
-    ui_nav_push(HY_V_AP_INFO);
+    if (net_mode(HY_NET_AP)) {
+        ui_nav_push(HY_V_AP_INFO);
+    }
 }
 
 static void tile_tap(void *ud)
@@ -179,6 +181,8 @@ static void make_tile(int idx, const char *title)
     lv_obj_t *l = ui_label(t, hy_type.body_bold, HY_C_TEXT, title);
     lv_obj_set_pos(l, 16, 18);
     s_sub[idx] = ui_label(t, hy_type.status, HY_C_TEXT2, "");
+    lv_obj_set_width(s_sub[idx], TILE_W - 2 * 16);   /* a long network name is cut, not wrapped */
+    lv_label_set_long_mode(s_sub[idx], LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_pos(s_sub[idx], 16, 58);
     s_tile[idx] = t;
 }

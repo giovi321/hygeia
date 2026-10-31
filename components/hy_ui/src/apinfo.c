@@ -101,6 +101,7 @@ static void fill(void)
         lv_obj_set_pos(l, 0, 44 + QR_BLOCK_H + 36);
         memset(pass, 0, sizeof pass);
         memset(qr, 0, sizeof qr);
+        memset(line, 0, sizeof line);
     } else {
         lv_label_set_text(s_title, HY_S_AP_OPEN);
         lv_label_set_text(s_btn_text, HY_S_DONE);

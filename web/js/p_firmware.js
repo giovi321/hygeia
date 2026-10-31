@@ -69,6 +69,11 @@ HY.settingsLinks.push({ href: "#/settings/firmware", text: "Firmware", note: "Ve
         if (!HY.alive(token)) { return; }
         if (Date.now() - t0 >= POLL_LIMIT_MS) {
           lock(false); bar.hidden = true;
+          if (same && !oldFw) {   // the version before the update was not known
+            say("The device still answers as version " + same + " and did not restart within 60 seconds. If that is the version you " +
+              "uploaded, the update is done. Otherwise upload again", true);
+            return;
+          }
           if (same) {
             say("The device still reports version " + same + ", the version it had before. If you uploaded a file with the same version, " +
               "the update is done. Otherwise the restart did not happen: upload again", true);

@@ -10,3 +10,4 @@ secrets*.h
 .env
 .plans/
 build-rel/
+__pycache__/

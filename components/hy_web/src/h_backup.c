@@ -135,9 +135,11 @@ static void *psram_calloc(size_t n)
 }
 
 /* Runs fn on a private copy of io (size bytes) and copies the context back on success. A job that times out may run
- * later on its own copy; the caller's buffer is never touched after the return. */
+ * later on its own copy; the caller's buffer is never touched after the return. Each job counts as activity, so a
+ * long import or export on battery does not hit the radio's idle limit. */
 static esp_err_t run_job(void (*fn)(void *), void *io, size_t size, uint32_t timeout_ms)
 {
+    hy_net_activity();
     hy_job_t *j = hy_job_new(fn, size);
     if (!j) {
         return ESP_ERR_NO_MEM;

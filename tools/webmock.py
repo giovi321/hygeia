@@ -326,8 +326,6 @@ class Handler(BaseHTTPRequestHandler):
     # ---- websocket ----
     def ws(self):
         key = self.headers.get("Sec-WebSocket-Key")
-        if os.environ.get("WEBMOCK_VERBOSE"):
-            print("ws upgrade, origin", self.headers.get("Origin"), file=sys.stderr, flush=True)
         if not key or (self.dev.args.unpaired and self.session() not in self.dev.sessions):
             return self.send(401, {"error": "unpaired", "field": None, "message": "This browser is not paired"})
         acc = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
