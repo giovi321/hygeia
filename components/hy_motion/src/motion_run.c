@@ -241,7 +241,15 @@ static void motion_task(void *arg)
                 continue;
             }
             imu_bad_logged = false;
-            esp_err_t rerr = hy_board_imu_wait_ready(100);   /* the first conversion, not a fixed delay */
+            /* Wait for data, drop that sample (it may be stale or unsettled), wait for the next one */
+            int16_t drop[3];
+            esp_err_t rerr = hy_board_imu_wait_ready(100);
+            if (rerr == ESP_OK) {
+                rerr = hy_board_imu_read(drop);
+            }
+            if (rerr == ESP_OK) {
+                rerr = hy_board_imu_wait_ready(100);
+            }
             if (rerr != ESP_OK) {
                 ESP_LOGW(TAG, "motion: no first sample after power up: %s", esp_err_to_name(rerr));
             }
