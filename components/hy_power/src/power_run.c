@@ -89,13 +89,17 @@ static int64_t s_sleep_t0_ms;              /* s_sleep_mu */
 /* sleepstat counters, all under s_mux. They live in RTC slow memory without initialisation, so a software, panic,
  * watchdog or brownout reset keeps them and a power-on reset (or a wrong magic word) clears them. Plain loads and
  * stores to that memory are safe from the ISRs: it is not behind the flash cache. */
-#define CTR_MAGIC 0x48595343u   /* "HYSC": change it when the struct layout changes */
+#define CTR_MAGIC 0x48595344u   /* "HYSD": change it when the struct layout changes */
+#define BOOT_HIST 4             /* boots kept with their reset reason and last known uptime */
+#define UPTIME_SAVE_S 10        /* the current boot's uptime goes to RTC memory at most this often */
 typedef struct {
     uint32_t magic;
     uint32_t boots;                 /* boots since the counters were last cleared, this one included */
     uint32_t entries, wake[W_N], chime_batt;
     uint32_t key_isr, key_isr_asleep, touch_isr, touch_isr_asleep;   /* all, and those that arrived while asleep */
     int64_t ms_asleep, longest_awake_off_ms;
+    uint32_t hist_reason[BOOT_HIST];   /* [0] is this boot, [1] the one before, and so on */
+    uint32_t hist_up_s[BOOT_HIST];     /* the last uptime seen for that boot, up to UPTIME_SAVE_S short */
 } sleep_ctr_t;
 static RTC_NOINIT_ATTR sleep_ctr_t s_ctr;
 static int64_t s_stretch_t0_ms;
@@ -129,6 +133,12 @@ static void ctr_init(void)
         s_ctr.magic = CTR_MAGIC;
     }
     s_ctr.boots++;
+    for (int i = BOOT_HIST - 1; i > 0; i--) {
+        s_ctr.hist_reason[i] = s_ctr.hist_reason[i - 1];
+        s_ctr.hist_up_s[i] = s_ctr.hist_up_s[i - 1];
+    }
+    s_ctr.hist_reason[0] = (uint32_t)esp_reset_reason();
+    s_ctr.hist_up_s[0] = 0;
 }
 
 static int64_t mono_s(void)
@@ -710,13 +720,19 @@ static uint32_t read_battery(int64_t mono, bool *refake)
 static void power_task(void *arg)
 {
     (void)arg;
-    int64_t last_read = INT64_MIN / 2, last_alive = INT64_MIN / 2, last_log = INT64_MIN / 2;
+    int64_t last_read = INT64_MIN / 2, last_alive = INT64_MIN / 2, last_log = INT64_MIN / 2, last_up = INT64_MIN / 2;
     hy_power_state_t st;
     hy_power_state(&st);
     int32_t saved_rate = st.batt.rate_cph;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(s_asleep ? SLEEP_LOOP_MS : LOOP_MS));
         int64_t mono = mono_s();
+        if (mono - last_up >= UPTIME_SAVE_S) {   /* RTC memory, no flash write */
+            last_up = mono;
+            portENTER_CRITICAL(&s_mux);
+            s_ctr.hist_up_s[0] = (uint32_t)mono;
+            portEXIT_CRITICAL(&s_mux);
+        }
 
         uint32_t irq = hy_board_pmu_irq();
         portENTER_CRITICAL(&s_mux);
@@ -986,6 +1002,9 @@ void hy_power_sleep_stats(void)
     int64_t ms = s_ctr.ms_asleep, longest = s_ctr.longest_awake_off_ms;
     uint32_t keys = s_ctr.key_isr, keys_a = s_ctr.key_isr_asleep, touches = s_ctr.touch_isr, touches_a = s_ctr.touch_isr_asleep;
     bool req = s_sleep_req, vbus = s_vbus_real;
+    uint32_t h_reason[BOOT_HIST], h_up[BOOT_HIST];
+    memcpy(h_reason, s_ctr.hist_reason, sizeof h_reason);
+    memcpy(h_up, s_ctr.hist_up_s, sizeof h_up);
     portEXIT_CRITICAL(&s_mux);
     bool asleep = s_asleep;
     if (asleep) {
@@ -1001,6 +1020,15 @@ void hy_power_sleep_stats(void)
              w[W_TIMER]);
     ESP_LOGI(TAG, "sleepstat boot: uptime %lld s, reset reason %s, boots since power-on %" PRIu32 " (counters cover all boots since power-on)",
              (long long)mono_s(), reset_name(esp_reset_reason()), boots);
+    /* Newest first. The current boot shows its uptime now; earlier boots show the last uptime saved before the reset. */
+    char hist[160];
+    int hn = snprintf(hist, sizeof hist, "sleepstat boots:");
+    for (uint32_t i = 0; i < BOOT_HIST && i < boots && hn > 0 && hn < (int)sizeof hist; i++) {
+        uint32_t up = i == 0 ? (uint32_t)mono_s() : h_up[i];
+        hn += snprintf(hist + hn, sizeof hist - hn, "%s #%" PRIu32 " %s (up %" PRIu32 " s%s)", i ? "," : "", boots - i,
+                       reset_name((esp_reset_reason_t)h_reason[i]), up, i == 0 ? " now" : "");
+    }
+    ESP_LOGI(TAG, "%s", hist);
     ESP_LOGI(TAG, "key presses %" PRIu32 " (%" PRIu32 " while asleep)", keys, keys_a);
     ESP_LOGI(TAG, "touch irqs %" PRIu32 " (%" PRIu32 " while asleep)", touches, touches_a);
     /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
