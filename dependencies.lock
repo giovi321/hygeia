@@ -274,6 +274,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.6.59
+  espressif/mdns:
+    component_hash: ef0766474b37459f6ad22461e453a8713e780e831a7c993b16919d817988dff6
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.14.1
   espressif/usb:
     component_hash: 99eee72ea224d9117d4c342442717a1f20bf8112e2ab5d7d7038b827874f4c92
     dependencies:
@@ -405,10 +415,11 @@ dependencies:
 direct_dependencies:
 - espressif/cjson
 - espressif/esp_lvgl_port
+- espressif/mdns
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
 - waveshare/esp32_s3_touch_amoled_2_16
-manifest_hash: 47235984eb8e6a9b0e3e752f594fbca40463110fbb1647b6bfd6e960cd5b525c
+manifest_hash: 458785d492370f69647fd0136baa8981a79e67e1ec5ddc952e5dd21037235421
 target: esp32s3
 version: 3.0.0

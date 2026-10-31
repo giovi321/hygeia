@@ -13,7 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define MAX_CMDS 48
+#define MAX_CMDS 64
 #define LINE_MAX_LEN 96
 /* stdin is the USB Serial/JTAG VFS without the driver: a read never blocks, and without a USB host it returns EOF at
  * once. With a host, poll every 20 ms so commands answer promptly; light sleep is off on VBUS anyway. Without one

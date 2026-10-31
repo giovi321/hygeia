@@ -71,9 +71,10 @@ static bool s_alive_on;             /* the runner tracks: the power task's perio
 
 /* ---- sleep mode state ---- */
 /* W_UI: the LVGL task left the sleep mode itself (the screen left OFF before the pausing pass ended) */
-typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_UI, W_TIMER, W_N } wake_cause_t;
+/* W_NET: hy_power_net_hold(true) (the radio started) */
+typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_UI, W_TIMER, W_NET, W_N } wake_cause_t;
 static const char *const k_cause[W_N] = {"pwr", "usb", "touch", "key", "rtc", "next_wake", "batt", "debug",
-                                         "ui", "timer-only"};
+                                         "ui", "timer-only", "net"};
 static int64_t (*volatile s_next_wake_fn)(void);
 static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
 static StaticSemaphore_t s_sleep_mu_buf;
@@ -82,6 +83,7 @@ static bool s_lock_held;                   /* s_sleep_mu */
 static bool s_light;                       /* light sleep enabled in this sleep mode; s_sleep_mu */
 static volatile bool s_asleep;             /* LVGL paused by the sleep mode; written under s_sleep_mu and s_mux */
 static bool s_sleep_req;                   /* the UI asked for the sleep mode; s_mux */
+static uint8_t s_net_hold;                 /* hy_power_net_hold count: no sleep mode while non-zero; s_mux */
 static bool s_vbus_real = true;            /* the last PMU reading saw VBUS (fakebatt does not change it); true until
                                               the first good reading, so light sleep never starts on USB; s_mux */
 static volatile bool s_touch_isr, s_key_isr; /* set by the ISRs, taken under s_mux */
@@ -89,7 +91,7 @@ static int64_t s_sleep_t0_ms;              /* s_sleep_mu */
 /* sleepstat counters, all under s_mux. They live in RTC slow memory without initialisation, so a software, panic,
  * watchdog or brownout reset keeps them and a power-on reset (or a wrong magic word) clears them. Plain loads and
  * stores to that memory are safe from the ISRs: it is not behind the flash cache. */
-#define CTR_MAGIC 0x48595344u   /* "HYSD": change it when the struct layout changes */
+#define CTR_MAGIC 0x48595345u   /* "HYSE": change it when the struct layout changes */
 #define BOOT_HIST 4             /* boots kept with their reset reason and last known uptime */
 #define UPTIME_SAVE_S 10        /* the current boot's uptime goes to RTC memory at most this often */
 typedef struct {
@@ -104,6 +106,7 @@ typedef struct {
 static RTC_NOINIT_ATTR sleep_ctr_t s_ctr;
 static int64_t s_stretch_t0_ms;
 static bool s_logged_noreq;                /* the missing request was logged in this OFF stretch */
+static bool s_logged_held;                 /* the radio hold was logged in this OFF stretch */
 static bool s_stretch_open;                /* awake since a wake that left the screen OFF */
 
 static const char *reset_name(esp_reset_reason_t r)
@@ -477,6 +480,18 @@ static void enter_sleep(void)
         return;
     }
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
+    portENTER_CRITICAL(&s_mux);
+    bool held = s_net_hold > 0;
+    portEXIT_CRITICAL(&s_mux);
+    if (held && !s_asleep) {
+        /* The radio runs: LVGL keeps running with the screen OFF; the UI asks again on its next tick */
+        if (!s_logged_held) {
+            s_logged_held = true;
+            ESP_LOGI(TAG, "sleep mode: held by the radio");
+        }
+        xSemaphoreGive(s_sleep_mu);
+        return;
+    }
     bool asleep_now = s_asleep, requested = sleep_requested();
     if (asleep_now || !requested) {
         /* Asleep already is normal: the UI asks again in the pass that entered the mode. Only a missing request is
@@ -573,6 +588,7 @@ void hy_power_screen_off(bool off)
     portEXIT_CRITICAL(&s_mux);
     if (!off) {
         s_logged_noreq = false;   /* a new OFF stretch logs a missing request again */
+        s_logged_held = false;
     }
     if (off) {
         enter_sleep();   /* the UI calls this from the LVGL task: LVGL pauses after this lv_timer_handler pass */
@@ -586,6 +602,26 @@ void hy_power_screen_off(bool off)
 void hy_power_screen_state(uint8_t scr)
 {
     s_scr = scr;
+}
+
+void hy_power_net_hold(bool on)
+{
+    portENTER_CRITICAL(&s_mux);
+    if (on) {
+        if (s_net_hold < UINT8_MAX) {
+            s_net_hold++;
+        }
+    } else if (s_net_hold) {
+        s_net_hold--;
+    }
+    uint8_t n = s_net_hold;
+    portEXIT_CRITICAL(&s_mux);
+    ESP_LOGI(TAG, "net hold %s (%u)", on ? "on" : "off", (unsigned)n);
+    /* exit_sleep checks s_asleep under s_sleep_mu: a sleep entry that passed its hold check just before the count
+     * rose is ended here */
+    if (on && s_sleep_mu) {
+        exit_sleep(W_NET);
+    }
 }
 
 void hy_power_chime_on_battery(void)
@@ -1002,6 +1038,7 @@ void hy_power_sleep_stats(void)
     int64_t ms = s_ctr.ms_asleep, longest = s_ctr.longest_awake_off_ms;
     uint32_t keys = s_ctr.key_isr, keys_a = s_ctr.key_isr_asleep, touches = s_ctr.touch_isr, touches_a = s_ctr.touch_isr_asleep;
     bool req = s_sleep_req, vbus = s_vbus_real;
+    unsigned net_hold = s_net_hold;
     uint32_t h_reason[BOOT_HIST], h_up[BOOT_HIST];
     memcpy(h_reason, s_ctr.hist_reason, sizeof h_reason);
     memcpy(h_up, s_ctr.hist_up_s, sizeof h_up);
@@ -1011,13 +1048,14 @@ void hy_power_sleep_stats(void)
         ms += mono_ms() - s_sleep_t0_ms;
     }
     ESP_LOGI(TAG, "sleepstat: %s%s, entries %" PRIu32 ", asleep %lld ms total, chime moments on battery %" PRIu32
-             ", longest awake stretch while off %lld ms, requested %d, vbus %d",
+             ", longest awake stretch while off %lld ms, requested %d, vbus %d, net hold %u",
              asleep ? "asleep" : "awake", asleep ? (s_light ? " (light sleep)" : " (no light sleep)") : "", entries,
-             (long long)ms, chimes, (long long)longest, req, vbus);
+             (long long)ms, chimes, (long long)longest, req, vbus, net_hold);
     ESP_LOGI(TAG, "sleepstat wakes: pwr %" PRIu32 ", usb %" PRIu32 ", touch %" PRIu32 ", key %" PRIu32 ", rtc %" PRIu32
-             ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", ui %" PRIu32 ", timer-only %" PRIu32,
+             ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", ui %" PRIu32 ", timer-only %" PRIu32
+             ", net %" PRIu32,
              w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_UI],
-             w[W_TIMER]);
+             w[W_TIMER], w[W_NET]);
     ESP_LOGI(TAG, "sleepstat boot: uptime %lld s, reset reason %s, boots since power-on %" PRIu32 " (counters cover all boots since power-on)",
              (long long)mono_s(), reset_name(esp_reset_reason()), boots);
     /* Newest first. The current boot shows its uptime now; earlier boots show the last uptime saved before the reset. */

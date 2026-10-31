@@ -5,3 +5,4 @@ dependencies:
   espressif/esp_lvgl_port: "==2.9.0"
   espressif/cjson: "==1.7.19~2"
   joltwallet/littlefs: "==1.23.1"
+  espressif/mdns: "==1.14.1"

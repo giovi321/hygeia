@@ -1,0 +1,26 @@
+idf_component_register(
+    SRCS
+        "src/net.c"
+        "src/net_nvs.c"
+        "src/captive.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        hy_core
+        esp_common
+    PRIV_REQUIRES
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_timer
+        lwip
+        nvs_flash
+        bootloader_support
+        freertos
+        hy_board
+        hy_clock
+        hy_power
+        hy_sched
+        lvgl__lvgl
+        espressif__mdns
+)

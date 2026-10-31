@@ -38,6 +38,10 @@ void      hy_power_set_next_wake_fn(int64_t (*fn)(void));
  * CPU-max PM lock is held whenever the sleep mode is not on. */
 void      hy_power_screen_off(bool off);
 void      hy_power_screen_state(uint8_t scr);    /* batlog scr column: 0 on, 1 dim, 2 off */
+/* Any task, after hy_power_init. While held, the sleep mode is not entered and an active one ends at once (LVGL
+ * resumes, no light sleep); the screen state is untouched. hy_net holds it while the radio is on. Counted:
+ * hold(true) twice needs two releases. */
+void      hy_power_net_hold(bool on);
 void      hy_power_chime_on_battery(void);       /* sleepstat: a chime moment while on battery */
 /* Heartbeat: NVS namespace "power", key "alive" (i64), key "clean" (u8). */
 bool      hy_power_alive_load(hy_alive_t *out);

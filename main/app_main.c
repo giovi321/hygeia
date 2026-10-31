@@ -18,6 +18,7 @@
 #include "hy/clock.h"
 #include "hy/motion.h"
 #include "hy/motion_run.h"
+#include "hy/net.h"
 #include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
@@ -202,6 +203,7 @@ static void cmd_settz(const char *args)
     hy_ui_debug_settz(iana);
 }
 static void cmd_settings(const char *args) { (void)args; hy_ui_debug_settings(); }
+static void cmd_wifi(const char *args) { hy_net_debug(args); }
 #endif
 
 #define MEDS_FILE "/data/meds.json"
@@ -359,6 +361,9 @@ void app_main(void)
     }
 
     init_storage();
+    esp_err_t nerr = hy_net_init();   /* NVS is up: networks, access point password; the radio stays off */
+    ESP_LOGI(TAG, "hy_net_init: %s", esp_err_to_name(nerr));
+    hy_net_set_keep_batt(settings.wifi_keep_batt);
     if (err == ESP_OK) {
         esp_err_t perr = hy_power_init();
         ESP_LOGI(TAG, "hy_power_init: %s", esp_err_to_name(perr));
@@ -377,6 +382,7 @@ void app_main(void)
         esp_err_t aerr = hy_audio_init();   /* about 0.4 s: not on the splash's path */
         ESP_LOGI(TAG, "hy_audio_init: %s", esp_err_to_name(aerr));
     }
+    hy_net_start();   /* after hy_power_start: the radio rule reads USB from the power state */
 
 #if CONFIG_HY_DEBUG_CONSOLE
     console_register("boardtest", cmd_boardtest);
@@ -424,6 +430,7 @@ void app_main(void)
     console_register("madctl", cmd_madctl);
     console_register("rot", cmd_rot);
     console_register("shake", cmd_shake);
+    console_register("wifi", cmd_wifi);
     console_start();
 #endif
 }
