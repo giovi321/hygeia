@@ -28,6 +28,16 @@ This is firmware version 0.3.0, a pre-release: Wi-Fi and the web UI come in a la
 
 The images are design mockups, not photos of the board.
 
+## Why a separate device
+
+I built Hygeia because a phone app made it too easy to put a dose off. An app lets you mark a dose as taken or snooze it from anywhere, even when you are nowhere near the medicines, and that is how doses get missed. Hygeia stays next to the medicines all the time. The reminder shows up where the pills are, so you see it when you are standing in front of them and log the dose there.
+
+The board is small and cheap. It runs on its own battery and sleeps when the screen is off, so you can move it around the house without a cable.
+
+It also works for people who do not use a smartphone, older people in particular. Daily use comes down to tapping a tile to log a dose and answering the reminder card when it appears. A carer can do the setup (medicines, times, doses) from a browser through the web UI, once the web UI exists; for now setup is done on the device.
+
+Technical users can go further and connect it to MQTT or webhooks to build automations, for example with Home Assistant. These integrations are planned and not built yet. The same device should suit both kinds of user, from someone who only taps tiles to someone wiring it into a home automation setup.
+
 ## What works today
 
 - Tiles with a code and a colour per medicine, tap to log, 5 second undo
