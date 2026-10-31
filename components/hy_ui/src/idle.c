@@ -289,7 +289,14 @@ static void event(hy_scr_ev_t ev, const char *why)
     const hy_settings_t *st = hy_settings();
     hy_scr_cfg_t cfg = {.dim_s = st->dim_s, .off_bat_s = st->off_bat_s, .off_usb_s = st->off_usb_s};
     hy_scr_t prev = s_shown;
+    bool usb_before = s_scr.usb;
     hy_scr_t now_st = hy_screen_event(&s_scr, ev, now, &cfg);
+    if (s_scr.usb != usb_before) {
+        ESP_LOGI(TAG, "screen: usb %d -> %d (%s)", usb_before, s_scr.usb, why ? why : names[ev]);
+        if (!s_scr.usb) {
+            ESP_LOGI(TAG, "screen: off timer on battery %d s", (int)st->off_bat_s);
+        }
+    }
     if (now_st != prev) {
         apply(prev, now_st, why ? why : names[ev]);
     }

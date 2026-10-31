@@ -21,7 +21,9 @@
 #include "batlog.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
+#include "esp_attr.h"
 #include "esp_pm.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -78,18 +80,56 @@ static StaticSemaphore_t s_sleep_mu_buf;
 static esp_pm_lock_handle_t s_pm_lock;     /* CPU max: see awake_lock_wanted */
 static bool s_lock_held;                   /* s_sleep_mu */
 static bool s_light;                       /* light sleep enabled in this sleep mode; s_sleep_mu */
-/* ISR event counts (under s_mux): all, and those that arrived while the sleep mode was active */
-static uint32_t s_n_key_isr, s_n_key_isr_asleep, s_n_touch_isr, s_n_touch_isr_asleep;
 static volatile bool s_asleep;             /* LVGL paused by the sleep mode; written under s_sleep_mu and s_mux */
 static bool s_sleep_req;                   /* the UI asked for the sleep mode; s_mux */
 static bool s_vbus_real = true;            /* the last PMU reading saw VBUS (fakebatt does not change it); true until
                                               the first good reading, so light sleep never starts on USB; s_mux */
 static volatile bool s_touch_isr, s_key_isr; /* set by the ISRs, taken under s_mux */
 static int64_t s_sleep_t0_ms;              /* s_sleep_mu */
-/* sleepstat counters; s_mux */
-static uint32_t s_n_entries, s_n_wake[W_N], s_n_chime_batt;
-static int64_t s_ms_asleep, s_longest_awake_off_ms, s_stretch_t0_ms;
+/* sleepstat counters, all under s_mux. They live in RTC slow memory without initialisation, so a software, panic,
+ * watchdog or brownout reset keeps them and a power-on reset (or a wrong magic word) clears them. Plain loads and
+ * stores to that memory are safe from the ISRs: it is not behind the flash cache. */
+#define CTR_MAGIC 0x48595343u   /* "HYSC": change it when the struct layout changes */
+typedef struct {
+    uint32_t magic;
+    uint32_t boots;                 /* boots since the counters were last cleared, this one included */
+    uint32_t entries, wake[W_N], chime_batt;
+    uint32_t key_isr, key_isr_asleep, touch_isr, touch_isr_asleep;   /* all, and those that arrived while asleep */
+    int64_t ms_asleep, longest_awake_off_ms;
+} sleep_ctr_t;
+static RTC_NOINIT_ATTR sleep_ctr_t s_ctr;
+static int64_t s_stretch_t0_ms;
+static bool s_logged_asleep, s_logged_noreq;   /* an early return of enter_sleep was logged in this OFF stretch */
 static bool s_stretch_open;                /* awake since a wake that left the screen OFF */
+
+static const char *reset_name(esp_reset_reason_t r)
+{
+    switch (r) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_EXT: return "external";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "other watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "sdio";
+    case ESP_RST_USB: return "usb";
+    case ESP_RST_JTAG: return "jtag";
+    default: return "unknown";
+    }
+}
+
+/* Once per boot, before any ISR is armed. */
+static void ctr_init(void)
+{
+    if (s_ctr.magic != CTR_MAGIC || esp_reset_reason() == ESP_RST_POWERON) {
+        memset(&s_ctr, 0, sizeof s_ctr);
+        s_ctr.magic = CTR_MAGIC;
+    }
+    s_ctr.boots++;
+}
 
 static int64_t mono_s(void)
 {
@@ -427,7 +467,13 @@ static void enter_sleep(void)
         return;
     }
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
-    if (s_asleep || !sleep_requested()) {
+    bool asleep_now = s_asleep, requested = sleep_requested();
+    if (asleep_now || !requested) {
+        bool *logged = asleep_now ? &s_logged_asleep : &s_logged_noreq;   /* LVGL task only */
+        if (!*logged) {
+            *logged = true;
+            ESP_LOGW(TAG, "sleep mode: not entered, %s", asleep_now ? "already asleep" : "no request");
+        }
         xSemaphoreGive(s_sleep_mu);
         return;
     }
@@ -442,9 +488,9 @@ static void enter_sleep(void)
     bool vbus = s_vbus_real;
     s_light = !vbus;   /* before s_asleep: the power task reads both without s_sleep_mu */
     s_asleep = true;
-    s_n_entries++;
-    if (s_stretch_open && now - s_stretch_t0_ms > s_longest_awake_off_ms) {
-        s_longest_awake_off_ms = now - s_stretch_t0_ms;
+    s_ctr.entries++;
+    if (s_stretch_open && now - s_stretch_t0_ms > s_ctr.longest_awake_off_ms) {
+        s_ctr.longest_awake_off_ms = now - s_stretch_t0_ms;
     }
     s_stretch_open = false;
     portEXIT_CRITICAL(&s_mux);
@@ -495,8 +541,8 @@ static void exit_sleep(wake_cause_t cause)
     portENTER_CRITICAL(&s_mux);
     s_asleep = false;
     s_sleep_req = false;
-    s_n_wake[cause]++;
-    s_ms_asleep += asleep_ms;
+    s_ctr.wake[cause]++;
+    s_ctr.ms_asleep += asleep_ms;
     s_stretch_open = true;
     s_stretch_t0_ms = now;
     portEXIT_CRITICAL(&s_mux);
@@ -514,6 +560,9 @@ void hy_power_screen_off(bool off)
         s_stretch_open = false;   /* the screen came back: not an awake stretch while OFF */
     }
     portEXIT_CRITICAL(&s_mux);
+    if (!off) {
+        s_logged_asleep = s_logged_noreq = false;   /* a new OFF stretch logs its early returns again */
+    }
     if (off) {
         enter_sleep();   /* the UI calls this from the LVGL task: LVGL pauses after this lv_timer_handler pass */
         return;
@@ -531,7 +580,7 @@ void hy_power_screen_state(uint8_t scr)
 void hy_power_chime_on_battery(void)
 {
     portENTER_CRITICAL(&s_mux);
-    s_n_chime_batt++;
+    s_ctr.chime_batt++;
     portEXIT_CRITICAL(&s_mux);
 }
 
@@ -548,9 +597,9 @@ static void IRAM_ATTR touch_hook(void)
 {
     portENTER_CRITICAL_ISR(&s_mux);
     s_touch_isr = true;
-    s_n_touch_isr++;
+    s_ctr.touch_isr++;
     if (s_asleep) {
-        s_n_touch_isr_asleep++;
+        s_ctr.touch_isr_asleep++;
     }
     portEXIT_CRITICAL_ISR(&s_mux);
     if (s_asleep && s_task) {
@@ -564,9 +613,9 @@ static void IRAM_ATTR key_hook(void)
 {
     portENTER_CRITICAL_ISR(&s_mux);
     s_key_isr = true;
-    s_n_key_isr++;
+    s_ctr.key_isr++;
     if (s_asleep) {
-        s_n_key_isr_asleep++;
+        s_ctr.key_isr_asleep++;
     }
     portEXIT_CRITICAL_ISR(&s_mux);
     if (s_task) {
@@ -709,7 +758,7 @@ static void power_task(void *arg)
             }
             if (cause == W_N) {
                 portENTER_CRITICAL(&s_mux);
-                s_n_wake[W_TIMER]++;
+                s_ctr.wake[W_TIMER]++;
                 portEXIT_CRITICAL(&s_mux);
             }
         }
@@ -806,6 +855,7 @@ esp_err_t hy_power_init(void)
         s_alive_mu = xSemaphoreCreateMutexStatic(&s_alive_mu_buf);
     }
     s_sleep_mu = xSemaphoreCreateMutexStatic(&s_sleep_mu_buf);
+    ctr_init();
     esp_err_t perr = esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "hy_awake", &s_pm_lock);
     if (perr == ESP_OK) {
         lock_hold(true);   /* s_vbus_real is true until the first reading: awake_lock_sync releases it on battery */
@@ -930,10 +980,10 @@ void hy_power_debug_pkey(const char *args)
 void hy_power_sleep_stats(void)
 {
     portENTER_CRITICAL(&s_mux);
-    uint32_t entries = s_n_entries, chimes = s_n_chime_batt, w[W_N];
-    memcpy(w, s_n_wake, sizeof w);
-    int64_t ms = s_ms_asleep, longest = s_longest_awake_off_ms;
-    uint32_t keys = s_n_key_isr, keys_a = s_n_key_isr_asleep, touches = s_n_touch_isr, touches_a = s_n_touch_isr_asleep;
+    uint32_t boots = s_ctr.boots, entries = s_ctr.entries, chimes = s_ctr.chime_batt, w[W_N];
+    memcpy(w, s_ctr.wake, sizeof w);
+    int64_t ms = s_ctr.ms_asleep, longest = s_ctr.longest_awake_off_ms;
+    uint32_t keys = s_ctr.key_isr, keys_a = s_ctr.key_isr_asleep, touches = s_ctr.touch_isr, touches_a = s_ctr.touch_isr_asleep;
     bool req = s_sleep_req, vbus = s_vbus_real;
     portEXIT_CRITICAL(&s_mux);
     bool asleep = s_asleep;
@@ -948,6 +998,8 @@ void hy_power_sleep_stats(void)
              ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", ui %" PRIu32 ", timer-only %" PRIu32,
              w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_UI],
              w[W_TIMER]);
+    ESP_LOGI(TAG, "sleepstat boot: uptime %lld s, reset reason %s, boots since power-on %" PRIu32 " (counters cover all boots since power-on)",
+             (long long)mono_s(), reset_name(esp_reset_reason()), boots);
     ESP_LOGI(TAG, "key presses %" PRIu32 " (%" PRIu32 " while asleep)", keys, keys_a);
     ESP_LOGI(TAG, "touch irqs %" PRIu32 " (%" PRIu32 " while asleep)", touches, touches_a);
     /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
