@@ -290,6 +290,21 @@ static void test_held_pose_none_cases(void)
     TEST_ASSERT_FALSE(hy_orient_held(&o, t - STEP, HY_OR_WAKE_DWELL_MS, &r));
 }
 
+static void test_accel_settled(void)
+{
+    hy_accel_t good = {-45, -949, 132};
+    hy_accel_t near = {-60, -940, 120};
+    hy_accel_t boot = {-4064, 3164, -3478};   /* measured right after power up: about 6.2 g */
+    TEST_ASSERT_TRUE(hy_accel_settled(good, near));
+    TEST_ASSERT_FALSE(hy_accel_settled(boot, boot));          /* constant but not 1 g */
+    TEST_ASSERT_FALSE(hy_accel_settled(boot, good));
+    TEST_ASSERT_FALSE(hy_accel_settled(good, boot));
+    TEST_ASSERT_FALSE(hy_accel_settled((hy_accel_t){0, 0, 0}, (hy_accel_t){0, 0, 0}));   /* nothing converted yet */
+    TEST_ASSERT_FALSE(hy_accel_settled(A0, A90));             /* both 1 g, still moving */
+    TEST_ASSERT_TRUE(hy_accel_settled(A0, (hy_accel_t){HY_OR_SETTLE_DELTA_MG, -1000, 0}));
+    TEST_ASSERT_FALSE(hy_accel_settled(A0, (hy_accel_t){HY_OR_SETTLE_DELTA_MG + 1, -1000, 0}));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -311,5 +326,6 @@ int main(void)
     RUN_TEST(test_held_pose_after_two_quarters);
     RUN_TEST(test_held_pose_under_wake_dwell);
     RUN_TEST(test_held_pose_none_cases);
+    RUN_TEST(test_accel_settled);
     return UNITY_END();
 }

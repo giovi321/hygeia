@@ -95,9 +95,14 @@ esp_err_t hy_board_imu_read_raw(int16_t mg[3]);
 /* After hy_board_imu_power(true): polls STATUS0 (0x2E) bit 0 (accel data available) once per tick (10 ms) until it is set.
    ESP_OK when set, ESP_ERR_TIMEOUT after timeout_ms, the bus error when the last read failed. */
 esp_err_t hy_board_imu_wait_ready(int timeout_ms);
-/* One sample at boot for the boot orientation: power up, wait for the first sample, drop it, wait for and read the
-   next one (expected 25 to 40 ms in all), power down. mg is set only on ESP_OK. Else the error: ESP_ERR_INVALID_STATE
-   when the IMU is absent, ESP_ERR_TIMEOUT when no sample arrived within 100 ms. */
+/* After hy_board_imu_power(true): reads samples as they become ready until two consecutive ones pass
+   hy_accel_settled (about 1 g and steady), and returns the second in mg. The first samples after power up are not
+   usable. ESP_ERR_TIMEOUT when that did not happen within timeout_ms (also when the device is moving), the bus error
+   when a read failed. mg is set only on ESP_OK. */
+esp_err_t hy_board_imu_wait_settled(int timeout_ms, int16_t mg[3]);
+/* One sample at boot for the boot orientation: power up, wait for a settled sample, power down. mg is set only on
+   ESP_OK. Else the error: ESP_ERR_INVALID_STATE when the IMU is absent, ESP_ERR_TIMEOUT when no settled sample
+   arrived within 300 ms. */
 esp_err_t hy_board_imu_sample_once(int16_t mg[3]);
 #if CONFIG_HY_DEBUG_CONSOLE
 /* CTRL1, CTRL2, CTRL7 as read from the chip */
