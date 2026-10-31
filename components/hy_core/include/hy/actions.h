@@ -198,4 +198,13 @@ hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts);
  */
 hy_err_t hy_act_record_gap(const hy_gap_t *g, hy_gap_reason_t reason);
 
+/*
+ * Import of one log entry from a backup: append_log with ts, tz, med_id, status, slot, delta_min, note, source and
+ * edited as given (the store assigns the id). No pill change, no undo record, no snooze change and no event:
+ * hy_act_log_import_end publishes one HY_EV_LOG_EDITED for the batch. HY_E_NOT_FOUND for an unknown medicine
+ * (archived ones are accepted), HY_E_INVALID for a bad status, HY_E_IO or HY_E_FULL from the store. No clock needed.
+ */
+hy_err_t hy_act_log_import(const hy_log_t *e);
+void     hy_act_log_import_end(void);
+
 #endif

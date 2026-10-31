@@ -1475,6 +1475,62 @@ static void test_record_gap_without_port_member(void)
     TEST_ASSERT_EQUAL_INT(0, st.n_gaps);
 }
 
+static void test_log_import_keeps_fields(void)
+{
+    hy_log_t e;
+    memset(&e, 0, sizeof e);
+    e.id = 77; e.med_id = 2; e.ts = D0 - 3 * 86400; strcpy(e.tz, TZ_ZURICH); e.status = HY_MISSED;
+    e.slot = D0 - 3 * 86400 - 600; e.delta_min = 10; strcpy(e.note, "from backup"); e.source = HY_SRC_MQTT;
+    e.edited = true;
+    clk.valid = false;   /* needs no clock */
+    n_evs = 0;
+    TEST_ASSERT_EQUAL(HY_OK, hy_act_log_import(&e));
+    TEST_ASSERT_EQUAL_INT(1, st.appends);
+    hy_log_t *s = &st.logs[0];
+    TEST_ASSERT_EQUAL_UINT32(100, s->id);   /* the store assigns the id */
+    TEST_ASSERT_EQUAL_UINT32(2, s->med_id);
+    TEST_ASSERT_EQUAL_INT64(e.ts, s->ts);
+    TEST_ASSERT_EQUAL_STRING(TZ_ZURICH, s->tz);
+    TEST_ASSERT_EQUAL_INT(HY_MISSED, s->status);
+    TEST_ASSERT_EQUAL_INT64(e.slot, s->slot);
+    TEST_ASSERT_EQUAL_INT32(10, s->delta_min);
+    TEST_ASSERT_EQUAL_STRING("from backup", s->note);
+    TEST_ASSERT_EQUAL_INT(HY_SRC_MQTT, s->source);
+    TEST_ASSERT_TRUE(s->edited);
+    TEST_ASSERT_EQUAL_INT(0, n_evs);          /* one event per batch, from _end */
+    clk.valid = true;
+
+    /* a taken entry changes no pill count and leaves no undo record */
+    e.status = HY_TAKEN;
+    TEST_ASSERT_EQUAL(HY_OK, hy_act_log_import(&e));
+    TEST_ASSERT_EQUAL_INT16(12, med_by_id(2)->pills_left);
+    TEST_ASSERT_EQUAL_INT(0, st.saves);
+    TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_act_undo(st.logs[1].id));
+
+    hy_act_log_import_end();
+    TEST_ASSERT_EQUAL_INT(1, n_evs);
+    TEST_ASSERT_EQUAL(HY_EV_LOG_EDITED, evs[0].type);
+}
+
+static void test_log_import_errors(void)
+{
+    hy_log_t e;
+    memset(&e, 0, sizeof e);
+    e.med_id = 9; e.ts = D0; strcpy(e.tz, "UTC0");
+    TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_act_log_import(&e));   /* unknown medicine */
+    e.med_id = 1; e.status = (hy_status_t)7;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_act_log_import(&e));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_act_log_import(NULL));
+    e.status = HY_TAKEN;
+    st.fail_append = true;
+    TEST_ASSERT_EQUAL(HY_E_IO, hy_act_log_import(&e));
+    st.fail_append = false;
+    /* archived medicines take their history too */
+    TEST_ASSERT_EQUAL(HY_OK, hy_act_med_archive(3, true));
+    e.med_id = 3;
+    TEST_ASSERT_EQUAL(HY_OK, hy_act_log_import(&e));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1555,5 +1611,7 @@ int main(void)
     RUN_TEST(test_log_update_free_log_keeps_slot_zero);
     RUN_TEST(test_record_gap_publishes_once);
     RUN_TEST(test_record_gap_without_port_member);
+    RUN_TEST(test_log_import_keeps_fields);
+    RUN_TEST(test_log_import_errors);
     return UNITY_END();
 }

@@ -1060,6 +1060,25 @@ size_t hy_net_known(hy_known_net_t *out)
     return n;
 }
 
+/* Backup export with secrets only: never logged. */
+esp_err_t hy_net_pass_get(const char *ssid, char out[64])
+{
+    out[0] = 0;
+    if (!s_inited) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!ssid) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    lock();
+    int i = find(ssid);
+    if (i >= 0) {
+        strlcpy(out, s_cfg.e[i].pass, 64);
+    }
+    unlock();
+    return i >= 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
 esp_err_t hy_net_add(const char *ssid, const char *pass)
 {
     if (!s_inited) {

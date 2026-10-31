@@ -66,6 +66,11 @@ web_handler_t web_settings_route(hy_route_id_t id);   /* settings, time, chime, 
 web_handler_t web_wifi_route(hy_route_id_t id);       /* Wi-Fi */
 web_handler_t web_data_route(hy_route_id_t id);       /* export, import, firmware update */
 
+/* Export and import (h_backup.c). busy: an import is writing, other web writes answer 409 "busy". stop: asks a
+ * running export or import to end and waits for it (server stop, before httpd_stop). */
+bool web_backup_busy(void);
+void web_backup_stop(void);
+
 /* Host name, IP literals and AP mode of the moment (hy_net_status copy). */
 typedef struct {
     bool ap;

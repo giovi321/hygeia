@@ -39,6 +39,31 @@
 hy_err_t hy_store_open(const char *base_dir);
 const hy_store_port_t *hy_store_port(void);   /* ctx is NULL */
 size_t   hy_store_skipped_lines(void);        /* corrupt lines skipped since open */
+/* The id the next appended log entry takes (0xFFFFFFFF once the ids ran out). */
+uint32_t hy_store_next_log_id(void);
+
+/*
+ * Staging for an import that replaces everything. Same thread as the port.
+ * - begin(bytes): HY_E_FULL when the free space hook reports less than 2 * bytes. Removes a leftover
+ *   <base>/import.tmp/ and creates it with an empty meds.json, gaps.jsonl and log/ (all three always exist).
+ * - meds, log, gap write there with ids kept (log ids must be nonzero; HY_E_INVALID otherwise). The live
+ *   store keeps working meanwhile.
+ * - commit: removes an older <base>/pre-import/, writes the marker import.tmp/commit, then for each of
+ *   meds.json, gaps.jsonl and log/ moves the live one into pre-import/ and the staged one in, all by rename,
+ *   then removes import.tmp and re-runs the open logic (month index, next log id). Every step can be repeated,
+ *   so hy_store_open finishes a commit that a reset interrupted after the marker, and discards a staging area
+ *   without one. HY_E_IO when a rename failed: the open logic still runs; nothing is deleted except the older
+ *   pre-import/.
+ * - abort removes import.tmp. Calls outside begin..commit/abort give HY_E_INVALID.
+ */
+hy_err_t hy_store_import_begin(size_t bytes);
+hy_err_t hy_store_import_meds(const hy_med_t *m, size_t n, uint32_t next_id);
+hy_err_t hy_store_import_log(const hy_log_t *e, size_t n);
+hy_err_t hy_store_import_gap(const hy_gap_t *g, hy_gap_reason_t r);
+hy_err_t hy_store_import_commit(void);
+void     hy_store_import_abort(void);
+/* Free bytes of the file system holding base_dir. NULL (the default) skips the space check. */
+void     hy_store_set_free_fn(size_t (*fn)(void));
 
 #ifdef ESP_PLATFORM
 #include "esp_err.h"

@@ -10,6 +10,7 @@ idf_component_register(
         "src/h_log.c"
         "src/h_settings.c"
         "src/h_wifi.c"
+        "src/h_backup.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS

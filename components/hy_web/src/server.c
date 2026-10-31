@@ -52,6 +52,7 @@ const char *web_status_line(int status)
     switch (status) {
     case 200: return "200 OK";
     case 201: return "201 Created";
+    case 202: return "202 Accepted";
     case 204: return "204 No Content";
     case 302: return "302 Found";
     case 400: return "400 Bad Request";
@@ -279,6 +280,10 @@ static esp_err_t api_handler(httpd_req_t *req)
     default:
         break;
     }
+    if (m != HY_M_GET && rt->id != HY_R_PAIR_START && rt->id != HY_R_PAIR && web_backup_busy()) {
+        web_send_err(&r, 409, "busy", NULL, "An import is running, try again when it is done");
+        goto done;
+    }
     hy_net_activity();
 
     web_handler_t h = web_route_handler(rt->id);
@@ -462,6 +467,7 @@ static void server_stop(void)
         }
         vTaskDelay(1);
     }
+    web_backup_stop();   /* an export or import worker holds a request of this server */
     httpd_stop(h);   /* waits for a handler in progress (at most its job timeout) */
     web_ws_detach();
     ESP_LOGI(TAG, "server stopped");

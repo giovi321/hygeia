@@ -50,6 +50,8 @@ void      hy_net_status(hy_net_status_t *out);
 esp_err_t hy_net_set_mode(hy_net_mode_t m, const char *ssid);
 /* The known networks in list order, at most HY_NET_MAX_KNOWN; returns the count. */
 size_t    hy_net_known(hy_known_net_t *out);
+/* The saved password of a known network (backup export with secrets only). ESP_ERR_NOT_FOUND when unknown. */
+esp_err_t hy_net_pass_get(const char *ssid, char out[64]);
 /* Adds a network or replaces the password of the same SSID. ESP_ERR_INVALID_ARG when hy_net_check_ssid or
  * hy_net_check_pass(pass, false) fails, ESP_ERR_NO_MEM for a sixth network. */
 esp_err_t hy_net_add(const char *ssid, const char *pass);

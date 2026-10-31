@@ -642,6 +642,178 @@ void test_gaps_skip_corrupt(void)
     TEST_ASSERT_EQUAL_INT64(3000, out[1].start);
 }
 
+/* ---- import staging ---- */
+
+static size_t fake_free;
+static size_t free_fn(void) { return fake_free; }
+
+/* Old data: A in meds.json (next id 5), entries in Sep and Oct, one gap. */
+static void old_data(void)
+{
+    hy_med_t m;
+    hy_med_defaults(&m);
+    m.id = 1; strcpy(m.code, "A"); strcpy(m.name, "Antibiotic"); m.times[0] = 480; m.n_times = 1;
+    TEST_ASSERT_EQUAL(HY_OK, P->save_meds_next(NULL, &m, 1, 5));
+    TEST_ASSERT_EQUAL(HY_OK, add(SEP, 1, NULL));
+    TEST_ASSERT_EQUAL(HY_OK, add(OCT, 1, NULL));
+    hy_gap_t g = { 1000, 2000 };
+    TEST_ASSERT_EQUAL(HY_OK, P->append_gap(NULL, &g, HY_GAP_OFF));
+}
+
+/* New data: V id 7 (next id 9), entries 40 (Nov) and 41 (Sep), one gap. */
+static void stage_new(void)
+{
+    hy_med_t m;
+    hy_med_defaults(&m);
+    m.id = 7; strcpy(m.code, "V"); strcpy(m.name, "Vitamin D"); m.times[0] = 480; m.n_times = 1;
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_meds(&m, 1, 9));
+    hy_log_t e[2] = { mk(NOV, 7), mk(SEP + 60, 7) };
+    e[0].id = 40; e[1].id = 41;
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_log(e, 2));
+    hy_gap_t g = { 5000, 6000 };
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_gap(&g, HY_GAP_LOST));
+}
+
+static void assert_new_data(void)
+{
+    hy_med_t got[4];
+    size_t n = 0;
+    TEST_ASSERT_EQUAL(HY_OK, P->load_meds(NULL, got, 4, &n));
+    TEST_ASSERT_EQUAL(1, n);
+    TEST_ASSERT_EQUAL_STRING("V", got[0].code);
+    TEST_ASSERT_EQUAL_UINT32(9, P->load_next_id(NULL));
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(2, q(0, NOV + DAY, 0, out, 8));
+    TEST_ASSERT_EQUAL_UINT32(41, out[0].id);
+    TEST_ASSERT_EQUAL_UINT32(40, out[1].id);
+    TEST_ASSERT_EQUAL_UINT32(42, hy_store_next_log_id());
+    hy_gap_t g[4];
+    uint8_t rs[4];
+    TEST_ASSERT_EQUAL(1, P->query_gaps(NULL, 0, 10000, g, rs, 4));
+    TEST_ASSERT_EQUAL_INT64(5000, g[0].start);
+    TEST_ASSERT_EQUAL_UINT8(HY_GAP_LOST, rs[0]);
+    TEST_ASSERT_FALSE(exists("import.tmp"));
+}
+
+void test_next_log_id(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(1, hy_store_next_log_id());
+    TEST_ASSERT_EQUAL(HY_OK, add(OCT, 1, NULL));
+    TEST_ASSERT_EQUAL_UINT32(2, hy_store_next_log_id());
+}
+
+void test_import_replace_commit(void)
+{
+    old_data();
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(1000));
+    TEST_ASSERT_TRUE(exists("import.tmp/log"));
+    stage_new();
+    /* the live store is untouched until the commit */
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(2, q(0, NOV + DAY, 0, out, 8));
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_commit());
+    assert_new_data();
+    /* the old data sits in pre-import/ */
+    TEST_ASSERT_TRUE(exists("pre-import/meds.json"));
+    TEST_ASSERT_TRUE(exists("pre-import/gaps.jsonl"));
+    TEST_ASSERT_TRUE(exists("pre-import/log/2026-09.jsonl"));
+    TEST_ASSERT_TRUE(exists("pre-import/log/2026-10.jsonl"));
+    TEST_ASSERT_FALSE(exists("log/2026-10.jsonl"));
+    /* appends go on from the imported ids */
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL(HY_OK, add(OCT, 7, &id));
+    TEST_ASSERT_EQUAL_UINT32(42, id);
+    /* survives reopen */
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    TEST_ASSERT_EQUAL(3, q(0, NOV + DAY, 0, out, 8));
+    /* a second import replaces the older pre-import */
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(10));
+    hy_med_t none[1];
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_meds(none, 0, 1));
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_commit());
+    TEST_ASSERT_TRUE(exists("pre-import/log/2026-11.jsonl"));
+    char pm[160], txt[512] = "";
+    path(pm, sizeof pm, "pre-import/meds.json");
+    FILE *f = fopen(pm, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    size_t got_n = fread(txt, 1, sizeof txt - 1, f);
+    fclose(f);
+    txt[got_n] = '\0';
+    TEST_ASSERT_NOT_NULL(strstr(txt, "Vitamin D"));   /* the first import's data, not the original */
+    TEST_ASSERT_EQUAL(0, q(0, NOV + DAY, 0, out, 8));
+    TEST_ASSERT_EQUAL_UINT32(1, hy_store_next_log_id());
+}
+
+void test_import_abort_keeps_old(void)
+{
+    old_data();
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(1000));
+    stage_new();
+    hy_store_import_abort();
+    TEST_ASSERT_FALSE(exists("import.tmp"));
+    TEST_ASSERT_FALSE(exists("pre-import"));
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(2, q(0, NOV + DAY, 0, out, 8));
+    hy_med_t got[4];
+    size_t n = 0;
+    TEST_ASSERT_EQUAL(HY_OK, P->load_meds(NULL, got, 4, &n));
+    TEST_ASSERT_EQUAL_STRING("A", got[0].code);
+    /* nothing staged any more */
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_store_import_commit());
+    hy_log_t e = mk(OCT, 1);
+    e.id = 3;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_store_import_log(&e, 1));
+    /* a staged entry without an id is refused */
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(10));
+    e.id = 0;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_store_import_log(&e, 1));
+    hy_store_import_abort();
+}
+
+void test_import_space_check(void)
+{
+    hy_store_set_free_fn(free_fn);
+    fake_free = 1999;
+    TEST_ASSERT_EQUAL(HY_E_FULL, hy_store_import_begin(1000));
+    TEST_ASSERT_FALSE(exists("import.tmp"));
+    fake_free = 2000;
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(1000));
+    hy_store_import_abort();
+    hy_store_set_free_fn(NULL);
+}
+
+void test_import_staging_without_marker_dropped_at_open(void)
+{
+    old_data();
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(1000));
+    stage_new();
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));   /* a reset before the commit */
+    TEST_ASSERT_FALSE(exists("import.tmp"));
+    hy_log_t out[8];
+    TEST_ASSERT_EQUAL(2, q(0, NOV + DAY, 0, out, 8));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_store_import_commit());
+}
+
+void test_import_interrupted_commit_finished_at_open(void)
+{
+    old_data();
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_import_begin(1000));
+    stage_new();
+    /* a reset after the marker and the first moves: meds.json is in pre-import/, the staged one not yet in */
+    char a[160], b[160];
+    path(a, sizeof a, "pre-import");
+    TEST_ASSERT_EQUAL(0, mkdir(a, 0775));
+    path(a, sizeof a, "meds.json");
+    path(b, sizeof b, "pre-import/meds.json");
+    TEST_ASSERT_EQUAL(0, rename(a, b));
+    write_raw("import.tmp/commit", "1\n");
+    TEST_ASSERT_EQUAL(HY_OK, hy_store_open(base));
+    assert_new_data();
+    TEST_ASSERT_TRUE(exists("pre-import/meds.json"));
+    TEST_ASSERT_TRUE(exists("pre-import/log/2026-10.jsonl"));
+    TEST_ASSERT_TRUE(exists("pre-import/gaps.jsonl"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -671,5 +843,11 @@ int main(void)
     RUN_TEST(test_gaps_append_query);
     RUN_TEST(test_gaps_trim);
     RUN_TEST(test_gaps_skip_corrupt);
+    RUN_TEST(test_next_log_id);
+    RUN_TEST(test_import_replace_commit);
+    RUN_TEST(test_import_abort_keeps_old);
+    RUN_TEST(test_import_space_check);
+    RUN_TEST(test_import_staging_without_marker_dropped_at_open);
+    RUN_TEST(test_import_interrupted_commit_finished_at_open);
     return UNITY_END();
 }

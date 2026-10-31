@@ -5,7 +5,8 @@
 
 Serves the bundle made by tools/web_bundle.py from web/ (rebuilt on every request, so edits show on reload) and
 answers /api/* from the sample files in tools/webmock/samples/ plus in-memory changes. Routes the firmware does not
-implement yet answer 501 like the device. Nothing is stored on disk.
+implement yet answer 501 like the device. Nothing is stored on disk. Export and import follow the device shapes
+(import works on the in-memory data; nothing is written to disk).
 
   --unpaired       every /api route except info and pairing answers 401 until the code 123456 is posted
   --slow           adds 1.5 s to every /api answer
@@ -160,6 +161,14 @@ def with_local(e):
     return out
 
 
+class Raw:
+    """A non-JSON answer body (export downloads)."""
+
+    def __init__(self, data, ctype):
+        self.data = data
+        self.ctype = ctype
+
+
 def err(status, code, field, message, **extra):
     body = {"error": code, "field": field, "message": message}
     body.update(extra)
@@ -267,6 +276,8 @@ class Handler(BaseHTTPRequestHandler):
                     status, body, headers = self.api(u.path, parse_qs(u.query))
                 except Exception as e:  # keep the mock alive, say what broke
                     status, body, headers = 500, {"error": "internal", "field": None, "message": repr(e)}, {}
+            if isinstance(body, Raw):
+                return self.send(status, raw=body.data, ctype=body.ctype, headers=headers)
             return self.send(status, body, headers=headers)
         if self.command not in ("GET", "HEAD"):
             return self.send(405, {"error": "method", "field": None, "message": "Method not allowed"})
@@ -331,6 +342,8 @@ class Handler(BaseHTTPRequestHandler):
             if m == "GET" and path not in dev.busy_seen:
                 dev.busy_seen.add(path)
                 return 503, err(503, "busy", None, "The device is busy, try again")[1], {}
+        if path == "/api/import" and m == "POST":
+            return self.backup_import(q)
         body = self.read_body() if m in ("POST", "PUT", "DELETE") else {}
         if body is None:
             return 400, err(400, "invalid", None, "The body is not valid JSON")[1], {}
@@ -627,6 +640,11 @@ class Handler(BaseHTTPRequestHandler):
                 dev.wifi["host"] = host
             return 200, {"host": dev.wifi["host"], "ap_ssid": "hygeia-AB12"}
 
+        if path == "/api/export.csv" and m == "GET":
+            return self.export("csv", q)
+        if path == "/api/export.json" and m == "GET":
+            return self.export("json", q)
+
         if path == "/api/chime/test" and m == "POST":
             return 200, {"played": True}
 
@@ -637,6 +655,137 @@ class Handler(BaseHTTPRequestHandler):
                 return 409, {"error": "confirm", "message": 'Send {"confirm":true} to power off', "due_24h": due}
             return 200, {"powering_off": True, "due_24h": due}
         return None
+
+    # ---- export and import: the device's shapes ----
+    def export_name(self, ext):
+        return 'attachment; filename="hygeia-%s.%s"' % (time.strftime("%Y%m%d", time.localtime()), ext)
+
+    def export(self, kind, q):
+        dev = self.dev
+        log = sorted(dev.log, key=lambda e: (e["ts"], e["id"]))
+        if kind == "csv":
+            meds = {x["id"]: x for x in dev.meds}
+
+            def cell(s):
+                s = "" if s is None else str(s)
+                if s[:1] in ("=", "+", "-", "@", "\t", "\r"):
+                    s = "'" + s
+                if any(c in s for c in ',"\r\n'):
+                    s = '"' + s.replace('"', '""') + '"'
+                return s
+            rows = ["id,local_time,utc,tz,code,name,status,slot_local,delta_min,note,source,edited"]
+            for e in log:
+                mm = meds.get(e["med_id"], {})
+                rows.append(",".join([
+                    str(e["id"]), time.strftime("%Y-%m-%d %H:%M", time.gmtime(e["ts"])), str(e["ts"]),
+                    cell(e.get("tz", "UTC0")), cell(mm.get("code", "?")), cell(mm.get("name", "")),
+                    cell(e["status"]),
+                    time.strftime("%Y-%m-%d %H:%M", time.gmtime(e["slot"])) if e.get("slot") else "",
+                    str(e.get("delta_min", 0)), cell(e.get("note", "")), cell(e.get("source", "screen")),
+                    "true" if e.get("edited") else "false"]))
+            data = ("\r\n".join(rows) + "\r\n").encode("utf-8")
+            return 200, Raw(data, "text/csv; charset=utf-8"), {"Content-Disposition": self.export_name("csv")}
+        secrets = (q.get("secrets") or ["0"])[0]
+        if secrets not in ("0", "1"):
+            return 400, err(400, "invalid", "secrets", "secrets is 0 or 1")[1], {}
+        meds = [{k: v for k, v in x.items() if k != "etag"} for x in dev.meds]
+        doc = {"v": 1, "api": 1, "exported": int(time.time()), "meds": meds, "next_id": dev.next_id, "gaps": [],
+               "settings": dev.settings}
+        if secrets == "1":
+            doc["wifi"] = {"networks": [{"ssid": s, "pass": "example-pass"} for s in dev.wifi["networks"]],
+                           "ap_pass": "abcdefgh23"}
+        doc["log"] = [{k: v for k, v in e.items() if k != "local"} for e in log]   # always the last member
+        data = json.dumps(doc, separators=(",", ":")).encode("utf-8")
+        return 200, Raw(data, "application/json"), {"Content-Disposition": self.export_name("json")}
+
+    def backup_import(self, q):
+        dev = self.dev
+        mode = (q.get("mode") or ["merge"])[0]
+        if mode not in ("merge", "replace"):
+            return 400, err(400, "invalid", "mode", "mode is merge or replace")[1], {}
+        preview = (q.get("preview") or ["0"])[0] == "1"
+        settings = (q.get("settings") or ["0"])[0] == "1"
+        n = int(self.headers.get("Content-Length") or 0)
+        if not n:
+            return 400, err(400, "invalid", "body", "Send the backup file as the request body")[1], {}
+        if n > 4 * 1024 * 1024:
+            return 413, err(413, "too_large", None, "The file is above 4 MB")[1], {}
+        try:
+            doc = json.loads(self.rfile.read(n).decode("utf-8"))
+        except ValueError:
+            return 400, err(400, "invalid", "json", "That request is not valid")[1], {}
+        if not isinstance(doc, dict):
+            return 400, err(400, "invalid", "json", "That request is not valid")[1], {}
+        if doc.get("v") != 1:
+            return 400, err(400, "invalid", "v", "That request is not valid")[1], {}
+        if not isinstance(doc.get("meds"), list):
+            return 400, err(400, "invalid", "meds", "That request is not valid")[1], {}
+        fmeds, flog, fgaps = doc["meds"], doc.get("log") or [], doc.get("gaps") or []
+        cur = {x["id"]: x for x in dev.meds}
+        kinds = {}
+        if mode == "replace":
+            kinds = {x["id"]: "add" for x in fmeds}
+        else:
+            for x in fmeds:
+                c = cur.get(x["id"])
+                if c and c["code"] == x["code"]:
+                    same = dev.etag(x) == dev.etag(c)
+                    kinds[x["id"]] = "same" if same else "change"
+                else:
+                    kinds[x["id"]] = "add"
+        have = {(e["med_id"], e["ts"], e["status"]) for e in dev.log}
+        add = dup = skip = 0
+        for e in flog:
+            k = kinds.get(e.get("med_id"))
+            if k is None:
+                skip += 1
+            elif mode == "merge" and k != "add" and (e["med_id"], e["ts"], e["status"]) in have:
+                dup += 1
+            else:
+                add += 1
+        counts = {"mode": mode, "exported": doc.get("exported", 0),
+                  "meds": {"add": sum(1 for v in kinds.values() if v == "add"),
+                           "change": sum(1 for v in kinds.values() if v == "change"),
+                           "same": sum(1 for v in kinds.values() if v == "same")},
+                  "log": {"add": add, "dup": dup, "skip": skip}, "gaps": {"add": len(fgaps)},
+                  "settings": "settings" in doc, "secrets": "wifi" in doc,
+                  "settings_applied": False, "secrets_applied": False}
+        if preview:
+            return 200, dict({"preview": True}, **counts), {}
+        if mode == "replace":
+            dev.meds = [dict(x) for x in fmeds]
+            dev.log = [dict(e) for e in flog if e.get("med_id") in kinds]
+        else:
+            remap = {}
+            for x in fmeds:
+                if kinds[x["id"]] == "change":
+                    cur[x["id"]].update(x)
+                elif kinds[x["id"]] == "add":
+                    nm = dict(x, id=dev.next_id)
+                    remap[x["id"]] = dev.next_id
+                    dev.next_id += 1
+                    dev.meds.append(nm)
+            for e in flog:
+                k = kinds.get(e.get("med_id"))
+                if k is None or (k != "add" and (e["med_id"], e["ts"], e["status"]) in have):
+                    continue
+                dev.log.append(dict(e, id=dev.next_log, med_id=remap.get(e["med_id"], e["med_id"])))
+                dev.next_log += 1
+        for x in dev.meds:
+            x["etag"] = dev.etag(x)
+        dev.next_id = max([dev.next_id] + [x["id"] + 1 for x in dev.meds])
+        dev.next_log = max([dev.next_log] + [e["id"] + 1 for e in dev.log])
+        if settings and isinstance(doc.get("settings"), dict):
+            dev.settings.update({k: v for k, v in doc["settings"].items() if k != "rot"})
+            counts["settings_applied"] = True
+        if settings and "wifi" in doc:
+            for net in doc["wifi"].get("networks", []):
+                if net.get("ssid") not in dev.wifi["networks"]:
+                    dev.wifi["networks"].append(net["ssid"])
+            counts["secrets_applied"] = True
+        dev.broadcast("meds_changed")
+        dev.broadcast("log_edited")
+        return 200, dict({"imported": True}, **counts), {}
 
     def log_page(self, q, now):
         dev = self.dev

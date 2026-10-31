@@ -775,3 +775,21 @@ hy_err_t hy_act_record_gap(const hy_gap_t *g, hy_gap_reason_t reason)
     hy_ev_publish(&ev);
     return HY_OK;
 }
+
+hy_err_t hy_act_log_import(const hy_log_t *e)
+{
+    if (!inited || !e) return HY_E_INVALID;
+    if ((unsigned)e->status > (unsigned)HY_MISSED || (unsigned)e->source > (unsigned)HY_SRC_AUTO) return HY_E_INVALID;
+    if (!find_med(e->med_id)) return HY_E_NOT_FOUND;
+    hy_log_t copy = *e;
+    copy.id = 0;
+    hy_err_t r = store->append_log(store_ctx, &copy);
+    if (r == HY_OK) return HY_OK;
+    return (r == HY_E_FULL || r == HY_E_INVALID) ? r : HY_E_IO;
+}
+
+void hy_act_log_import_end(void)
+{
+    if (!inited) return;
+    publish(HY_EV_LOG_EDITED, clk->valid(clk_ctx) ? clk->now(clk_ctx) : 0, 0, 0, 0);
+}

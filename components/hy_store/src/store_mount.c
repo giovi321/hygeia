@@ -5,6 +5,16 @@
 
 static const char *TAG = "store_mount";
 
+/* Free bytes of the storage partition, for the import space check. 0 when unknown (the check then refuses). */
+static size_t littlefs_free(void)
+{
+    size_t total = 0, used = 0;
+    if (esp_littlefs_info("storage", &total, &used) != ESP_OK || used > total) {
+        return 0;
+    }
+    return total - used;
+}
+
 esp_err_t hy_store_mount(void)
 {
     esp_vfs_littlefs_conf_t conf = {
@@ -31,5 +41,6 @@ esp_err_t hy_store_mount(void)
         return err;
     }
     ESP_LOGI(TAG, "mounted /data: total %u bytes, used %u bytes", (unsigned)total, (unsigned)used);
+    hy_store_set_free_fn(littlefs_free);
     return ESP_OK;
 }

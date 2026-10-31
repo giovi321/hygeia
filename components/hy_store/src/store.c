@@ -28,6 +28,8 @@ static char s_wbuf[LINE_MAX_];
 static uint32_t s_next_med_id;      /* "next_id" of meds.json as last loaded or saved, 0 = unknown */
 static size_t s_gap_lines;          /* non-blank lines in gaps.jsonl, corrupt ones included */
 static size_t count_lines(const char *path);
+static void recover_import(void);
+static bool s_staging;
 
 /* ---- paths ---- */
 
@@ -329,7 +331,10 @@ static void remove_tmp_in(const char *dir_path)
     while ((de = readdir(d)) != NULL) {
         size_t n = strlen(de->d_name);
         if (n > 4 && strcmp(de->d_name + n - 4, ".tmp") == 0) {
-            if (snprintf(p, sizeof p, "%s/%s", dir_path, de->d_name) < (int)sizeof p) unlink(p);
+            struct stat st;
+            if (snprintf(p, sizeof p, "%s/%s", dir_path, de->d_name) < (int)sizeof p && stat(p, &st) == 0 &&
+                !S_ISDIR(st.st_mode))
+                unlink(p);
         }
     }
     closedir(d);
@@ -347,6 +352,8 @@ hy_err_t hy_store_open(const char *base_dir)
     if (!make_path(p, "log")) return HY_E_IO;
     if (mkdir(p, 0775) != 0 && errno != EEXIST) return HY_E_IO;
 
+    s_staging = false;
+    recover_import();   /* before the .tmp sweep: the staging area is a directory named import.tmp */
     remove_tmp_in(s_base);
     remove_tmp_in(p);
 
@@ -802,3 +809,225 @@ static const hy_store_port_t PORT = {
 };
 
 const hy_store_port_t *hy_store_port(void) { return &PORT; }
+
+uint32_t hy_store_next_log_id(void)
+{
+    return s_next_id > 0xFFFFFFFFULL ? 0xFFFFFFFFu : (uint32_t)s_next_id;
+}
+
+/* ---- import staging: <base>/import.tmp/ replaces meds.json, gaps.jsonl and log/ in one commit ---- */
+
+#define STAGE_DIR  "import.tmp"
+#define PRE_DIR    "pre-import"
+#define MARKER     STAGE_DIR "/commit"
+
+static size_t (*s_free_fn)(void);
+static const char *const STAGED[] = { "meds.json", "gaps.jsonl", "log" };
+
+void hy_store_set_free_fn(size_t (*fn)(void)) { s_free_fn = fn; }
+
+static bool exists_at(const char *p)
+{
+    struct stat st;
+    return stat(p, &st) == 0;
+}
+
+static bool is_dir_at(const char *p)
+{
+    struct stat st;
+    return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* Removes a directory tree (at most depth levels below it). The directory is listed again after every removal, so
+ * no entry is deleted while a listing is open. */
+static bool rm_tree(const char *path, int depth)
+{
+    if (!exists_at(path)) return true;
+    if (!is_dir_at(path)) return unlink(path) == 0;
+    for (;;) {
+        DIR *d = opendir(path);
+        if (!d) return false;
+        char child[PATH_MAX_ + 64];
+        bool found = false;
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+            if (snprintf(child, sizeof child, "%s/%s", path, de->d_name) >= (int)sizeof child) continue;
+            found = true;
+            break;
+        }
+        closedir(d);
+        if (!found) break;
+        if (is_dir_at(child)) {
+            if (depth <= 0 || !rm_tree(child, depth - 1)) return false;
+        } else if (unlink(child) != 0) {
+            return false;
+        }
+    }
+    return rmdir(path) == 0;
+}
+
+/* Moves each staged item in, the live one into pre-import/ first. Repeatable: an item already moved in has no
+ * staged copy any more and is skipped. A live item whose pre-import copy already exists is not overwritten: the
+ * step fails and both stay where they are. */
+static bool roll_forward(void)
+{
+    bool ok = true;
+    for (size_t i = 0; i < sizeof STAGED / sizeof STAGED[0]; i++) {
+        char rel[48], staged[PATH_MAX_], live[PATH_MAX_], pre[PATH_MAX_];
+        snprintf(rel, sizeof rel, STAGE_DIR "/%s", STAGED[i]);
+        if (!make_path(staged, rel) || !make_path(live, STAGED[i])) return false;
+        snprintf(rel, sizeof rel, PRE_DIR "/%s", STAGED[i]);
+        if (!make_path(pre, rel)) return false;
+        if (!exists_at(staged)) continue;
+        if (exists_at(live)) {
+            if (exists_at(pre) || rename(live, pre) != 0) {
+                ok = false;
+                continue;
+            }
+        }
+        if (rename(staged, live) != 0) ok = false;
+    }
+    return ok;
+}
+
+/* At open: finishes a commit that has its marker, drops a staging area that has none. */
+static void recover_import(void)
+{
+    char stage[PATH_MAX_], marker[PATH_MAX_], pre[PATH_MAX_];
+    if (!make_path(stage, STAGE_DIR) || !make_path(marker, MARKER) || !make_path(pre, PRE_DIR)) return;
+    if (!is_dir_at(stage)) return;
+    if (exists_at(marker)) {
+        if (mkdir(pre, 0775) != 0 && errno != EEXIST) return;
+        if (!roll_forward()) return;   /* keep everything for the next attempt */
+    }
+    rm_tree(stage, 2);
+}
+
+static hy_err_t write_whole(const char *path, const char *text)
+{
+    char tmp[PATH_MAX_ + 8];
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return HY_E_IO;
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return HY_E_IO;
+    size_t len = strlen(text);
+    bool ok = fwrite(text, 1, len, f) == len;
+    if (!sync_close(f)) ok = false;
+    if (ok && rename(tmp, path) != 0) ok = false;
+    if (!ok) unlink(tmp);
+    return ok ? HY_OK : HY_E_IO;
+}
+
+void hy_store_import_abort(void)
+{
+    char stage[PATH_MAX_];
+    if (s_base[0] && make_path(stage, STAGE_DIR)) rm_tree(stage, 2);
+    s_staging = false;
+}
+
+hy_err_t hy_store_import_begin(size_t bytes)
+{
+    if (!s_open) return HY_E_IO;
+    if (s_free_fn) {
+        size_t need = bytes > ((size_t)-1) / 2 ? (size_t)-1 : bytes * 2;
+        if (s_free_fn() < need) return HY_E_FULL;
+    }
+    hy_store_import_abort();
+    char stage[PATH_MAX_], p[PATH_MAX_];
+    if (!make_path(stage, STAGE_DIR) || mkdir(stage, 0775) != 0) return HY_E_IO;
+    hy_err_t r = HY_E_IO;
+    char *empty = hy_meds_to_json_next(NULL, 0, 1);
+    if (empty && make_path(p, STAGE_DIR "/log") && mkdir(p, 0775) == 0 && make_path(p, STAGE_DIR "/meds.json") &&
+        write_whole(p, empty) == HY_OK && make_path(p, STAGE_DIR "/gaps.jsonl") && write_whole(p, "") == HY_OK)
+        r = HY_OK;
+    free(empty);
+    if (r != HY_OK) {
+        rm_tree(stage, 2);
+        return r;
+    }
+    s_staging = true;
+    return HY_OK;
+}
+
+hy_err_t hy_store_import_meds(const hy_med_t *m, size_t n, uint32_t next_id)
+{
+    if (!s_staging || (n && !m)) return HY_E_INVALID;
+    char p[PATH_MAX_];
+    if (!make_path(p, STAGE_DIR "/meds.json")) return HY_E_IO;
+    char *js = hy_meds_to_json_next(m, n, next_id);
+    if (!js) return HY_E_INVALID;
+    hy_err_t r = write_whole(p, js);
+    free(js);
+    return r;
+}
+
+/* Appends the entries to their month files under import.tmp/log, ids kept; a run of entries in one month shares one
+ * open file. */
+hy_err_t hy_store_import_log(const hy_log_t *e, size_t n)
+{
+    if (!s_staging || (n && !e)) return HY_E_INVALID;
+    for (size_t i = 0; i < n; i++)
+        if (e[i].id == 0 || e[i].id == 0xFFFFFFFFu || !ts_in_range(e[i].ts)) return HY_E_INVALID;
+    FILE *f = NULL;
+    int open_idx = -1;
+    hy_err_t r = HY_OK;
+    for (size_t i = 0; i < n && r == HY_OK; i++) {
+        if (hy_log_to_jsonl(&e[i], s_wbuf, sizeof s_wbuf - 1) < 0) {
+            r = HY_E_INVALID;
+            break;
+        }
+        int idx = month_index(e[i].ts);
+        if (idx != open_idx) {
+            if (f && !sync_close(f)) r = HY_E_IO;
+            f = NULL;
+            if (r != HY_OK) break;
+            char name[32], rel[64], p[PATH_MAX_];
+            month_name(idx, name, sizeof name);   /* "log/YYYY-MM.jsonl" */
+            snprintf(rel, sizeof rel, STAGE_DIR "/%s", name);
+            if (!make_path(p, rel) || !(f = fopen(p, "ab"))) {
+                r = HY_E_IO;
+                break;
+            }
+            open_idx = idx;
+        }
+        size_t len = strlen(s_wbuf);
+        s_wbuf[len++] = '\n';
+        if (fwrite(s_wbuf, 1, len, f) != len) r = HY_E_IO;
+    }
+    if (f && !sync_close(f)) r = HY_E_IO;
+    return r;
+}
+
+hy_err_t hy_store_import_gap(const hy_gap_t *g, hy_gap_reason_t reason)
+{
+    if (!s_staging || !g) return HY_E_INVALID;
+    char line[LINE_MAX_], p[PATH_MAX_];
+    if (hy_gap_to_jsonl(g, reason, line, sizeof line) < 0) return HY_E_INVALID;
+    if (!make_path(p, STAGE_DIR "/gaps.jsonl")) return HY_E_IO;
+    return append_line(p, line);
+}
+
+hy_err_t hy_store_import_commit(void)
+{
+    if (!s_staging) return HY_E_INVALID;
+    char pre[PATH_MAX_], marker[PATH_MAX_], stage[PATH_MAX_];
+    if (!make_path(pre, PRE_DIR) || !make_path(marker, MARKER) || !make_path(stage, STAGE_DIR)) return HY_E_IO;
+    /* Before the marker a failure leaves the live data as it was and the staging area for the abort. */
+    if (!rm_tree(pre, 2) || mkdir(pre, 0775) != 0) return HY_E_IO;
+    FILE *f = fopen(marker, "wb");
+    if (!f) return HY_E_IO;
+    bool marked = fputs("1\n", f) >= 0;
+    if (!sync_close(f) || !marked) {
+        unlink(marker);
+        return HY_E_IO;
+    }
+    /* From here on the commit only goes forward; hy_store_open repeats it after a reset. */
+    bool ok = roll_forward() || roll_forward();
+    if (ok) rm_tree(stage, 2);
+    s_staging = false;
+    char base[BASE_MAX];
+    strcpy(base, s_base);
+    hy_err_t r = hy_store_open(base);
+    return ok ? r : HY_E_IO;
+}
+
