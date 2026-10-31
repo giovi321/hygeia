@@ -14,7 +14,7 @@ Hygeia is a personal reminder tool. It is not a medical device and must not be t
 :::
 
 :::note[Version 0.3.0, pre-release]
-These pages describe what the firmware does today. Wi-Fi, the web UI, MQTT, Home Assistant, webhooks are not built; they are listed on the [Roadmap](roadmap/) page only.
+These pages describe what the firmware does today. Wi-Fi, the web UI, MQTT, Home Assistant, and webhooks are not built; they are listed on the [Roadmap](roadmap/) page only.
 :::
 
 ## What works today

@@ -102,7 +102,7 @@ static void test_shake_same_sign_train(void)
     quiet(&r, 1000);
     TEST_ASSERT_EQUAL(1, r.trues);
 
-    start(&r);   /* two spikes make three strokes, not enough */
+    start(&r);   /* two spikes make two strokes, not enough */
     spike(&r, 0, 3500, 120);
     spike(&r, 0, 3500, 120);
     quiet(&r, 1000);

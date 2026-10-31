@@ -59,7 +59,7 @@ void     hy_orient_set(hy_orient_t *o, hy_rot_t r);   /* forced (lock, debug): c
 
 /* Per axis: hi and lo are the extremes since the last turning point (t_hi, t_lo their times), dir is 1 while rising,
    -1 while falling, 0 before the first turning point; prev_v and prev_ms are the last confirmed turning point, valid
-   when have_prev; count is the run of consecutive strokes. cooling is true from a detection until the cooldown ends. */
+   when have_prev; count is the run of consecutive strokes. cooling is true from a detection until the cooldown has passed and the axes have been calm for HY_SHK_CALM_MS. */
 typedef struct { int32_t hi, lo, prev_v; uint32_t t_hi, t_lo, prev_ms; int8_t dir; bool have_prev; uint8_t count; }
     hy_shake_axis_t;
 typedef struct { hy_shake_axis_t ax[3]; uint32_t start_ms, cool_until_ms, last_stroke_ms; bool primed, cooling; }
