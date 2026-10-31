@@ -11,6 +11,7 @@
  *   CTRL7 0x08 bit 0 accel enable              both
  *   RESET 0x60 <- 0xB0, RST_RESULT 0x4D = 0x80 SensorLib
  *   AX_L..AZ_H 0x35..0x3A, 6-byte burst       both
+ *   STATUS0 0x2E bit 0 accel data available   SensorLib (STATUS0_ACCEL_AVAIL; getDataReady masks 0x01 for accel only)
  *   +-8 g scale 4096 LSB/g                     both */
 #include "hy/board.h"
 
@@ -26,6 +27,8 @@ static const char *TAG = "imu";
 #define QMI_REG_CTRL1     0x02
 #define QMI_REG_CTRL2     0x03
 #define QMI_REG_CTRL7     0x08
+#define QMI_REG_STATUS0   0x2E
+#define QMI_STATUS0_ACCEL 0x01
 #define QMI_REG_RST_RES   0x4D
 #define QMI_REG_RESET     0x60
 #define QMI_REG_AX_L      0x35
@@ -38,6 +41,8 @@ static const char *TAG = "imu";
 #define QMI_CTRL7_ACCEL   0x01
 #define QMI_LSB_PER_G     4096
 #define QMI_IO_TIMEOUT_MS 50
+#define QMI_READY_POLL_MS 5
+#define QMI_READY_MAX_MS  100
 
 /* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. The sensor is mounted mirrored: y is negated */
 static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
@@ -201,18 +206,49 @@ esp_err_t hy_board_imu_read(int16_t mg[3])
     return ESP_OK;
 }
 
+esp_err_t hy_board_imu_wait_ready(int timeout_ms)
+{
+    if (s_state != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t last = ESP_OK;
+    for (int waited = 0;; waited += QMI_READY_POLL_MS) {
+        uint8_t st = 0;
+        last = reg_read(QMI_REG_STATUS0, &st, 1);
+        if (last == ESP_OK && (st & QMI_STATUS0_ACCEL)) {
+            return ESP_OK;
+        }
+        if (waited >= timeout_ms) {
+            return last != ESP_OK ? last : ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(pdMS_TO_TICKS(QMI_READY_POLL_MS));
+    }
+}
+
 esp_err_t hy_board_imu_sample_once(int16_t mg[3])
 {
     if (s_state != ESP_OK) {
-        return ESP_FAIL;
+        return ESP_ERR_INVALID_STATE;
     }
-    if (hy_board_imu_power(true) != ESP_OK) {
-        return ESP_FAIL;
+    esp_err_t err = hy_board_imu_power(true);
+    if (err != ESP_OK) {
+        return err;
     }
-    vTaskDelay(pdMS_TO_TICKS(30));
-    esp_err_t err = hy_board_imu_read(mg);
+    /* The first conversion after the oscillator starts may not be settled: wait for data, drop that sample, wait for
+       the next one and use it */
+    int16_t first[3];
+    err = hy_board_imu_wait_ready(QMI_READY_MAX_MS);
+    if (err == ESP_OK) {
+        err = hy_board_imu_read(first);
+    }
+    if (err == ESP_OK) {
+        err = hy_board_imu_wait_ready(QMI_READY_MAX_MS);
+    }
+    if (err == ESP_OK) {
+        err = hy_board_imu_read(mg);
+    }
     hy_board_imu_power(false); /* on every path after a successful power-on */
-    return err == ESP_OK ? ESP_OK : ESP_FAIL;
+    return err;
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
