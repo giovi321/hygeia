@@ -1,5 +1,5 @@
 /* Settings and its sub-views: Time zone (region and city rollers), Sound (volume slider, Play chime), Display
- * (brightness slider) and About. Date and time is timeset.c, Wi-Fi is a placeholder until plan 4.
+ * (brightness slider, rotation lock) and About. Date and time is timeset.c, Wi-Fi is a placeholder until plan 4.
  * The list scrolls and consumes its scroll strokes; every row acts on a still tap only. */
 
 #include <stdio.h>
@@ -29,7 +29,7 @@ enum { R_ZONE, R_DATETIME, R_SOUND, R_DISPLAY, R_WIFI, R_ABOUT, R_N };
 static lv_obj_t *s_root, *s_list, *s_val[R_N];
 static lv_obj_t *s_zone_root, *s_region, *s_city;
 static lv_obj_t *s_sound_root, *s_vol_lbl, *s_vol_slider;
-static lv_obj_t *s_disp_root, *s_bright_lbl, *s_bright_slider;
+static lv_obj_t *s_disp_root, *s_bright_lbl, *s_bright_slider, *s_rot_val;
 static lv_obj_t *s_about_root, *s_about[4];
 static const char *s_regions[MAX_REGIONS];
 static size_t s_nreg, s_city_first, s_city_n;
@@ -250,6 +250,20 @@ static void sound_create(void)
     lv_obj_set_pos(b, MARGIN, 176);
 }
 
+static lv_obj_t *row_build(lv_obj_t *parent, int h, const char *title, ui_action_cb cb, void *ud);
+
+static void rot_lock_refresh(void)
+{
+    lv_label_set_text(s_rot_val, rotate_locked() ? HY_S_ON : HY_S_OFF);
+}
+
+static void rot_lock_tap(void *ud)
+{
+    (void)ud;
+    rotate_set_lock(!rotate_locked());
+    rot_lock_refresh();
+}
+
 static void display_create(void)
 {
     s_disp_root = ui_view_box();
@@ -259,6 +273,8 @@ static void display_create(void)
     lv_obj_set_pos(s_bright_lbl, 24, 72);
     s_bright_slider = ui_slider(s_disp_root, ROW_W, 10, 100, display_live, settings_brightness_commit);
     lv_obj_set_pos(s_bright_slider, MARGIN, 116);
+    s_rot_val = row_build(s_disp_root, 66, HY_S_SET_ROT_LOCK, rot_lock_tap, NULL);
+    lv_obj_set_pos(lv_obj_get_parent(s_rot_val), MARGIN, 176);
 }
 
 /* ---- about ---- */
@@ -357,28 +373,35 @@ static void list_scroll_cb(lv_event_t *e)
     ui_input_consume();   /* a stroke that scrolls the list must not also navigate */
 }
 
-static void make_row(int idx, const char *title)
+/* A list-style row: the title on the left, the value on the right. Returns the value label (its parent is the row). */
+static lv_obj_t *row_build(lv_obj_t *parent, int h, const char *title, ui_action_cb cb, void *ud)
 {
-    lv_obj_t *r = lv_obj_create(s_list);
+    lv_obj_t *r = lv_obj_create(parent);
     lv_obj_remove_style_all(r);
-    lv_obj_set_size(r, ROW_W, ROW_H);
+    lv_obj_set_size(r, ROW_W, h);
     lv_obj_set_style_radius(r, 22, 0);
     lv_obj_set_style_bg_color(r, lv_color_hex(HY_C_SURFACE), 0);
     lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(r, lv_color_hex(HY_C_SURFACE2), LV_STATE_PRESSED);
     lv_obj_set_scrollable(r, false);
     lv_obj_set_scroll_chain(r, true);
-    if (idx == R_WIFI) {
-        lv_obj_set_style_opa(r, LV_OPA_40, 0);
-    }
-    ui_on_tap(r, row_tap, (void *)(uintptr_t)idx);
+    ui_on_tap(r, cb, ud);
     lv_obj_t *t = ui_label(r, hy_type.body, HY_C_TEXT, title);
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 22, 0);
-    s_val[idx] = ui_label(r, hy_type.status, HY_C_TEXT2, "");
-    lv_obj_set_width(s_val[idx], 250);
-    lv_label_set_long_mode(s_val[idx], LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_style_text_align(s_val[idx], LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(s_val[idx], LV_ALIGN_RIGHT_MID, -22, 0);
+    lv_obj_t *v = ui_label(r, hy_type.status, HY_C_TEXT2, "");
+    lv_obj_set_width(v, 250);
+    lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(v, LV_ALIGN_RIGHT_MID, -22, 0);
+    return v;
+}
+
+static void make_row(int idx, const char *title)
+{
+    s_val[idx] = row_build(s_list, ROW_H, title, row_tap, (void *)(uintptr_t)idx);
+    if (idx == R_WIFI) {
+        lv_obj_set_style_opa(lv_obj_get_parent(s_val[idx]), LV_OPA_40, 0);
+    }
 }
 
 static void list_refresh(void)
@@ -443,6 +466,7 @@ void settings_show(hy_view_t v)
     case HY_V_SET_DISPLAY:
         lv_slider_set_value(s_bright_slider, st->brightness, LV_ANIM_OFF);
         lv_label_set_text_fmt(s_bright_lbl, HY_S_SET_BRIGHT, (unsigned)st->brightness);
+        rot_lock_refresh();   /* a lock changed from the console shows when the page opens */
         break;
     case HY_V_ABOUT:
         about_refresh();

@@ -304,6 +304,7 @@ void rotate_poll(void);                          /* LVGL timer, 50 ms: applies t
 void rotate_set_lock(bool on);                   /* saves rot_lock and rot, tells the motion task */
 bool rotate_locked(void);
 void shake_event(void);                          /* motion callback and debug: undoes the dose while the Undo toast shows */
+void rotate_debug_state(void);                   /* debug: applied, pending and lock, logged */
 void rotate_force(hy_rot_t r);                   /* debug: apply now, also while locked; saves rot */
 
 /* splash.c */
