@@ -1,47 +1,56 @@
 <style>
+  /* Device UI mockups. Sizes and positions follow the firmware (components/hy_ui/src): absolute boxes use the screen
+     pixel of the 480 x 480 panel, and page content sits 56 px down, below the top bar. Text is Inter at the
+     firmware's type scale and line heights. */
   .wrap { display:flex; flex-wrap:wrap; gap:22px; }
   .item { width:310px; }
   .item h3 { margin:10px 0 4px; font-size:15px; }
   .item p { margin:0; font-size:13px; line-height:1.4; color:#888; }
-  .dev { width:480px; height:480px; background:#000; border-radius:28px; position:relative; overflow:hidden;
-         font-family:-apple-system,"Segoe UI",Roboto,sans-serif; color:#EDEDF0; transform:scale(.645); transform-origin:top left;
+  .dev { width:480px; height:480px; background:#000; position:relative; overflow:hidden;
+         font-family:Inter,-apple-system,"Segoe UI",Roboto,sans-serif; color:#EDEDF0; transform:scale(.645); transform-origin:top left;
          margin-bottom:-170px; margin-right:-170px; outline:5px solid #26262C; }
-  /* larger top bar */
-  .sb { height:56px; display:flex; align-items:center; justify-content:space-between; padding:0 24px; }
-  .sb .t { font-size:30px; font-weight:700; letter-spacing:.5px; }
-  .sb .r { display:flex; gap:16px; align-items:center; font-size:22px; font-weight:600; color:#C8C8D0; }
-  .wifi { width:30px; height:22px; position:relative; }
-  .wifi i { position:absolute; left:50%; bottom:0; border:4px solid #C8C8D0; border-color:#C8C8D0 transparent transparent transparent; border-radius:50%; transform:translateX(-50%); }
-  .bat { width:42px; height:22px; border:3px solid #C8C8D0; border-radius:6px; position:relative; }
-  .bat:after { content:""; position:absolute; right:-8px; top:5px; width:4px; height:7px; background:#C8C8D0; border-radius:2px; }
-  .bat i { position:absolute; left:3px; top:3px; bottom:3px; width:62%; background:#7CE38B; border-radius:2px; }
-  .badge { font-size:16px; padding:3px 9px; border-radius:8px; background:#1E1E24; color:#C8C8D0; }
-  .ring { border-radius:50%; display:flex; align-items:center; justify-content:center; }
-  .ring .in { border-radius:50%; background:#0B0B0E; display:flex; align-items:center; justify-content:center; font-weight:700; }
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:8px 22px; }
-  .tile { background:#121216; border-radius:26px; height:180px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
-  .due { outline:3px solid #F6C453; outline-offset:-3px; }
-  .sub { color:#8A8A94; font-size:17px; }
-  .dots { position:absolute; bottom:12px; left:0; right:0; display:flex; justify-content:center; gap:8px; }
-  .dots i { width:8px; height:8px; border-radius:50%; background:#3A3A42; } .dots i.on { background:#EDEDF0; width:22px; border-radius:4px; }
-  .grab { position:absolute; top:6px; left:50%; width:44px; height:5px; margin-left:-22px; border-radius:3px; background:#2E2E36; }
-  .hdr { font-size:26px; font-weight:700; padding:2px 24px 8px; }
-  .card { background:#121216; border-radius:22px; padding:16px 18px; margin:0 18px 12px; }
-  .qs { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 18px; }
-  .q { background:#1A1A20; border-radius:22px; height:96px; padding:16px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:space-between; }
-  .q.on { background:#24323A; } .q b { font-size:21px; } .q span { font-size:16px; color:#9A9AA4; }
-  .slider { height:30px; background:#1A1A20; border-radius:15px; margin:14px 18px; position:relative; }
-  .slider i { position:absolute; left:0; top:0; bottom:0; width:70%; background:#3A3A44; border-radius:15px; }
-  .cell { width:34px; height:34px; border-radius:9px; }
-  .ok { background:#4FD1C5; } .late { background:#2F7F78; } .miss { background:transparent; outline:2px solid #E5484D; outline-offset:-2px; } .na { background:#1C1C22; }
-  .slide { height:88px; border-radius:44px; background:#1A1A20; margin:0 26px; position:relative; display:flex; align-items:center; justify-content:center; font-size:21px; color:#9A9AA4; }
-  .knob { position:absolute; left:8px; top:8px; width:72px; height:72px; border-radius:50%; background:#F6C453; color:#000; display:flex; align-items:center; justify-content:center; font-size:30px; font-weight:800; }
-  .legend { font-size:13px; color:#888; }
+  .dev * { box-sizing:border-box; }
+  .a { position:absolute; white-space:nowrap; }
+  .c { text-align:center; }
+  .f17 { font-size:17px; line-height:22px; font-weight:400; }
+  .f17b { font-size:17px; line-height:23px; font-weight:700; }
+  .f22 { font-size:22px; line-height:28px; font-weight:400; }
+  .f22b { font-size:22px; line-height:27px; font-weight:700; }
+  .f26 { font-size:26px; line-height:33px; font-weight:700; }
+  .f30 { font-size:30px; line-height:38px; font-weight:700; }
+  .f38 { font-size:38px; line-height:33px; font-weight:700; }
+  .f44 { font-size:44px; line-height:53px; font-weight:700; }
+  .f52 { font-size:52px; line-height:64px; font-weight:700; }
+  .f96 { font-size:96px; line-height:77px; font-weight:700; }
+  .f120 { font-size:120px; line-height:92px; font-weight:200; }
+  .t2 { color:#9A9AA4; }
+  /* top bar: 56 px, time left, crossed Wi-Fi, optional bolt and battery percent right */
+  .bar { position:absolute; left:0; top:0; width:480px; height:56px; }
+  .bar .tm { left:24px; top:9px; }
+  .bar .rt { position:absolute; right:24px; top:0; height:56px; display:flex; align-items:center; }
+  .bar .rt svg { display:block; overflow:visible; }
+  .bar .pct { line-height:28px; }
+  .grab { position:absolute; top:6px; left:218px; width:44px; height:5px; border-radius:3px; background:#2E2E36; }
+  .ring { position:absolute; border-radius:50%; }
+  .disc { position:absolute; border-radius:50%; background:#0B0B0E; }
+  .tile { position:absolute; width:210px; height:180px; border-radius:24px; background:#121216; }
+  .tile .bd { position:absolute; inset:0; border-radius:24px; border:3px solid; }
+  .dots { position:absolute; top:460px; left:213px; height:8px; display:flex; gap:8px; }
+  .dots i { width:8px; height:8px; border-radius:4px; background:#3A3A42; }
+  .dots i.on { width:22px; background:#EDEDF0; }
+  .q { position:absolute; width:216px; height:96px; border-radius:22px; background:#1A1A20; }
+  .q.on { background:#24323A; }
+  .btn { position:absolute; border-radius:22px; background:#1A1A20; display:flex; align-items:center; }
+  .cell { position:absolute; border-radius:10px; }
+  .late:after { content:""; position:absolute; left:16px; top:15px; width:8px; height:8px; border-radius:50%; background:#F6C453; }
+  .miss { border:2px solid #E5484D; }
+  .na { background:#1C1C22; }
   .arrow { position:absolute; font-size:15px; color:#9A9AA4; background:#000c; padding:2px 8px; border-radius:8px; border:1px dashed #555; }
+  .legend { font-size:13px; color:#888; }
 </style>
 
-<h2>Screens v4: icon-only status (Wi-Fi arcs = client, AP badge = own network)</h2>
-<p class="subtitle">480×480 shown at 64%. Top bar enlarged (time, Wi-Fi mode, battery %). Dashed labels show the gestures and are not drawn on the device.</p>
+<h2>Device screens as built (480×480)</h2>
+<p class="subtitle">Shown at 64%. Layout, sizes and wording follow the firmware. Dashed labels show the gestures and are not drawn on the device.</p>
 
 <div class="section">
   <h3>Gesture map</h3>
@@ -52,138 +61,72 @@
 
   <div class="item">
     <div class="dev">
-      <div class="grab"></div>
-      <div class="sb"><span class="t">08:42</span><span class="r"><span class="wifi"><i style="width:30px;height:30px"></i><i style="width:16px;height:16px;bottom:-1px"></i></span><span>78%</span></span></div>
-      <div class="grid">
-        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#4FD1C5 0 62%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#4FD1C5">A</div></div><div class="sub">2 h 14 m ago</div></div>
-        <div class="tile due"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#F6C453 0 100%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#F6C453">V</div></div><div class="sub" style="color:#F6C453;font-weight:600">Due now</div></div>
-        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#A78BFA 0 25%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#A78BFA">M</div></div><div class="sub">as needed</div></div>
-        <div class="tile" style="background:#0B0B0E"><div style="font-size:44px;color:#8A8A94">+</div></div>
-      </div>
+      <div class="bar"><div class="grab"></div><span class="a tm f30">08:42</span><div class="rt"><svg width="30" height="24" viewBox="0 0 30 24" style="margin-right:16px" fill="none" stroke="#9A9AA4" stroke-linecap="round"><path d="M5.81 12.81 A13 13 0 0 1 24.19 12.81" stroke-width="4"/><path d="M11.46 18.46 A5 5 0 0 1 18.54 18.46" stroke-width="4"/><path d="M3 1 L27 23" stroke-width="3"/></svg><svg width="12" height="18" viewBox="0 0 12 18" style="margin-right:6px"><polygon points="8,0 1,10 7,10" fill="#EDEDF0"/><polygon points="5,7 11,7 4,17" fill="#EDEDF0"/></svg><span class="pct f22">78%</span></div></div>
+      <div class="tile" style="left:22px;top:64px"><div class="ring" style="left:47px;top:16px;width:116px;height:116px;background:conic-gradient(#4FD1C5 0 62%, #1A1A20 0)"></div><div class="disc" style="left:58px;top:27px;width:94px;height:94px"></div><span class="a f52 c" style="left:0;width:210px;top:45px;color:#4FD1C5">A</span><span class="a c f17 t2" style="left:0;width:210px;top:142px;">2&nbsp;h 14&nbsp;m ago</span></div><div class="tile" style="left:248px;top:64px"><div class="ring" style="left:47px;top:16px;width:116px;height:116px;background:conic-gradient(#F6C453 0 100%, #1A1A20 0)"></div><div class="disc" style="left:58px;top:27px;width:94px;height:94px"></div><span class="a f52 c" style="left:0;width:210px;top:45px;color:#F6C453">V</span><span class="a c f17b" style="left:0;width:210px;top:141.5px;color:#F6C453">Due now</span><div class="bd" style="border-color:#F6C453"></div></div><div class="tile" style="left:22px;top:260px"><div class="ring" style="left:47px;top:16px;width:116px;height:116px;background:conic-gradient(#A78BFA 0 25%, #1A1A20 0)"></div><div class="disc" style="left:58px;top:27px;width:94px;height:94px"></div><span class="a f52 c" style="left:0;width:210px;top:45px;color:#A78BFA">M</span><span class="a c f17 t2" style="left:0;width:210px;top:142px;">as needed</span></div><div class="tile" style="left:248px;top:260px;background:#0B0B0E"><span class="a f44 c t2" style="left:0;width:210px;top:63px">+</span></div>
       <div class="dots"><i class="on"></i><i></i><i></i></div>
       <span class="arrow" style="right:6px;top:220px">← Overview</span>
       <span class="arrow" style="left:170px;top:62px">↓ Quick settings</span>
     </div>
-    <h3>1 · Home</h3><p>Larger top bar. No menu; page dots only. "+" tile shows how to add a medicine from the web UI (or opens a QR code to it).</p>
+    <h3>1 · Home</h3><p>Two tiles per row, scrolling vertically. The ring shows the time from the last dose towards the next; a due tile gets a full ring and a coloured outline. The "+" tile opens the form that adds a medicine. The Wi-Fi mark is crossed out because Wi-Fi is not built yet; the bolt shows USB power.</p>
   </div>
 
   <div class="item">
     <div class="dev">
-      <div class="sb"><span class="t">08:42</span><span class="r"><span class="wifi"><i style="width:30px;height:30px"></i><i style="width:16px;height:16px;bottom:-1px"></i></span><span>78%</span></span></div>
-      <div class="qs">
-        <div class="q on"><b>Wi-Fi</b><span>Client · HomeNet</span></div>
-        <div class="q"><b>Access point</b><span>Off · tap to start</span></div>
-        <div class="q on"><b>Sound</b><span>Chime on</span></div>
-        <div class="q"><b>Do not disturb</b><span>Off</span></div>
-      </div>
-      <div class="slider"><i></i></div>
-      <div style="display:flex;justify-content:space-between;padding:0 24px;font-size:17px;color:#9A9AA4"><span>Brightness</span><span>Battery 78% · ~2 d</span></div>
-      <div style="display:flex;gap:12px;padding:14px 18px 0">
-        <div class="q" style="flex:1;height:64px;justify-content:center"><b style="font-size:18px">Settings ›</b></div>
-        <div class="q" style="flex:1;height:64px;justify-content:center"><b style="font-size:18px">Web UI QR ›</b></div>
-      </div>
+      <div class="bar"><span class="a tm f30">08:42</span><div class="rt"><svg width="30" height="24" viewBox="0 0 30 24" style="margin-right:16px" fill="none" stroke="#9A9AA4" stroke-linecap="round"><path d="M5.81 12.81 A13 13 0 0 1 24.19 12.81" stroke-width="4"/><path d="M11.46 18.46 A5 5 0 0 1 18.54 18.46" stroke-width="4"/><path d="M3 1 L27 23" stroke-width="3"/></svg><span class="pct f22">78%</span></div></div>
+      <div class="q" style="left:18px;top:56px;opacity:.4"><span class="a f22b" style="left:16px;top:18px">Wi-Fi</span><span class="a f17 t2" style="left:16px;top:58px">Off</span></div><div class="q" style="left:246px;top:56px;opacity:.4"><span class="a f22b" style="left:16px;top:18px">Access point</span><span class="a f17 t2" style="left:16px;top:58px">Off</span></div><div class="q on" style="left:18px;top:164px;"><span class="a f22b" style="left:16px;top:18px">Sound</span><span class="a f17 t2" style="left:16px;top:58px">Chime on</span></div><div class="q" style="left:246px;top:164px;"><span class="a f22b" style="left:16px;top:18px">Do not disturb</span><span class="a f17 t2" style="left:16px;top:58px">Off</span></div><div class="a" style="left:18px;top:274px;width:444px;height:56px;border-radius:28px;background:#1A1A20"></div><div class="a" style="left:18px;top:274px;width:296px;height:56px;border-radius:28px;background:#3A3A44"></div><span class="a f17b" style="left:38px;top:290.5px">Brightness</span><span class="a f17 t2" style="left:24px;top:346px">~2&nbsp;d left</span><div class="btn" style="left:18px;top:380px;width:216px;height:64px"><span class="f17b" style="margin-left:16px">Settings ›</span></div><div class="btn" style="left:246px;top:380px;width:216px;height:64px;opacity:.4"><span class="f17b" style="margin-left:16px">Web UI QR ›</span></div>
       <span class="arrow" style="left:170px;bottom:10px">↑ close</span>
     </div>
-    <h3>2 · Quick settings (pull down)</h3><p>Wi-Fi client / AP toggles, sound, do-not-disturb, brightness, battery estimate. The QR code opens the web UI on a phone.</p>
+    <h3>2 · Quick settings (pull down)</h3><p>Sound and Do not disturb toggle. Wi-Fi, Access point and Web UI QR are dimmed placeholders until Wi-Fi is built. The brightness slider carries its name. The battery line shows only a discharge estimate and is hidden on USB power.</p>
   </div>
 
   <div class="item">
     <div class="dev">
-      <div class="sb"><span class="t">08:42</span><span class="r"><span class="badge">AP</span><span>78%</span></span></div>
-      <div class="hdr">Today</div>
-      <div style="display:flex;align-items:center;gap:24px;padding:0 24px 10px">
-        <div class="ring" style="width:130px;height:130px;background:conic-gradient(#7CE38B 0 66%,#22222A 0)"><div class="in" style="width:106px;height:106px;flex-direction:column"><span style="font-size:38px">2/3</span><span class="sub" style="font-size:14px;font-weight:400">doses</span></div></div>
-        <div style="font-size:18px;line-height:1.7"><div><span style="color:#4FD1C5">●</span> A 06:28 ✓</div><div><span style="color:#F6C453">●</span> V 08:30 due</div><div><span style="color:#4FD1C5">●</span> A 14:00</div><div style="color:#8A8A94">○ M as needed</div></div>
-      </div>
-      <div style="position:relative;height:60px;margin:6px 24px;border-top:2px solid #22222A">
-        <span style="position:absolute;left:25%;top:-11px;width:20px;height:20px;border-radius:50%;background:#4FD1C5"></span>
-        <span style="position:absolute;left:35%;top:-11px;width:20px;height:20px;border-radius:50%;background:#F6C453"></span>
-        <span style="position:absolute;left:58%;top:-11px;width:20px;height:20px;border-radius:50%;border:3px solid #4FD1C5;box-sizing:border-box"></span>
-        <span style="position:absolute;left:35.5%;top:-30px;width:2px;height:60px;background:#EDEDF0"></span>
-        <span class="sub" style="position:absolute;left:0;top:14px;font-size:14px">00</span><span class="sub" style="position:absolute;left:47%;top:14px;font-size:14px">12</span><span class="sub" style="position:absolute;right:0;top:14px;font-size:14px">24</span>
-      </div>
+      <div class="bar"><span class="a tm f30">08:42</span><div class="rt"><svg width="30" height="24" viewBox="0 0 30 24" style="margin-right:16px" fill="none" stroke="#9A9AA4" stroke-linecap="round"><path d="M5.81 12.81 A13 13 0 0 1 24.19 12.81" stroke-width="4"/><path d="M11.46 18.46 A5 5 0 0 1 18.54 18.46" stroke-width="4"/><path d="M3 1 L27 23" stroke-width="3"/></svg><span class="pct f22">78%</span></div></div>
+      <span class="a f26" style="left:24px;top:58px">Today</span><div class="ring" style="left:24px;top:102px;width:150px;height:150px;background:conic-gradient(#7CE38B 0 25%, #22222A 0)"></div><div class="disc" style="left:38px;top:116px;width:122px;height:122px"></div><span class="a f38 c" style="left:38px;width:122px;top:152.5px">1/4</span><span class="a f17 t2 c" style="left:38px;width:122px;top:194px">doses</span><div class="a" style="left:198px;top:100px;height:38px;display:flex;align-items:center"><i style="width:12px;height:12px;border-radius:50%;margin-right:10px;background:#4FD1C5"></i><span class="f22" style="">A 06:28</span><svg width="16" height="16" viewBox="0 0 16 16" style="margin-left:8px" fill="none" stroke="#7CE38B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,8 6,14 15,2"/></svg></div><div class="a" style="left:198px;top:138px;height:38px;display:flex;align-items:center"><i style="width:12px;height:12px;border-radius:50%;margin-right:10px;background:#F6C453"></i><span class="f22" style="">V 08:30</span><span class="f22" style="color:#F6C453">&nbsp;due</span></div><div class="a" style="left:198px;top:176px;height:38px;display:flex;align-items:center"><i style="width:12px;height:12px;border-radius:50%;margin-right:10px;background:#4FD1C5"></i><span class="f22" style="">A 14:00</span></div><div class="a" style="left:198px;top:214px;height:38px;display:flex;align-items:center"><i style="width:12px;height:12px;border-radius:50%;margin-right:10px;background:#4FD1C5"></i><span class="f22" style="">A 22:00</span></div><div class="a" style="left:198px;top:252px;height:38px;display:flex;align-items:center"><i style="width:12px;height:12px;border-radius:50%;margin-right:10px;border:2px solid #9A9AA4"></i><span class="f22" style="color:#9A9AA4">M as needed</span></div><div class="a" style="left:24px;top:385px;width:432px;height:2px;background:#22222A"></div><span class="a" style="left:121px;top:375px;width:22px;height:22px;border-radius:50%;background:#4FD1C5"></span><span class="a" style="left:166px;top:375px;width:22px;height:22px;border-radius:50%;background:#F6C453"></span><span class="a" style="left:265px;top:375px;width:22px;height:22px;border-radius:50%;border:3px solid #4FD1C5"></span><span class="a" style="left:409px;top:375px;width:22px;height:22px;border-radius:50%;border:3px solid #4FD1C5"></span><div class="a" style="left:179px;top:354px;width:2px;height:64px;background:#EDEDF0"></div><span class="a f17 t2" style="left:24px;top:405px">00</span><span class="a f17 t2" style="left:227px;top:405px">12</span><span class="a f17 t2" style="right:24px;top:405px">24</span>
       <div class="dots"><i></i><i class="on"></i><i></i></div>
     </div>
-    <h3>3 · Overview (swipe left)</h3><p>Quick view: today's doses (taken / due / upcoming / as-needed) and a 24 h timeline with a "now" line.</p>
+    <h3>3 · Overview (swipe left)</h3><p>Today's dose count in a ring, one row per dose with its state (a green tick for taken, the word due or late in the medicine colour, as-needed medicines last) and a 24 h timeline with a "now" line.</p>
   </div>
 
   <div class="item">
     <div class="dev">
-      <div class="sb"><span class="t">08:42</span><span class="r"><span>78%</span></span></div>
-      <div class="hdr">Last 7 days</div>
-      <div style="display:grid;grid-template-columns:40px repeat(7,34px);gap:10px 14px;padding:0 24px;align-items:center;font-size:20px">
-        <span></span><span class="sub">T</span><span class="sub">F</span><span class="sub">S</span><span class="sub">S</span><span class="sub">M</span><span class="sub">T</span><span class="sub">W</span>
-        <b style="color:#4FD1C5">A</b><i class="cell ok"></i><i class="cell ok"></i><i class="cell late"></i><i class="cell ok"></i><i class="cell ok"></i><i class="cell ok"></i><i class="cell ok" style="opacity:.5"></i>
-        <b style="color:#F6C453">V</b><i class="cell ok" style="background:#F6C453"></i><i class="cell miss"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell ok" style="background:#F6C453"></i><i class="cell na"></i>
-        <b style="color:#A78BFA">M</b><i class="cell na"></i><i class="cell" style="background:#A78BFA"></i><i class="cell na"></i><i class="cell na"></i><i class="cell" style="background:#A78BFA"></i><i class="cell na"></i><i class="cell na"></i>
-      </div>
-      <div style="display:flex;justify-content:space-around;margin:26px 24px 0;font-size:16px;color:#9A9AA4"><span>■ on time</span><span>▪ late</span><span style="color:#E5484D">□ missed</span></div>
-      <div style="text-align:center;margin-top:16px;font-size:24px;font-weight:700">Adherence 95%</div>
+      <div class="bar"><span class="a tm f30">08:42</span><div class="rt"><svg width="30" height="24" viewBox="0 0 30 24" style="margin-right:16px" fill="none" stroke="#9A9AA4" stroke-linecap="round"><path d="M5.81 12.81 A13 13 0 0 1 24.19 12.81" stroke-width="4"/><path d="M11.46 18.46 A5 5 0 0 1 18.54 18.46" stroke-width="4"/><path d="M3 1 L27 23" stroke-width="3"/></svg><span class="pct f22">78%</span></div></div>
+      <span class="a f26" style="left:24px;top:58px">Last 7 days</span><span class="a f17 t2 c" style="left:78px;top:101px;width:40px">T</span><span class="a f17 t2 c" style="left:130px;top:101px;width:40px">F</span><span class="a f17 t2 c" style="left:182px;top:101px;width:40px">S</span><span class="a f17 t2 c" style="left:234px;top:101px;width:40px">S</span><span class="a f17 t2 c" style="left:286px;top:101px;width:40px">M</span><span class="a f17 t2 c" style="left:338px;top:101px;width:40px">T</span><span class="a f17 t2 c" style="left:390px;top:101px;width:40px">W</span><span class="a f22b" style="left:24px;top:137.5px;color:#4FD1C5">A</span><i class="cell" style="left:78px;top:132px;width:40px;height:38px;background:#4FD1C5"></i><i class="cell" style="left:130px;top:132px;width:40px;height:38px;background:#4FD1C5"></i><i class="cell late" style="left:182px;top:132px;width:40px;height:38px;background:#4FD1C5"></i><i class="cell" style="left:234px;top:132px;width:40px;height:38px;background:#4FD1C5"></i><i class="cell" style="left:286px;top:132px;width:40px;height:38px;background:#4FD1C5"></i><i class="cell" style="left:338px;top:132px;width:40px;height:38px;background:#4FD1C5"></i><i class="cell" style="left:390px;top:132px;width:40px;height:38px;opacity:.5;background:#4FD1C5"></i><span class="a f22b" style="left:24px;top:183.5px;color:#F6C453">V</span><i class="cell" style="left:78px;top:178px;width:40px;height:38px;background:#F6C453"></i><i class="cell miss" style="left:130px;top:178px;width:40px;height:38px;"></i><i class="cell" style="left:182px;top:178px;width:40px;height:38px;background:#F6C453"></i><i class="cell" style="left:234px;top:178px;width:40px;height:38px;background:#F6C453"></i><i class="cell" style="left:286px;top:178px;width:40px;height:38px;background:#F6C453"></i><i class="cell" style="left:338px;top:178px;width:40px;height:38px;background:#F6C453"></i><i class="cell na" style="left:390px;top:178px;width:40px;height:38px;"></i><span class="a f22b" style="left:24px;top:229.5px;color:#A78BFA">M</span><i class="cell na" style="left:78px;top:224px;width:40px;height:38px;"></i><i class="cell" style="left:130px;top:224px;width:40px;height:38px;background:#A78BFA"></i><i class="cell na" style="left:182px;top:224px;width:40px;height:38px;"></i><i class="cell na" style="left:234px;top:224px;width:40px;height:38px;"></i><i class="cell" style="left:286px;top:224px;width:40px;height:38px;background:#A78BFA"></i><i class="cell na" style="left:338px;top:224px;width:40px;height:38px;"></i><i class="cell na" style="left:390px;top:224px;width:40px;height:38px;"></i><div class="a f17" style="left:104px;top:377px;height:22px;transform:translateX(-50%);display:flex;align-items:center;color:#9A9AA4"><i style="width:10px;height:10px;border-radius:2px;background:#9A9AA4;margin-right:7px"></i>on&nbsp;time</div><div class="a f17" style="left:245px;top:377px;height:22px;transform:translateX(-50%);display:flex;align-items:center;color:#9A9AA4"><i style="width:10px;height:10px;border-radius:2px;background:#9A9AA4;margin-right:7px;position:relative"><b style="position:absolute;left:3px;top:3px;width:4px;height:4px;border-radius:50%;background:#F6C453"></b></i>late</div><div class="a f17" style="left:382px;top:377px;height:22px;transform:translateX(-50%);display:flex;align-items:center;color:#E5484D"><i style="width:10px;height:10px;border-radius:2px;border:2px solid #E5484D;margin-right:7px"></i>missed</div><span class="a f26 c" style="left:0;width:480px;top:413.5px">Adherence 95%</span>
       <div class="dots"><i></i><i></i><i class="on"></i></div>
     </div>
-    <h3>4 · History (swipe left again)</h3><p>7-day grid per medicine, one row each, scrolls when there are many. Pinch or double tap to switch to 30 days. Tap a row → medicine detail.</p>
+    <h3>4 · History (swipe left again)</h3><p>7-day grid, one row per medicine; the list scrolls when there are more than five. Double tap anywhere to switch to 30 days. Tap a row to open the medicine detail. Today's column is dimmed while doses are still open.</p>
   </div>
 
   <div class="item">
     <div class="dev">
-      <div class="sb"><span class="t">08:42</span><span class="r"><span>78%</span></span></div>
-      <div style="display:flex;align-items:center;gap:18px;padding:0 24px 14px">
-        <div class="ring" style="width:96px;height:96px;background:conic-gradient(#4FD1C5 0 62%,#22222A 0)"><div class="in" style="width:80px;height:80px;font-size:44px;color:#4FD1C5">A</div></div>
-        <div><div style="font-size:26px;font-weight:700">Antibiotic</div><div class="sub">1 tab · 06:00, 14:00, 22:00</div><div class="sub">12 tablets left</div></div>
-      </div>
-      <div class="card" style="font-size:19px;line-height:1.75">
-        <div style="display:flex;justify-content:space-between"><span>Today 06:28</span><span class="sub">+28 min</span></div>
-        <div style="display:flex;justify-content:space-between"><span>Yesterday 22:04</span><span class="sub">on time</span></div>
-        <div style="display:flex;justify-content:space-between"><span>Yesterday 14:41</span><span class="sub">+41 min</span></div>
-      </div>
-      <div style="display:flex;gap:12px;padding:0 18px">
-        <div class="q" style="flex:1;height:66px;justify-content:center;align-items:center"><b style="font-size:19px">Log with note</b></div>
-        <div class="q" style="flex:1;height:66px;justify-content:center;align-items:center"><b style="font-size:19px">Log earlier…</b></div>
-      </div>
+      <div class="bar"><span class="a tm f30">08:42</span><div class="rt"><svg width="30" height="24" viewBox="0 0 30 24" style="margin-right:16px" fill="none" stroke="#9A9AA4" stroke-linecap="round"><path d="M5.81 12.81 A13 13 0 0 1 24.19 12.81" stroke-width="4"/><path d="M11.46 18.46 A5 5 0 0 1 18.54 18.46" stroke-width="4"/><path d="M3 1 L27 23" stroke-width="3"/></svg><span class="pct f22">78%</span></div></div>
+      <div class="ring" style="left:24px;top:57px;width:96px;height:96px;background:conic-gradient(#4FD1C5 0 62%, #22222A 0)"></div><div class="disc" style="left:32px;top:65px;width:80px;height:80px"></div><span class="a f44 c" style="left:24px;width:96px;top:83.5px;color:#4FD1C5">A</span><span class="a f26" style="left:138px;top:65px">Antibiotic</span><span class="a f17 t2" style="left:138px;top:99px">1 tab · 06:00, 14:00, 22:00</span><span class="a f17 t2" style="left:138px;top:122px">12 tablets left</span><div class="a" style="left:18px;top:165px;width:444px;height:132px;border-radius:22px;background:#121216"></div><span class="a f22" style="left:36px;top:179px">Today 06:28</span><span class="a f17 t2" style="right:36px;top:182px">+28 min</span><span class="a f22" style="left:36px;top:217px">Yesterday 22:04</span><span class="a f17 t2" style="right:36px;top:220px">on time</span><span class="a f22" style="left:36px;top:255px">Yesterday 14:41</span><span class="a f17 t2" style="right:36px;top:258px">+41 min</span><div class="btn" style="left:18px;top:309px;width:216px;height:66px;justify-content:center"><span class="f22b">Log with note</span></div><div class="btn" style="left:246px;top:309px;width:216px;height:66px;justify-content:center"><span class="f22b">Log earlier…</span></div><span class="a f22b" style="left:24px;top:393px">Last 30 days</span><i class="a" style="left:24px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:52px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:80px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:108px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"><b style="position:absolute;left:9px;top:9px;width:4px;height:4px;border-radius:50%;background:#F6C453"></b></i><i class="a" style="left:136px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:164px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:192px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:220px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:248px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:276px;top:432px;width:22px;height:22px;border-radius:6px;border:2px solid #E5484D"></i><i class="a" style="left:304px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:332px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:360px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:388px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:416px;top:432px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:24px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:52px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"><b style="position:absolute;left:9px;top:9px;width:4px;height:4px;border-radius:50%;background:#F6C453"></b></i><i class="a" style="left:80px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:108px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:136px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:164px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:192px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:220px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:248px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:276px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:304px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:332px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:360px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:388px;top:460px;width:22px;height:22px;border-radius:6px;background:#4FD1C5"></i><i class="a" style="left:416px;top:460px;width:22px;height:22px;border-radius:6px;opacity:.5;background:#4FD1C5"></i>
       <span class="arrow" style="left:4px;top:230px">→ back</span>
     </div>
-    <h3>5 · Medicine detail (long press)</h3><p>Name, dose, schedule, pill count, recent log with lateness. Scroll down for the 30-day chart and history edits.</p>
+    <h3>5 · Medicine detail (long press)</h3><p>Ring, name, dose and schedule, pills left, the three newest log entries with lateness, and the two log buttons. Scroll down for the 30-day grid, the adherence, and the Edit and Archive buttons.</p>
   </div>
 
   <div class="item">
     <div class="dev">
-      <div class="sb"><span class="t">08:30</span><span class="r"><span>78%</span></span></div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:6px">
-        <div class="ring" style="width:200px;height:200px;background:conic-gradient(#F6C453 0 100%,#22222A 0)"><div class="in" style="width:176px;height:176px;flex-direction:column"><span style="font-size:96px;color:#F6C453;line-height:1">V</span></div></div>
-        <div style="font-size:26px;font-weight:700">Vitamin D · 1 tab</div>
-        <div class="sub">Due 08:30</div>
-      </div>
-      <div class="slide" style="margin-top:16px"><div class="knob">✓</div>Slide to log as taken  ›</div>
-      <div style="display:flex;justify-content:space-between;padding:12px 40px 0;font-size:18px;color:#9A9AA4"><span>‹ swipe left: snooze 15 min</span><span>Skip</span></div>
+      <div class="bar"><span class="a tm f30">08:30</span><div class="rt"><svg width="30" height="24" viewBox="0 0 30 24" style="margin-right:16px" fill="none" stroke="#9A9AA4" stroke-linecap="round"><path d="M5.81 12.81 A13 13 0 0 1 24.19 12.81" stroke-width="4"/><path d="M11.46 18.46 A5 5 0 0 1 18.54 18.46" stroke-width="4"/><path d="M3 1 L27 23" stroke-width="3"/></svg><svg width="12" height="18" viewBox="0 0 12 18" style="margin-right:6px"><polygon points="8,0 1,10 7,10" fill="#EDEDF0"/><polygon points="5,7 11,7 4,17" fill="#EDEDF0"/></svg><span class="pct f22">78%</span></div></div>
+      <div class="ring" style="left:140px;top:62px;width:200px;height:200px;background:conic-gradient(#F6C453 0 100%, #22222A 0)"></div><div class="disc" style="left:152px;top:74px;width:176px;height:176px"></div><span class="a f96 c" style="left:140px;width:200px;top:130px;color:#F6C453">V</span><span class="a f26 c" style="left:20px;width:440px;top:271px">Vitamin D · 1 tab</span><span class="a f17 t2 c" style="left:20px;width:440px;top:311px">Due 08:30</span><div class="a" style="left:26px;top:347px;width:428px;height:88px;border-radius:44px;background:#1A1A20"></div><span class="a f22 t2 c" style="left:26px;width:428px;top:377px">Slide to log as taken ›</span><div class="a" style="left:34px;top:355px;width:72px;height:72px;border-radius:50%;background:#F6C453"></div><svg class="a" style="left:34px;top:355px" width="72" height="72" viewBox="0 0 72 72" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><polyline points="21,38 30,47 50,26"/></svg><span class="a f17 t2" style="left:40px;top:449px">‹ swipe left: snooze 15 min</span><span class="a f17 t2" style="right:40px;top:449px">Skip</span>
     </div>
-    <h3>6 · Dose due (full screen)</h3><p>Chime plays. Slide right = taken (no accidental taps). Swipe left on the screen = snooze. Skip is a small text button. A "missed" event is sent if nothing happens within the set time.</p>
+    <h3>6 · Dose due (full screen)</h3><p>Chime plays. Slide right = taken (no accidental taps). Swipe left = snooze. Skip is a small text button. With several doses due, dots on the left edge show the position and "+N more" follows the due time. A "missed" event is written if nothing happens within the set time. On USB power the card keeps the screen on, shown here with the bolt.</p>
   </div>
 
   <div class="item">
     <div class="dev">
-      <div class="sb"><span class="t">08:43</span><span class="r"><span class="wifi"><i style="width:30px;height:30px"></i><i style="width:16px;height:16px;bottom:-1px"></i></span><span>78%</span></span></div>
-      <div class="grid" style="opacity:.35">
-        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#4FD1C5 0 62%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#4FD1C5">A</div></div><div class="sub">2 h 15 m ago</div></div>
-        <div class="tile"><div class="ring" style="width:116px;height:116px;background:conic-gradient(#F6C453 0 2%,#22222A 0)"><div class="in" style="width:96px;height:96px;font-size:52px;color:#F6C453">V</div></div><div class="sub">just now</div></div>
-      </div>
-      <div style="position:absolute;left:24px;right:24px;bottom:34px;height:88px;background:#1E1E24;border-radius:24px;display:flex;align-items:center;padding:0 22px;gap:16px">
-        <span style="width:44px;height:44px;border-radius:50%;background:#7CE38B;color:#000;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800">✓</span>
-        <span style="flex:1;font-size:21px">V logged 08:43</span>
-        <span style="font-size:21px;font-weight:700;color:#F6C453">Undo 5</span>
-      </div>
+      <div class="bar"><div class="grab"></div><span class="a tm f30">08:43</span><div class="rt"><svg width="30" height="24" viewBox="0 0 30 24" style="margin-right:16px" fill="none" stroke="#9A9AA4" stroke-linecap="round"><path d="M5.81 12.81 A13 13 0 0 1 24.19 12.81" stroke-width="4"/><path d="M11.46 18.46 A5 5 0 0 1 18.54 18.46" stroke-width="4"/><path d="M3 1 L27 23" stroke-width="3"/></svg><span class="pct f22">78%</span></div></div>
+      <div class="tile" style="left:22px;top:64px"><div class="ring" style="left:47px;top:16px;width:116px;height:116px;background:conic-gradient(#4FD1C5 0 62%, #1A1A20 0)"></div><div class="disc" style="left:58px;top:27px;width:94px;height:94px"></div><span class="a f52 c" style="left:0;width:210px;top:45px;color:#4FD1C5">A</span><span class="a c f17 t2" style="left:0;width:210px;top:142px;">2&nbsp;h 15&nbsp;m ago</span></div><div class="tile" style="left:248px;top:64px"><div class="ring" style="left:47px;top:16px;width:116px;height:116px;background:conic-gradient(#F6C453 0 2%, #1A1A20 0)"></div><div class="disc" style="left:58px;top:27px;width:94px;height:94px"></div><span class="a f52 c" style="left:0;width:210px;top:45px;color:#F6C453">V</span><span class="a c f17 t2" style="left:0;width:210px;top:142px;">just now</span></div><div class="tile" style="left:22px;top:260px"><div class="ring" style="left:47px;top:16px;width:116px;height:116px;background:conic-gradient(#A78BFA 0 25%, #1A1A20 0)"></div><div class="disc" style="left:58px;top:27px;width:94px;height:94px"></div><span class="a f52 c" style="left:0;width:210px;top:45px;color:#A78BFA">M</span><span class="a c f17 t2" style="left:0;width:210px;top:142px;">as needed</span></div><div class="tile" style="left:248px;top:260px;background:#0B0B0E"><span class="a f44 c t2" style="left:0;width:210px;top:63px">+</span></div><div class="dots"><i class="on"></i><i></i><i></i></div><div class="a" style="left:0;top:56px;width:480px;height:424px;background:rgba(0,0,0,.6)"></div><div class="a" style="left:24px;top:358px;width:432px;height:88px;border-radius:28px;background:#1A1A20"></div><div class="a" style="left:46px;top:380px;width:44px;height:44px;border-radius:50%;background:#7CE38B"></div><svg class="a" style="left:46px;top:380px" width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="12,23 19,30 32,15"/></svg><span class="a f22" style="left:106px;top:388px">V logged 08:43</span><span class="a f22b" style="right:44px;top:388.5px;color:#F6C453">Undo 5</span>
     </div>
-    <h3>7 · Logged (single tap on a tile)</h3><p>Ring resets with an animation, a toast offers undo for 5 s with a countdown. Swipe the toast away to dismiss it.</p>
+    <h3>7 · Logged (single tap on a tile)</h3><p>The ring resets, the content dims under a scrim and a toast offers Undo for 5 s with a countdown. Shaking the device also undoes and shows "Undone by shake". The top bar stays bright.</p>
   </div>
 
   <div class="item">
     <div class="dev">
-      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px">
-        <div style="font-size:120px;font-weight:200;color:#9A9AA4;letter-spacing:-2px">08:44</div>
-        <div style="font-size:22px;color:#9A9AA4">Next: A at 14:00</div>
-        <div style="font-size:18px;color:#8A8A94;margin-top:8px">78% · Wi-Fi off</div>
-      </div>
+      <span class="a f120 t2 c" style="left:0;width:480px;top:161px">08:44</span><span class="a f22 t2 c" style="left:0;width:480px;top:291px">Next: A at 14:00</span><span class="a f17 t2 c" style="left:0;width:480px;top:339px">78% · Wi-Fi off</span>
     </div>
-    <h3>8 · Idle / dimmed</h3><p>After 30 s: dim grey clock and next dose, position drifts slowly against burn-in. Tap to wake. On battery the screen turns off after a further delay.</p>
+    <h3>8 · Idle / dimmed</h3><p>After 30 s: dim grey clock and next dose, with the battery percent and Wi-Fi state below. The group moves a few pixels each minute against burn-in. Tap to wake. On battery the screen turns off after a further delay.</p>
   </div>
 
 </div>
