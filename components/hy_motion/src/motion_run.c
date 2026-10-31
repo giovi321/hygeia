@@ -39,7 +39,7 @@ static bool s_want;            /* hy_motion_enable */
 static bool s_lock;
 static bool s_arm;
 static uint32_t s_arm_seq;      /* bumped by every hy_motion_shake_arm(true): the detector restarts */
-static uint32_t s_shake_gen;   /* bumped at every disarm: drops a shake queued before it */
+static uint32_t s_shake_gen;   /* bumped at every arm change and every disable: drops a shake queued before it */
 static uint32_t s_set_seq;     /* bumped by hy_motion_set_current; the task remembers the last one it handled */
 static hy_rot_t s_applied;     /* the rotation the UI last confirmed through hy_motion_set_current (or init) */
 static uint32_t s_gen;         /* bumped at every disable: drops callbacks queued before it */
@@ -88,14 +88,19 @@ static void async_cb(void *p)
 }
 
 /* Motion task. lv_async_call is not thread safe: queue it under the LVGL lock, drop on failure */
-static bool post(int ev, hy_rot_t r)
+static bool post(int ev, hy_rot_t r, uint32_t shake_gen)
 {
     if (!hy_board_display()) {
         return false;
     }
-    portENTER_CRITICAL(&s_mux);
-    uint32_t gen = (ev == EV_SHAKE ? s_shake_gen : s_gen) & 0xffffff;
-    portEXIT_CRITICAL(&s_mux);
+    uint32_t gen;
+    if (ev == EV_SHAKE) {
+        gen = shake_gen & 0xffffff;   /* the generation read with the arm snapshot, before the sample */
+    } else {
+        portENTER_CRITICAL(&s_mux);
+        gen = s_gen & 0xffffff;
+        portEXIT_CRITICAL(&s_mux);
+    }
     uintptr_t arg = ((uintptr_t)gen << 8) | ((uintptr_t)ev << 4) | (uintptr_t)r;
     if (!hy_board_lock(POST_LOCK_MS)) {
         ESP_LOGE(TAG, "post: lvgl lock timeout");
@@ -166,7 +171,7 @@ static void motion_task(void *arg)
     for (;;) {
         bool want, lock, arm, set_req;
         hy_rot_t applied;
-        uint32_t seq, arm_seq;
+        uint32_t seq, arm_seq, shake_gen;
 #if CONFIG_HY_DEBUG_CONSOLE
         bool dbg_only = false;
 #endif
@@ -175,6 +180,7 @@ static void motion_task(void *arg)
         lock = s_lock;
         arm = s_arm;
         arm_seq = s_arm_seq;
+        shake_gen = s_shake_gen;
         seq = s_set_seq;
         set_req = want && seq != seen_seq;   /* handled below; a request is not lost if the power up fails */
         applied = s_applied;
@@ -266,7 +272,7 @@ static void motion_task(void *arg)
 
         if (!lock && hy_orient_feed(&o, t, a)) {
             hy_rot_t next = hy_orient_current(&o);
-            if (!post(EV_ROTATE, next)) {
+            if (!post(EV_ROTATE, next, 0)) {
                 hy_orient_set(&o, applied);   /* never ahead of the panel: a held pose switches again after the dwell */
             }
             s_orient_cur = hy_orient_current(&o);
@@ -280,10 +286,10 @@ static void motion_task(void *arg)
 #if CONFIG_HY_DEBUG_CONSOLE
             ESP_LOGI(TAG, "shake detected%s", dbg_only ? " (debug arm, no action)" : "");
             if (!dbg_only) {
-                post(EV_SHAKE, hy_orient_current(&o));
+                post(EV_SHAKE, hy_orient_current(&o), shake_gen);
             }
 #else
-            post(EV_SHAKE, hy_orient_current(&o));
+            post(EV_SHAKE, hy_orient_current(&o), shake_gen);
 #endif
         }
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -330,6 +336,7 @@ void hy_motion_enable(bool on)
     s_want = on;
     if (changed && !on) {
         s_gen++;
+        s_shake_gen++;   /* a shake queued before the screen went off is dropped after a re-enable */
     }
     portEXIT_CRITICAL(&s_mux);
     if (changed) {
@@ -360,9 +367,8 @@ void hy_motion_shake_arm(bool on)
     s_arm = on;
     if (on) {
         s_arm_seq++;
-    } else {
-        s_shake_gen++;
     }
+    s_shake_gen++;   /* every arm change, so a shake queued for an earlier toast never hits the next one */
     portEXIT_CRITICAL(&s_mux);
     wake_task();
 }
