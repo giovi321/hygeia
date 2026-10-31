@@ -7,4 +7,9 @@ js/p_pair.js
 js/p_dash.js
 js/p_meds.js
 js/p_medform.js
+js/p_history.js
+js/p_log.js
+js/p_schedule.js
+js/p_settings.js
+js/p_wifi.js
 js/app.js

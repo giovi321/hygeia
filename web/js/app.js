@@ -1,13 +1,5 @@
 // Start: find out whether this browser is paired, then show the page named by the URL.
 
-// Pages that other parts of the UI add later register their own routes before this file runs.
-["/history", "/log", "/schedule", "/settings"].forEach(function (p) {
-  HY.route(p, function (params, view) {
-    view.appendChild(HY.h("h1", null, p.charAt(1).toUpperCase() + p.slice(2)));
-    view.appendChild(HY.h("p", { class: "mut" }, "This page is not available in this version."));
-  }, p.slice(1) === "log" ? "history" : p.slice(1));
-});
-
 (function () {
   window.addEventListener("hashchange", HY.navigate);
   HY.api("GET", "/api/info").then(function (info) {
