@@ -154,7 +154,7 @@ void shake_event(void)
 {
     if (toast_logged_visible()) {
         ESP_LOGI(TAG, "shake: undo");
-        toast_undo_pressed();
+        toast_undo_by_shake();
     } else {
         ESP_LOGI(TAG, "shake: ignored");
     }

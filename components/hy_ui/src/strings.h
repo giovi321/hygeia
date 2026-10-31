@@ -53,6 +53,7 @@
 #define HY_S_SKIPPED       "%s skipped %s"          /* code, HH:MM */
 #define HY_S_UNDO          "Undo %u"                /* seconds left */
 #define HY_S_UNDO_EXPIRED  "Too late to undo"
+#define HY_S_UNDONE_SHAKE  "Undone by shake"
 #define HY_S_TOAST_BANG    "!"
 #define HY_S_NOT_YET       "Not available yet"
 #define HY_S_BATT_LOW      "Battery low" HY_S_DOT "%d%%"  /* percent */

@@ -217,7 +217,7 @@ void ui_battery_toast_flush(void)
     toast_show_info(b);
 }
 
-bool toast_undo_pressed(void)
+static bool undo(bool by_shake)
 {
     if (s_mode != MODE_LOGGED) {
         return false;
@@ -228,10 +228,22 @@ bool toast_undo_pressed(void)
     ui_log_hwm("undo");
     if (err == HY_E_UNDO_EXPIRED) {
         toast_show_info(HY_S_UNDO_EXPIRED);
+    } else if (by_shake) {
+        toast_show_info(HY_S_UNDONE_SHAKE);   /* info toast: it does not arm the shake and does not wake the screen */
     } else {
         ui_battery_toast_flush();   /* the Undo toast is gone */
     }
     return true;
+}
+
+bool toast_undo_pressed(void)
+{
+    return undo(false);
+}
+
+bool toast_undo_by_shake(void)
+{
+    return undo(true);
 }
 
 bool toast_logged_visible(void)
