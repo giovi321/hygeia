@@ -17,6 +17,10 @@ The whole group moves by a few pixels each minute to limit burn-in on the AMOLED
 
 Any touch only wakes the screen; it is not passed to the screen underneath. A due card wakes the screen by itself.
 
+## Motion sensor
+
+The motion sensor is read only while the screen is on or dimmed. The dimmed clock turns with the device too, so on USB power the clock follows the device. The sensor is powered down while the screen is off, so it costs nothing then. It does not wake the screen: turning or shaking a sleeping device does nothing.
+
 ## Screen off and sleep
 
 - On USB power the screen dims after 30 seconds and stays dimmed. A due card on USB keeps the screen on
