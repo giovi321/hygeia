@@ -60,6 +60,7 @@ void hy_ui_debug_archive(const char *arg); /* "<code> [yes]": the archive confir
 void hy_ui_debug_limits(void);            /* the active and stored counts against the limits */
 void hy_ui_debug_madctl(const char *arg); /* "<hex> <swap> <mx> <my> [xgap ygap]": raw MADCTL, touch flags and even gaps, full redraw */
 void hy_ui_debug_rot(const char *arg);    /* "<0-3>": rotate_force (also while locked, saves rot); "" logs the current one */
+void hy_ui_debug_shake(void);             /* the shake callback as the motion task posts it: undoes while the Undo toast shows, else "shake: ignored" */
 void hy_ui_debug_mf(const char *arg);     /* the medicine form: "new|edit <code>|name <text>|dose [text]|code <xy>|color <n>|type fixed|asneeded|time add HH:MM|time del <idx>|interval <min>|next|back|save|state" */
 #endif
 
