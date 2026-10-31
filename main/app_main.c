@@ -226,7 +226,11 @@ static void cmd_ui(const char *args)
         hy_ui_debug_net(args + 4);
         return;
     }
-    printf("usage: ui net off|paused|connecting|connected|weak|failing|ap|auto\n");
+    if (strncmp(args, "hit ", 4) == 0) {
+        hy_ui_debug_hit(args + 4);
+        return;
+    }
+    printf("usage: ui net off|paused|connecting|connected|weak|failing|ap|auto | ui hit <x> <y>\n");
 }
 #endif
 

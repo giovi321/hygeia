@@ -24,7 +24,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS, J_MADCTL, J_ROT, J_SHAKE, J_NET, J_PAIR };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS, J_MADCTL, J_ROT, J_SHAKE, J_NET, J_PAIR, J_HIT };
 typedef struct {
     int kind;
     char arg[96];
@@ -845,6 +845,37 @@ static void job_rot(const char *arg)
     }
 }
 
+/* "ui hit X Y": the object a touch at screen X,Y reaches, found the way the input device searches (system layer, top
+ * layer, active screen), then its parents with their areas, so a covering object can be told from the button */
+static void job_hit(const char *arg)
+{
+    int x, y;
+    if (sscanf(arg, "%d %d", &x, &y) != 2) {
+        ESP_LOGE(TAG, "usage: ui hit <x> <y>");
+        return;
+    }
+    lv_point_t p = {x, y};
+    lv_obj_t *o = lv_indev_search_obj(lv_layer_sys(), &p);
+    if (!o) {
+        o = lv_indev_search_obj(lv_layer_top(), &p);
+    }
+    if (!o) {
+        o = lv_indev_search_obj(lv_screen_active(), &p);
+    }
+    if (!o) {
+        ESP_LOGI(TAG, "hit %d,%d: nothing", x, y);
+        return;
+    }
+    int depth = 0;
+    for (lv_obj_t *q = o; q && depth < 8; q = lv_obj_get_parent(q), depth++) {
+        lv_area_t a;
+        lv_obj_get_coords(q, &a);
+        ESP_LOGI(TAG, "hit %d,%d: %s%p text=%s area %d,%d..%d,%d clickable %d hidden %d", x, y, depth ? "parent " : "", (void *)q,
+                 lv_obj_check_type(q, &lv_label_class) ? lv_label_get_text(q) : "-", (int)a.x1, (int)a.y1, (int)a.x2, (int)a.y2,
+                 (int)lv_obj_is_clickable(q), (int)lv_obj_is_hidden(q));
+    }
+}
+
 static void run_job(void *arg)
 {
     job_t *j = arg;
@@ -961,6 +992,9 @@ static void run_job(void *arg)
     case J_PAIR:
         pair_debug(j->arg);
         break;
+    case J_HIT:
+        job_hit(j->arg);
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -1023,5 +1057,6 @@ void hy_ui_debug_rot(const char *arg) { post(J_ROT, arg); }
 void hy_ui_debug_shake(void) { post(J_SHAKE, NULL); }
 void hy_ui_debug_net(const char *arg) { post(J_NET, arg); }
 void hy_ui_debug_pair(const char *arg) { post(J_PAIR, arg); }
+void hy_ui_debug_hit(const char *arg) { post(J_HIT, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */
