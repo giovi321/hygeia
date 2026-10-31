@@ -24,6 +24,10 @@ idf_component_register(
         "src/netcfg.c"
         "src/dns.c"
         "src/auth.c"
+        "src/routes.c"
+        "src/api.c"
+        "src/api_med.c"
+        "src/api_log.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

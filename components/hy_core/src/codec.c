@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
+#include "codec_obj.h"
 #include "hy/codec.h"
 #include "hy/gap.h"
 #include "hy/med.h"
@@ -125,17 +126,17 @@ hy_err_t hy_gap_from_jsonl(const char *line, hy_gap_t *g, hy_gap_reason_t *r)
 
 /* ---- log line ---- */
 
-int hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len)
+cJSON *hy_codec_log_obj(const hy_log_t *e)
 {
-    if (!e || !buf || len == 0) return -1;
-    if ((unsigned)e->status > HY_MISSED || (unsigned)e->source > HY_SRC_AUTO) return -1;
+    if (!e) return NULL;
+    if ((unsigned)e->status > HY_MISSED || (unsigned)e->source > HY_SRC_AUTO) return NULL;
     /* refuse what the decoder would reject */
     if (e->ts < -MAX_SAFE_I64 || e->ts > MAX_SAFE_I64 || e->slot < -MAX_SAFE_I64 ||
-        e->slot > MAX_SAFE_I64) return -1;
-    if (strnlen(e->tz, sizeof e->tz) >= sizeof e->tz || strnlen(e->note, sizeof e->note) >= sizeof e->note) return -1;
+        e->slot > MAX_SAFE_I64) return NULL;
+    if (strnlen(e->tz, sizeof e->tz) >= sizeof e->tz || strnlen(e->note, sizeof e->note) >= sizeof e->note) return NULL;
 
     cJSON *o = cJSON_CreateObject();
-    if (!o) return -1;
+    if (!o) return NULL;
     bool ok = cJSON_AddNumberToObject(o, "id", (double)e->id) &&
               cJSON_AddNumberToObject(o, "ts", (double)e->ts) &&
               cJSON_AddStringToObject(o, "tz", e->tz) &&
@@ -146,7 +147,19 @@ int hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len)
     if (ok && e->note[0] != '\0') ok = cJSON_AddStringToObject(o, "note", e->note) != NULL;
     ok = ok && cJSON_AddStringToObject(o, "source", SOURCE_NAMES[e->source]) &&
           cJSON_AddBoolToObject(o, "edited", e->edited);
-    char *s = ok ? cJSON_PrintUnformatted(o) : NULL;
+    if (!ok) {
+        cJSON_Delete(o);
+        return NULL;
+    }
+    return o;
+}
+
+int hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len)
+{
+    if (!e || !buf || len == 0) return -1;
+    cJSON *o = hy_codec_log_obj(e);
+    if (!o) return -1;
+    char *s = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!s) return -1;
     size_t n = strlen(s);
@@ -159,13 +172,11 @@ int hy_log_to_jsonl(const hy_log_t *e, char *buf, size_t len)
     return ret;
 }
 
-hy_err_t hy_log_from_jsonl(const char *line, hy_log_t *out)
+hy_err_t hy_codec_log_from_obj(const cJSON *o, hy_log_t *out)
 {
-    if (!line || !out) return HY_E_INVALID;
-    cJSON *o = cJSON_ParseWithOpts(line, NULL, true);
-    if (!o) return HY_E_INVALID;
-    hy_err_t r = HY_E_INVALID;
-    if (cJSON_IsObject(o)) {
+    if (!o || !out || !cJSON_IsObject(o)) return HY_E_INVALID;
+    hy_err_t r;
+    {
         hy_log_t e;
         memset(&e, 0, sizeof e);
         double d = 0;
@@ -199,13 +210,22 @@ hy_err_t hy_log_from_jsonl(const char *line, hy_log_t *out)
         if (r == HY_OK) r = get_bool(o, "edited", &e.edited);
         if (r == HY_OK) *out = e;
     }
+    return r;
+}
+
+hy_err_t hy_log_from_jsonl(const char *line, hy_log_t *out)
+{
+    if (!line || !out) return HY_E_INVALID;
+    cJSON *o = cJSON_ParseWithOpts(line, NULL, true);
+    if (!o) return HY_E_INVALID;
+    hy_err_t r = hy_codec_log_from_obj(o, out);
     cJSON_Delete(o);
     return r;
 }
 
 /* ---- medicines ---- */
 
-static cJSON *med_to_json(const hy_med_t *m)
+cJSON *hy_codec_med_obj(const hy_med_t *m)
 {
     cJSON *o = cJSON_CreateObject();
     cJSON *sch = cJSON_CreateObject();
@@ -274,7 +294,7 @@ char *hy_meds_to_json(const hy_med_t *meds, size_t n)
     }
     cJSON_AddItemToObject(root, "meds", arr);
     for (size_t i = 0; i < n; i++) {
-        cJSON *m = med_to_json(&meds[i]);
+        cJSON *m = hy_codec_med_obj(&meds[i]);
         if (!m) {
             cJSON_Delete(root);
             return NULL;
@@ -299,7 +319,7 @@ static bool parse_time(const char *s, uint16_t *out)
     return true;
 }
 
-static hy_err_t med_from_json(const cJSON *o, hy_med_t *m)
+hy_err_t hy_codec_med_from_obj(const cJSON *o, hy_med_t *m)
 {
     if (!cJSON_IsObject(o)) return HY_E_INVALID;
     hy_med_defaults(m);
@@ -395,7 +415,7 @@ hy_err_t hy_meds_from_json(const char *json, hy_med_t *out, size_t max, size_t *
             size_t i = 0;
             cJSON *it;
             cJSON_ArrayForEach(it, arr) {
-                r = med_from_json(it, &out[i]);
+                r = hy_codec_med_from_obj(it, &out[i]);
                 if (r != HY_OK) break;
                 i++;
             }
