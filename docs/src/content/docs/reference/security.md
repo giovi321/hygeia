@@ -20,7 +20,7 @@ See [REST API](../rest-api/) for the routes and error codes.
 
 ## What the device does not do
 
-- No TLS. The device serves plain HTTP on port 80. The pairing code, the session cookie, every page and every export travel unencrypted, and anyone on the same network segment can read them
+- Plain HTTP by design. The web UI does not use TLS: the device serves plain HTTP on port 80, protected by pairing, the `X-Hygeia` header and the host allow-list. The pairing code, the session cookie, every page and every export travel unencrypted, and anyone on the same network segment can read them. The update download from GitHub is outbound and uses HTTPS
 - No user accounts. A paired browser has full access. Pairing proves that someone could see the screen of the device
 - No protection against someone who holds the device. Anyone who can touch it can open Settings, show a pairing code and pair a browser
 

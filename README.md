@@ -61,7 +61,7 @@ Technical users can go further and connect it to MQTT or webhooks to build autom
 
 ## What does not exist yet
 
-MQTT with Home Assistant discovery and webhooks are planned and not built, and the web UI has no TLS. Log entries are edited and deleted in the web UI only, not on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
+MQTT with Home Assistant discovery and webhooks are planned and not built. Log entries are edited and deleted in the web UI only, not on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
 
 ## Quick start
 
@@ -75,7 +75,7 @@ idf.py -p <port> flash
 
 On first boot the device shows the "Set the time" screen until you set the date, time and zone. Details are in [Build and flash](docs/src/content/docs/getting-started/flashing.md) and [First boot](docs/src/content/docs/getting-started/first-boot.md).
 
-To reach the web UI, pull down quick settings and tap the Access point tile, join the network shown by the QR code, open the address shown next, and pair the browser with the code the device shows. See [Wi-Fi setup](docs/src/content/docs/getting-started/wifi.md) and [Web UI](docs/src/content/docs/user-guide/web-ui.md). The first install of this firmware has to be done over USB, because the bootloader has rollback enabled. The web UI has no TLS: use it on a network you trust. See the [security notes](docs/src/content/docs/reference/security.md).
+To reach the web UI, pull down quick settings and tap the Access point tile, join the network shown by the QR code, open the address shown next, and pair the browser with the code the device shows. See [Wi-Fi setup](docs/src/content/docs/getting-started/wifi.md) and [Web UI](docs/src/content/docs/user-guide/web-ui.md). The first install of this firmware has to be done over USB, because the bootloader has rollback enabled. The web UI serves plain HTTP on the local network by design, protected by pairing, the `X-Hygeia` header and a host allow-list, so use it on a network you trust. The firmware update download from GitHub uses HTTPS. See the [security notes](docs/src/content/docs/reference/security.md).
 
 Release build, without the serial debug console:
 

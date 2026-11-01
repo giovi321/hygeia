@@ -9,7 +9,7 @@ Everything on this page is planned and does not exist in the firmware. The plans
 
 ## Web UI additions
 
-The web UI, Wi-Fi, pairing, export and import, and firmware update are built (see [Web UI](../user-guide/web-ui/) and [Wi-Fi setup](../getting-started/wifi/)). Not built: TLS, and the Integrations controls for MQTT, Home Assistant and webhooks, which show "Coming in a later version" in the web UI.
+The web UI, Wi-Fi, pairing, export and import, and firmware update are built (see [Web UI](../user-guide/web-ui/) and [Wi-Fi setup](../getting-started/wifi/)). Not built: the Integrations controls for MQTT, Home Assistant and webhooks, which show "Coming in a later version" in the web UI.
 
 ## MQTT and Home Assistant discovery
 
