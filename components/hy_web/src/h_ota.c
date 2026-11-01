@@ -20,8 +20,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "esp_app_desc.h"
-#include "esp_app_format.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -29,6 +27,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "hy/fwimg.h"
 #include "hy/net.h"
 #include "hy/power_run.h"
 #include "sdkconfig.h"
@@ -41,7 +40,6 @@ static const char *TAG = "web_ota";
 #define OTA_MIN_BATT_PCT 30
 #define OTA_RESTART_MS   2000
 #define OTA_ACTIVITY     (64 * 1024)         /* restart the battery idle timer of the radio every 64 KB */
-#define OTA_HEAD_LEN     (sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t))
 
 static atomic_bool s_restarting;
 
@@ -161,34 +159,6 @@ static void refuse_rest(httpd_req_t *req, uint8_t *buf, size_t left, int64_t dea
     answer(req, status, code, msg);
 }
 
-/* NULL when the first bytes are the start of a hygeia application image for this chip; else the reason (log only). */
-static const char *check_head(const uint8_t *buf, size_t n, esp_app_desc_t *desc)
-{
-    if (n < OTA_HEAD_LEN) {
-        return "shorter than an image header";
-    }
-    esp_image_header_t h;
-    memcpy(&h, buf, sizeof h);
-    if (h.magic != ESP_IMAGE_HEADER_MAGIC) {
-        return "no image magic";
-    }
-    if (h.chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) {
-        return "built for another chip";
-    }
-    if (h.segment_count == 0) {
-        return "no segments";
-    }
-    memcpy(desc, buf + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t), sizeof *desc);
-    if (desc->magic_word != ESP_APP_DESC_MAGIC_WORD) {
-        return "no application description";
-    }
-    if (strncmp(desc->project_name, "hygeia", sizeof desc->project_name) != 0) {
-        return "another project";
-    }
-    desc->version[sizeof desc->version - 1] = 0;
-    return NULL;
-}
-
 /* The restart runs in the LVGL task, the only task that writes the store, so no medicine or log write is cut
  * halfway. Without the screen task (or when it is busy for a second) it restarts from here. */
 static void restart_cb(void *arg)
@@ -217,12 +187,11 @@ void web_ota_run(httpd_req_t *req, size_t len)
     int64_t deadline = t0 + OTA_DEADLINE_US;
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     uint8_t *buf = heap_caps_malloc(OTA_CHUNK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    esp_app_desc_t desc;
-    esp_ota_handle_t h = 0;
-    bool begun = false;
-    esp_err_t err;
+    char version[32];
+    hy_fwimg_t *w = NULL;
+    hy_fwimg_res_t fr;
 
-    if (!buf || !part) {
+    if (!buf || !part || hy_fwimg_begin(len, NULL, &w) != HY_FWIMG_OK) {
         answer(req, 503, "busy", "Not enough memory for the update");
         httpd_sess_trigger_close(req->handle, httpd_req_to_sockfd(req));
         goto out;
@@ -236,37 +205,27 @@ void web_ota_run(httpd_req_t *req, size_t len)
         goto out;
     }
     size_t done = n;
-    const char *why = check_head(buf, n, &desc);
-    if (why) {
-        ESP_LOGW(TAG, "upload refused: %s", why);
-        refuse_rest(req, buf, len - done, deadline, 422, "not_hygeia", "This file is not a hygeia firmware image");
-        goto out;
-    }
-    ESP_LOGI(TAG, "upload of firmware %s (%u bytes) to %s", desc.version, (unsigned)len, part->label);
-
-    err = esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &h);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_begin: %s", esp_err_to_name(err));
-        if (err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
-            refuse_rest(req, buf, len - done, deadline, 503, "busy",
-                        "The device is still checking its own firmware, try again shortly");
-        } else {
-            refuse_rest(req, buf, len - done, deadline, 500, "flash", "The firmware slot could not be prepared");
-        }
-        goto out;
-    }
-    begun = true;
-    web_ui_toast_info("Updating firmware");
-
+    bool first = true;
     size_t next_activity = OTA_ACTIVITY;
     for (;;) {
-        err = esp_ota_write(h, buf, n);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "esp_ota_write at %u: %s", (unsigned)(done - n), esp_err_to_name(err));
-            esp_ota_abort(h);
-            begun = false;
-            refuse_rest(req, buf, len - done, deadline, 500, "flash", "Writing the firmware failed");
+        fr = hy_fwimg_write(w, buf, n);
+        if (fr != HY_FWIMG_OK) {
+            w = NULL;   /* the writer is freed on any error */
+            if (fr == HY_FWIMG_NOT_HYGEIA) {
+                refuse_rest(req, buf, len - done, deadline, 422, "not_hygeia", "This file is not a hygeia firmware image");
+            } else if (fr == HY_FWIMG_SELF_PENDING) {
+                refuse_rest(req, buf, len - done, deadline, 503, "busy",
+                            "The device is still checking its own firmware, try again shortly");
+            } else if (first) {
+                refuse_rest(req, buf, len - done, deadline, 500, "flash", "The firmware slot could not be prepared");
+            } else {
+                refuse_rest(req, buf, len - done, deadline, 500, "flash", "Writing the firmware failed");
+            }
             goto out;
+        }
+        if (first) {
+            first = false;
+            web_ui_toast_info("Updating firmware");
         }
         if (done == len) {
             break;
@@ -284,24 +243,15 @@ void web_ota_run(httpd_req_t *req, size_t len)
         done += n;
     }
 
-    err = esp_ota_end(h);   /* frees the handle whatever the result */
-    begun = false;
-    if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
-        ESP_LOGW(TAG, "image check failed: %s", esp_err_to_name(err));
+    fr = hy_fwimg_finish(w, NULL, version);   /* frees the writer whatever the result */
+    w = NULL;
+    if (fr == HY_FWIMG_CORRUPT) {
         answer(req, 422, "corrupt", "The firmware file is damaged or incomplete");
         web_ui_toast_info("Firmware update failed");
         goto out;
     }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_end: %s", esp_err_to_name(err));
+    if (fr != HY_FWIMG_OK) {
         answer(req, 500, "flash", "The firmware could not be finished");
-        web_ui_toast_info("Firmware update failed");
-        goto out;
-    }
-    err = esp_ota_set_boot_partition(part);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_set_boot_partition: %s", esp_err_to_name(err));
-        answer(req, 500, "flash", "The new firmware could not be selected");
         web_ui_toast_info("Firmware update failed");
         goto out;
     }
@@ -311,15 +261,13 @@ void web_ota_run(httpd_req_t *req, size_t len)
     char body[32];
     snprintf(body, sizeof body, "{\"reboot_in_s\":%d}", OTA_RESTART_MS / 1000);
     web_send_json(&r, 200, body);
-    ESP_LOGI(TAG, "firmware %s written to %s in %lld ms, restart in %d s (worker stack left %u bytes)", desc.version,
+    ESP_LOGI(TAG, "firmware %s written to %s in %lld ms, restart in %d s (worker stack left %u bytes)", version,
              part->label, (long long)((esp_timer_get_time() - t0) / 1000), OTA_RESTART_MS / 1000,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
     web_ui_toast_info("Firmware updated, restarting");
     schedule_restart();
 
 out:
-    if (begun) {
-        esp_ota_abort(h);
-    }
+    hy_fwimg_abort(w);
     heap_caps_free(buf);
 }

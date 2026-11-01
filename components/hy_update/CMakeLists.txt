@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/fwimg.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_app_format
+    PRIV_REQUIRES
+        app_update
+        esp_system
+        heap
+        log
+        mbedtls
+)

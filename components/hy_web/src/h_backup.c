@@ -37,6 +37,7 @@
 #include "hy/clock.h"
 #include "hy/codec.h"
 #include "hy/events.h"
+#include "hy/fwimg.h"
 #include "hy/import.h"
 #include "hy/net.h"
 #include "hy/sched_run.h"
@@ -1174,6 +1175,7 @@ static void worker(void *arg)
     httpd_req_async_handler_complete(w->req);
     free(w);
     atomic_store(&s_abort, false);
+    hy_heavy_release();
     atomic_store(&s_state, 0);
     vTaskDelete(NULL);
 }
@@ -1187,8 +1189,15 @@ static esp_err_t start_worker(web_req_t *r, wjob_t *proto)
         web_send_err(r, 409, "busy", NULL, "An export, import or firmware update is running");
         return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
     }
+    /* the device-wide heavy-job slot: the GitHub update takes it too */
+    if (!hy_heavy_claim(proto->kind == W_OTA ? "upload" : proto->kind == W_IMPORT ? "import" : "export")) {
+        atomic_store(&s_state, 0);
+        web_send_err(r, 409, "busy", NULL, "An export, import or firmware update is running");
+        return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
+    }
     atomic_store(&s_abort, false);
     if (atomic_load(&s_stopping) || web_ota_restarting()) {   /* after the claim: see web_backup_stop */
+        hy_heavy_release();
         atomic_store(&s_state, 0);
         web_send_busy(r);
         return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
@@ -1197,6 +1206,7 @@ static esp_err_t start_worker(web_req_t *r, wjob_t *proto)
     httpd_req_t *async = NULL;
     if (!w || httpd_req_async_handler_begin(r->req, &async) != ESP_OK) {
         free(w);
+        hy_heavy_release();
         atomic_store(&s_state, 0);
         web_send_busy(r);
         return r->req->content_len > WEB_BODY_MAX ? ESP_FAIL : ESP_OK;
@@ -1211,6 +1221,7 @@ static esp_err_t start_worker(web_req_t *r, wjob_t *proto)
         httpd_sess_trigger_close(async->handle, httpd_req_to_sockfd(async));
         httpd_req_async_handler_complete(async);
         free(w);
+        hy_heavy_release();
         atomic_store(&s_state, 0);
     }
     return ESP_OK;

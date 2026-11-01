@@ -35,6 +35,7 @@ idf_component_register(
         hy_power
         hy_sched
         hy_store
+        hy_update
         lvgl__lvgl
         espressif__cjson
     WHOLE_ARCHIVE
