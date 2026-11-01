@@ -288,7 +288,7 @@ Mockups: `design/mockups/webui.html`.
 - Responsive: sidebar on desktop, top menu on a phone
 - Live updates over WebSocket from the event bus
 - No open access. A browser is paired once with a 6-digit code shown on the device screen; the device then keeps a session token for that browser (at most 4 browsers, the oldest is forgotten). Paired browsers can be forgotten on the device and in the web UI. No TLS on the device; the docs say to keep it on a trusted LAN
-- Firmware update: upload of a `.bin` to the inactive OTA slot, verified, then reboot; rollback on failed boot
+- Firmware update, two ways. Upload a `hygeia.bin` file. Or press "Check for update" (web UI, or Settings › About on the device): the device asks GitHub for the latest stable release of the project and, after a confirmation, downloads `hygeia.bin` itself over HTTPS, checks it against the release's `SHA256SUMS` and installs it. Both ways write the inactive slot, verify it, restart, and roll back on a failed boot. Nothing contacts GitHub until the button is pressed; there are no background checks. Checking needs Wi-Fi with internet; installing needs USB or a battery charge of 30 % or more
 
 API: JSON, paths as listed, no version in the path. `GET /api/info` and `GET /api/state` carry `"api": 1`; adding fields does not change it, removing or changing one does. Clients ignore unknown fields. Errors are `{"error": "<code>", "field": "<name or null>", "message": "<text>"}`
 
@@ -323,6 +323,9 @@ REST API (JSON):
 | `POST /api/chime/test` | play the chime |
 | `POST /api/power/off` | power off the device |
 | `POST /api/ota` | firmware upload |
+| `GET /api/update` | state of the GitHub update (check result, progress, last error) |
+| `POST /api/update/check` | ask GitHub for the latest stable release |
+| `POST /api/update/install` | download and install the checked release, body `{"version":"vX.Y.Z"}` |
 | `GET /ws` | WebSocket event stream |
 
 ## MQTT
@@ -355,8 +358,10 @@ The web UI is embedded in the app image (gzipped, expected well under 300 KB), s
 
 Release artefacts:
 
-- `hygeia-<ver>-ota.bin`: app only, for the web UI firmware update
-- `hygeia-<ver>-update.bin` and flash offsets for esptool / the web flasher: bootloader, partition table and app, never the storage or NVS partitions, so reflashing keeps the log
+- `hygeia.bin`: application image, for the web UI update and the GitHub update
+- `hygeia-full.bin`: bootloader, partition table and application, flashed at 0x0 for a first install. It is one contiguous image from 0x0 to the end of the application, so writing it also erases the NVS partition (the gap before otadata is filled with 0xFF); the storage partition lies past its end and is not touched
+- `SHA256SUMS`: SHA-256 of both
+- The device's GitHub update depends on these three names
 - `hygeia-<ver>-factory.bin`: full image including an empty storage partition, for first install or a deliberate wipe; the docs label it as erasing all data
 - Store and settings carry a schema version; migrations run on boot after an update, with a backup of the old files kept until the next successful boot
 
