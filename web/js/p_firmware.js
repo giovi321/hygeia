@@ -205,6 +205,7 @@ HY.settingsLinks.push({ href: "#/settings/firmware", text: "Firmware", note: "Ve
         if (Date.now() - t0 >= POLL_LIMIT_MS) {
           lock(false); bar.hidden = true; waiting = false;
           if (viaUpdate) {
+            ust = null; render();   // the buttons work again; the message below stays
             say(same ? "The device still reports version " + same + ", the version it had before. The restart did not happen: " +
               "check for the update again in a minute" :
               "The device did not answer within 60 seconds. If the new firmware fails, the device may come back on the previous " +
