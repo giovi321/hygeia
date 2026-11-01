@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Build the release configuration and package it.
 # Usage: package-release.sh <version>
-# Output in dist/: hygeia.bin (app image for web updates), hygeia-full.bin
-# (merged image for first-time flashing at offset 0x0), SHA256SUMS.
+# Output in dist/: hygeia.bin (app image for web updates), hygeia-full.hex
+# (Intel HEX of bootloader, partition table, otadata and app for first-time
+# flashing; it has gaps, so flashing it never writes nvs or storage), SHA256SUMS.
 set -euo pipefail
 
 ver="$1"
@@ -19,5 +20,5 @@ idf.py -B build-rel \
 mkdir -p dist
 cp build-rel/hygeia.bin dist/hygeia.bin
 (cd build-rel && python -m esptool --chip esp32s3 merge_bin \
-  -o ../dist/hygeia-full.bin @flash_args)
-(cd dist && sha256sum hygeia.bin hygeia-full.bin > SHA256SUMS && cat SHA256SUMS)
+  --format hex -o ../dist/hygeia-full.hex @flash_args)
+(cd dist && sha256sum hygeia.bin hygeia-full.hex > SHA256SUMS && cat SHA256SUMS)

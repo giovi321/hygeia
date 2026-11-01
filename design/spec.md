@@ -359,7 +359,7 @@ The web UI is embedded in the app image (gzipped, expected well under 300 KB), s
 Release artefacts:
 
 - `hygeia.bin`: application image, for the web UI update and the GitHub update
-- `hygeia-full.bin`: bootloader, partition table and application, flashed at 0x0 for a first install. It is one contiguous image from 0x0 to the end of the application, so writing it also erases the NVS partition (the gaps between its regions are filled with 0xFF); the storage partition lies past its end and is not touched
+- `hygeia-full.hex`: bootloader, partition table, otadata and application as an Intel HEX file, flashed with `esptool write-flash 0x0 hygeia-full.hex` for a first install. HEX leaves the gaps between regions unwritten, so flashing it writes nothing inside the NVS and storage partitions: settings, medicines and the log survive a full reflash
 - `SHA256SUMS`: SHA-256 of both. The device's GitHub update depends on these three names
 - `hygeia-<ver>-factory.bin` (planned, CI does not publish it yet): full image including an empty storage partition, for first install or a deliberate wipe; the docs label it as erasing all data
 - Store and settings carry a schema version; migrations run on boot after an update, with a backup of the old files kept until the next successful boot
