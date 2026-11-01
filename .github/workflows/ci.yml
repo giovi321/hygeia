@@ -77,8 +77,12 @@ jobs:
           - SHA256SUMS: checksums of both files.
           NOTES
           sed -i 's/^ *//' notes.md
-          gh release create "$TAG" --repo "$REPO" --title "$TAG" --notes-file notes.md $flags \
-            dist/hygeia.bin dist/hygeia-full.bin dist/SHA256SUMS
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$REPO" --clobber dist/hygeia.bin dist/hygeia-full.bin dist/SHA256SUMS
+          else
+            gh release create "$TAG" --repo "$REPO" --title "$TAG" --notes-file notes.md $flags \
+              dist/hygeia.bin dist/hygeia-full.bin dist/SHA256SUMS
+          fi
 
   host-tests:
     runs-on: ubuntu-latest
