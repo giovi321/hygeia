@@ -22,14 +22,13 @@ a { color: inherit; }
 
 /* shell: a sticky top bar below 900 px, a 180 px sidebar from 900 px */
 .top {
-  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 8px;
+  position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px;
   padding: 0 8px 0 16px; background: var(--side); border-bottom: 1px solid var(--line);
 }
 .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; text-decoration: none; min-height: 44px; flex: none; }
-#menu { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-#menu::-webkit-scrollbar { display: none; }
+#menu { display: flex; flex: 1 1 100%; flex-wrap: wrap; min-width: 0; padding-bottom: 4px; }
 #menu a {
-  display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 12px;
+  display: inline-flex; align-items: center; flex: 1 1 auto; justify-content: center; min-height: 40px; padding: 0 8px;
   border-radius: 8px; color: var(--mut); text-decoration: none; white-space: nowrap;
 }
 #menu a.on { background: var(--on); color: var(--tx); }
@@ -44,8 +43,8 @@ main { padding: 16px; max-width: 960px; }
     gap: 0; padding: 16px 10px; border-right: 1px solid var(--line); border-bottom: 0; overflow-y: auto;
   }
   .logo { padding: 0 8px 12px; }
-  #menu { flex: none; flex-direction: column; overflow: visible; margin-bottom: 2px; }
-  #menu a { margin-bottom: 2px; }
+  #menu { flex: none; flex-direction: column; padding-bottom: 0; margin-bottom: 2px; }
+  #menu a { flex: none; justify-content: flex-start; min-height: 44px; padding: 0 12px; margin-bottom: 2px; }
   .devline { display: block; margin-top: 24px; padding: 0 12px; font-size: 12px; line-height: 1.7; color: var(--mut); }
   main { padding: 20px 24px; }
 }
