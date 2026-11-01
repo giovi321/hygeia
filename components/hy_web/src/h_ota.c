@@ -18,7 +18,6 @@
 
 #include <stdatomic.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -30,7 +29,6 @@
 #include "hy/fwimg.h"
 #include "hy/net.h"
 #include "hy/power_run.h"
-#include "sdkconfig.h"
 #include "web_internal.h"
 
 static const char *TAG = "web_ota";
@@ -216,6 +214,8 @@ void web_ota_run(httpd_req_t *req, size_t len)
             } else if (fr == HY_FWIMG_SELF_PENDING) {
                 refuse_rest(req, buf, len - done, deadline, 503, "busy",
                             "The device is still checking its own firmware, try again shortly");
+            } else if (fr == HY_FWIMG_NO_MEM) {
+                refuse_rest(req, buf, len - done, deadline, 503, "busy", "Not enough memory for the update");
             } else if (first) {
                 refuse_rest(req, buf, len - done, deadline, 500, "flash", "The firmware slot could not be prepared");
             } else {
@@ -247,6 +247,11 @@ void web_ota_run(httpd_req_t *req, size_t len)
     w = NULL;
     if (fr == HY_FWIMG_CORRUPT) {
         answer(req, 422, "corrupt", "The firmware file is damaged or incomplete");
+        web_ui_toast_info("Firmware update failed");
+        goto out;
+    }
+    if (fr == HY_FWIMG_NO_MEM) {
+        answer(req, 503, "busy", "Not enough memory for the update");
         web_ui_toast_info("Firmware update failed");
         goto out;
     }

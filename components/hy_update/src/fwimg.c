@@ -123,6 +123,7 @@ hy_fwimg_res_t hy_fwimg_begin(size_t len, const char *expect_ver, hy_fwimg_t **o
     }
     w->sha = psa_hash_operation_init();
     if (psa_hash_setup(&w->sha, PSA_ALG_SHA_256) != PSA_SUCCESS) {
+        psa_hash_abort(&w->sha);
         heap_caps_free(w);
         return HY_FWIMG_NO_MEM;
     }
