@@ -54,6 +54,7 @@ export default defineConfig({
             { label: 'Data model', link: '/reference/data-model/' },
             { label: 'Scheduling rules', link: '/reference/scheduling/' },
             { label: 'REST API', link: '/reference/rest-api/' },
+            { label: 'Security notes', link: '/reference/security/' },
             { label: 'Development', link: '/reference/development/' },
           ],
         },

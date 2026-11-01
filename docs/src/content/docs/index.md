@@ -7,14 +7,14 @@ description: Medicine reminder and dose logger for the Waveshare ESP32-S3-Touch-
   <img src="/hygeia/assets/logo.svg" alt="Hygeia" width="96" height="96" />
 </div>
 
-Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16. It turns the board into a medicine reminder and dose log for one person. Logging a dose is one tap on a tile. At scheduled times the screen shows a full-screen card and plays a chime. Everything runs on the device with no network, no account and no cloud.
+Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16. It turns the board into a medicine reminder and dose log for one person. Logging a dose is one tap on a tile. At scheduled times the screen shows a full-screen card and plays a chime. Everything runs on the device with no network, no account and no cloud. Wi-Fi and a web UI are optional.
 
 :::caution[Not a medical device]
 Hygeia is a personal reminder tool. It is not a medical device and must not be the only safeguard for medication that must not be missed. A reminder can fail: the battery can be flat, the device can be off, the clock can be wrong or the speaker can be muted. Check the reminders against another source before relying on them.
 :::
 
-:::note[Version 0.3.0, pre-release]
-These pages describe what the firmware does today. Wi-Fi, the web UI, MQTT, Home Assistant, and webhooks are not built; they are listed on the [Roadmap](roadmap/) page only.
+:::note[Pre-release]
+These pages describe what the firmware does today. Wi-Fi, the access point and the web UI are built. MQTT, Home Assistant and webhooks are planned and not built; they are listed on the [Roadmap](roadmap/) page only.
 :::
 
 ## Why a separate device
@@ -23,7 +23,7 @@ I built Hygeia because a phone app made it too easy to put a dose off. An app le
 
 The board is small and cheap. It runs on its own battery and sleeps when the screen is off, so you can move it around the house without a cable.
 
-It also works for people who do not use a smartphone, older people in particular. Daily use comes down to tapping a tile to log a dose and answering the reminder card when it appears. A carer can do the setup (medicines, times, doses) from a browser through the web UI, once the web UI exists; for now setup is done on the device.
+It also works for people who do not use a smartphone, older people in particular. Daily use comes down to tapping a tile to log a dose and answering the reminder card when it appears. A carer can do the setup (medicines, times, doses) from a browser through the web UI, which the device serves itself over Wi-Fi. Basic setup also works on the device screen.
 
 Technical users can go further and connect it to MQTT or webhooks to build automations, for example with Home Assistant. These integrations are planned and not built yet. The same device should suit both kinds of user, from someone who only taps tiles to someone wiring it into a home automation setup.
 
@@ -39,14 +39,18 @@ Technical users can go further and connect it to MQTT or webhooks to build autom
 - Idle clock that dims the screen and shows the next dose; on battery the screen turns off after 2 minutes and the CPU sleeps
 - Clock from the onboard RTC, with a "Set the time" screen when the RTC is invalid
 - Data on the device flash: medicines and log survive power cycles and reflashes that leave the storage partition alone
+- Wi-Fi client and access point modes, switched in quick settings, in Settings, Wi-Fi or in the web UI, with QR codes to join the access point and to open the web UI, and `hygeia.local` on a network
+- Web UI served by the device: dashboard, medicines, history, log, schedule, settings, Wi-Fi, backup with CSV and JSON export and import, firmware update with automatic rollback, and power off. A browser pairs once with a 6-digit code shown on the screen
+- Wi-Fi turns off after 10 minutes without use on battery, unless Keep Wi-Fi on battery is on
 
 ## Pages
 
 - [Hardware](getting-started/hardware/): board facts and what was verified on hardware
 - [Build and flash](getting-started/flashing/): ESP-IDF v6.0.2, debug and release builds
 - [First boot](getting-started/first-boot/): what the device shows the first time
-- [User guide](user-guide/home-and-logging/): every screen and gesture
-- [Data model](reference/data-model/) and [scheduling rules](reference/scheduling/)
+- [Wi-Fi setup](getting-started/wifi/): the access point, QR codes, pairing and the battery rule
+- [User guide](user-guide/home-and-logging/): every screen and gesture, and the [web UI](user-guide/web-ui/)
+- [Data model](reference/data-model/), [scheduling rules](reference/scheduling/), [REST API](reference/rest-api/) and [security notes](reference/security/)
 - [Roadmap](roadmap/): features that are planned and not built
 
 ## License

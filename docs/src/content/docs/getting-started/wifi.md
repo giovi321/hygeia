@@ -13,7 +13,10 @@ The web UI has no TLS. Use it on your home network or on the device's own access
 
 1. Pull down quick settings and tap the Access point tile. The device starts an access point with the name `hygeia-XXXX` (the X characters are fixed per device) and a generated password
 2. The screen shows "Join the device's Wi-Fi" with a QR code and the name and password in text. Scan the code with a phone, or join the network by hand, then tap Next
-3. The screen shows "Then open" with a QR code for `http://192.168.4.1/`. Scan it or type the address.
+3. The screen shows "Then open" with a QR code for `http://192.168.4.1/`. Scan it or type the address
+
+![Design mockup of the join screen](/hygeia/assets/mockups/12-access-point-join.png)
+![Design mockup of the address screen](/hygeia/assets/mockups/13-access-point-open.png)
 4. The web UI asks you to pair the browser. See [Pairing](#pairing)
 5. Open Settings, Wi-Fi in the web UI. Under "Add a network", enter the name and password of your home network and tap Save network. The device keeps at most 5 networks
 6. Choose Wi-Fi as the mode. The page warns that it will lose its connection. Confirm, reconnect your phone or computer to your home network and open `http://hygeia.local`
@@ -22,7 +25,9 @@ The access point password can be changed in the web UI under Access point, and t
 
 ## Open the web UI later
 
-With the device on your home network, tap the Web UI QR button in quick settings. The screen shows a QR code for `http://<ip>/` and the address in text, for example `http://192.168.1.23` and `hygeia.local`. In access point mode the button shows the address `http://192.168.4.1/`.
+With the device on your home network, tap the Web UI QR button in quick settings. The screen shows a QR code for `http://<ip>/` and the address in text, for example `http://192.168.1.23` and `hygeia.local`. In access point mode the button shows the join screen and then the address screen. With no network on, it offers buttons to turn on Wi-Fi or start the access point.
+
+![Design mockup of the Web UI QR screen](/hygeia/assets/mockups/11-web-ui-qr.png)
 
 The device answers to its IP address, to `hygeia` (or the host name you set), to `hygeia.local` and to a name that starts with `hygeia.`. On Wi-Fi client mode other names get an error; in access point mode they are sent to the web UI. See [Host names](../../reference/rest-api/#host-names).
 
@@ -36,6 +41,8 @@ The web UI shows data and changes it, so each browser pairs once:
 2. The device wakes its screen and shows a 6-digit code for 120 seconds
 3. Type the code in the browser and tap Pair
 
+![Design mockup of the pairing code screen](/hygeia/assets/mockups/14-pair-a-browser.png)
+
 Five wrong codes stop pairing for a minute. After Cancel on the device, or a code that ran out unused, a new code can be asked for after a minute, and at most 3 codes every 10 minutes. The code never covers a reminder: while a dose is due or the battery power-off countdown shows, pairing waits. The device keeps 4 browsers and forgets the oldest when a fifth pairs. Forget browsers in the web UI under Settings, Paired browsers, or on the device under Settings, Wi-Fi.
 
 ## The battery and the radio
@@ -47,7 +54,7 @@ Wi-Fi uses power, and the CPU cannot sleep while the radio is on. On battery the
 - After that pause, a touch on the screen or a web request does not start the radio again. Only a tap on the Wi-Fi or Access point tile, a mode change from the web UI or plugging in USB starts it. Plugging in USB starts the saved mode
 - Settings, Wi-Fi has the switch "Keep Wi-Fi on battery". With it on, the radio stays on while on battery and the battery drains faster
 
-A firmware update on battery needs a charge of 30 percent or more.
+A firmware update on battery needs a charge of 30 percent or more. See the [security notes](../../reference/security/) before you leave the radio on.
 
 ## Time from the network
 

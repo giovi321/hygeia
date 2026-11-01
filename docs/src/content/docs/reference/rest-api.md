@@ -9,6 +9,8 @@ The device serves a REST API and the web UI over plain HTTP on port 80, in Wi-Fi
 The device has no TLS. Requests, the session cookie and exported files travel unencrypted. Do not forward port 80 to the internet. Join it from the home network or from its own access point only.
 :::
 
+See also the [security notes](../security/).
+
 ## Host names
 
 The device answers a request only when the `Host` header names the device. Any other name gets `421` and the error `host`, which blocks DNS rebinding. In access point mode the device is a captive portal instead: a request for another name, and any unknown path, gets `302` to `http://192.168.4.1/`. The device answers to:

@@ -17,9 +17,9 @@
 
 > **Not a medical device.** Hygeia is a personal reminder tool. Do not rely on it as the only safeguard for medication that must not be missed.
 
-Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16 that reminds you about medicine doses and logs them. Logging a dose is one tap on a tile. At scheduled times the screen shows a full-screen card and plays a chime. It works with no network, no account and no cloud.
+Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16 that reminds you about medicine doses and logs them. Logging a dose is one tap on a tile. At scheduled times the screen shows a full-screen card and plays a chime. It works with no network, no account and no cloud. Wi-Fi and a web UI served by the device are optional.
 
-This is firmware version 0.3.0, a pre-release: Wi-Fi and the web UI come in a later version. The documentation is at [giovi321.github.io/hygeia](https://giovi321.github.io/hygeia/); the sources of the pages are in [`docs/src/content/docs`](docs/src/content/docs).
+This is a pre-release. MQTT, Home Assistant and webhooks are planned and not built. The documentation is at [giovi321.github.io/hygeia](https://giovi321.github.io/hygeia/); the sources of the pages are in [`docs/src/content/docs`](docs/src/content/docs).
 
 <p align="center">
   <img src="docs/public/assets/mockups/01-home.png" alt="Design mockup of the Home screen" width="280" />
@@ -28,13 +28,17 @@ This is firmware version 0.3.0, a pre-release: Wi-Fi and the web UI come in a la
 
 The images are design mockups, not photos of the board.
 
+<p align="center">
+  <img src="docs/public/screenshots/webui-dashboard.png" alt="The web UI dashboard in a desktop browser, with one tile per medicine" width="640" />
+</p>
+
 ## Why a separate device
 
 I built Hygeia because a phone app made it too easy to put a dose off. An app lets you mark a dose as taken or snooze it from anywhere, even when you are nowhere near the medicines, and that is how doses get missed. Hygeia stays next to the medicines all the time. The reminder shows up where the pills are, so you see it when you are standing in front of them and log the dose there.
 
 The board is small and cheap. It runs on its own battery and sleeps when the screen is off, so you can move it around the house without a cable.
 
-It also works for people who do not use a smartphone, older people in particular. Daily use comes down to tapping a tile to log a dose and answering the reminder card when it appears. A carer can do the setup (medicines, times, doses) from a browser through the web UI, once the web UI exists; for now setup is done on the device.
+It also works for people who do not use a smartphone, older people in particular. Daily use comes down to tapping a tile to log a dose and answering the reminder card when it appears. A carer can do the setup (medicines, times, doses) from a browser through the web UI, which the device serves itself over Wi-Fi. Basic setup also works on the device screen.
 
 Technical users can go further and connect it to MQTT or webhooks to build automations, for example with Home Assistant. These integrations are planned and not built yet. The same device should suit both kinds of user, from someone who only taps tiles to someone wiring it into a home automation setup.
 
@@ -50,10 +54,14 @@ Technical users can go further and connect it to MQTT or webhooks to build autom
 - On battery the screen dims after 30 seconds and turns off after 2 minutes, with the CPU in light sleep; touch, the RTC alarm and the PWR key wake it
 - Idle clock with burn-in drift
 - Clock from the onboard RTC, medicines and log stored on the device flash
+- Wi-Fi client and access point modes, switched in quick settings, in Settings, Wi-Fi or in the web UI. QR codes join the access point and open the web UI, and the device answers at `hygeia.local` on a network
+- Web UI served by the device: dashboard, medicines, history, log, schedule, settings, Wi-Fi, backup with CSV and JSON export and import, firmware update with automatic rollback, and power off. A browser pairs once with a 6-digit code shown on the screen, and the web UI sets the clock and time zone from the browser
+- Wi-Fi turns off after 10 minutes without use on battery, unless Keep Wi-Fi on battery is on
+- A REST API that the web UI uses, and nothing else, so everything it does can be done with `curl`
 
 ## What does not exist yet
 
-Wi-Fi and access point mode, the web UI, MQTT with Home Assistant discovery, and webhooks are planned and not built. Log entries cannot be edited or deleted on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
+MQTT with Home Assistant discovery and webhooks are planned and not built, and the web UI has no TLS. Log entries are edited and deleted in the web UI only, not on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
 
 ## Quick start
 
@@ -66,6 +74,8 @@ idf.py -p <port> flash
 ```
 
 On first boot the device shows the "Set the time" screen until you set the date, time and zone. Details are in [Build and flash](docs/src/content/docs/getting-started/flashing.md) and [First boot](docs/src/content/docs/getting-started/first-boot.md).
+
+To reach the web UI, pull down quick settings and tap the Access point tile, join the network shown by the QR code, open the address shown next, and pair the browser with the code the device shows. See [Wi-Fi setup](docs/src/content/docs/getting-started/wifi.md) and [Web UI](docs/src/content/docs/user-guide/web-ui.md). The first install of this firmware has to be done over USB, because the bootloader has rollback enabled. The web UI has no TLS: use it on a network you trust. See the [security notes](docs/src/content/docs/reference/security.md).
 
 Release build, without the serial debug console:
 
@@ -89,6 +99,7 @@ idf.py -B build-rel -D SDKCONFIG=build-rel/sdkconfig -D SDKCONFIG_DEFAULTS="sdkc
 | Firmware | C on ESP-IDF v6.0.2 |
 | UI | LVGL 9.6.0 with esp_lvgl_port, hand-written screens |
 | Board support | Waveshare registry component 2.0.1 |
+| Network | Wi-Fi client and access point, mDNS, HTTP server with a REST API and a WebSocket for live updates, web UI in `web/` |
 | Storage | LittleFS for medicines and log, NVS for settings |
 | Host tests | plain C with Unity and cJSON, run with `make -C host_tests test` |
 | Docs | Astro Starlight in `docs/` |
@@ -100,7 +111,7 @@ make -C host_tests test
 cd docs && npm ci && npm run build
 ```
 
-The design spec is `design/spec.md` and the board measurements are in `design/hardware-notes.md`.
+The design spec is `design/spec.md` and the board measurements are in `design/hardware-notes.md`. `python tools/webmock.py` serves the web UI against sample data, with no board.
 
 ## License
 

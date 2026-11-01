@@ -15,7 +15,11 @@ description: Repository layout, host tests and the serial debug console.
 | `components/hy_sched` | runs the scheduler with the real clock and store |
 | `components/hy_store` | LittleFS mount, medicine and log files, NVS settings |
 | `components/hy_audio` | chime playback |
+| `components/hy_net` | Wi-Fi client and access point, mDNS, captive portal, the battery rule for the radio |
+| `components/hy_web` | HTTP server, REST API, WebSocket events, pairing sessions, backup and firmware update |
 | `components/hy_ui` | LVGL screens, theme, fonts |
+| `web/` | the web UI: HTML, CSS and JavaScript, bundled into the firmware by `tools/web_bundle.py` |
+| `tools/` | the web bundle builder, the web UI mock server `webmock.py`, the parity table generator and the time zone table generator |
 | `host_tests/` | unit tests that build and run on the host |
 | `design/` | the design spec, hardware notes and mockups |
 | `docs/` | this documentation site |
@@ -29,6 +33,10 @@ The pure logic is tested on the host with plain C, gcc and make:
 ```bash
 make -C host_tests test
 ```
+
+## Web UI development
+
+`python tools/webmock.py` serves the web UI from `web/` and answers the API from sample files, so the pages can be built without a board. Edits show on reload. Options such as `--unpaired`, `--slow` and `--low-battery` reproduce the pairing page, a slow device and a refused firmware update. The table in [REST API](../rest-api/#screen-and-web-parity) is generated from the firmware route table by `tools/gen_parity.py`.
 
 ## Debug console
 

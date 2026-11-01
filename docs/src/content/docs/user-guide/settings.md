@@ -22,6 +22,8 @@ Pull down from the top edge on any screen to open quick settings. Swipe up to cl
 
 Do not disturb keeps the due card but silences the chime.
 
+![Design mockup of quick settings with the access point on](/hygeia/assets/mockups/09-quick-settings-access-point-on.png)
+
 The Wi-Fi and Access point tiles are explained in [Wi-Fi setup](../../getting-started/wifi/). The same settings, and more, are in the [web UI](../web-ui/).
 
 Changes are saved to NVS and survive a restart. Defaults: sound on, do not disturb off, volume 60, brightness 50, snooze 15 minutes.
@@ -34,7 +36,9 @@ Settings has these entries:
 - Date and time: the same rollers as the "Set the time" screen
 - Sound: a volume slider and a Play chime button
 - Display: brightness, and Rotation lock under the brightness slider
-- Wi-Fi: the mode (Off, Wi-Fi, Access point), the saved networks (tap one to connect to it), the access point name and password, the web UI address, the number of paired browsers with Forget all, and Keep Wi-Fi on battery. Networks are added only in the web UI
+- Wi-Fi: the mode (Off, Wi-Fi, Access point), the saved networks (tap one to connect to it), the Access point row (it opens the join screen with the name and password), the web UI address, the number of paired browsers with Forget all, and Keep Wi-Fi on battery. Networks are added only in the web UI
+
+![Design mockup of Settings, Wi-Fi](/hygeia/assets/mockups/10-settings-wi-fi.png)
 - About: version, clock sync state, storage used and free, and the number of active and archived medicines
 
 The Time zone page changes the zone for future occurrences. Scheduled times keep their wall-clock time in the new zone. See [Scheduling rules](../../reference/scheduling/).

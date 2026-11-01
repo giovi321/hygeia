@@ -9,6 +9,8 @@ The device serves the web UI itself, in a browser on the same network. It edits 
 The device has no TLS. Anything on the network can read what travels between the browser and the device. Use it at home, or on the device's own access point.
 :::
 
+![The web UI dashboard in a desktop browser](/hygeia/screenshots/webui-dashboard.png)
+
 A browser pairs once with a code shown on the device screen. Until then every page shows "Pair this browser". See [Pairing](../../getting-started/wifi/#pairing).
 
 The pages update on their own when the device changes, for example when a dose is logged on the screen. If the device cannot be reached, the page keeps what it shows and says so.
