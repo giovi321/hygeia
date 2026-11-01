@@ -64,7 +64,8 @@ static void refresh(void)
     lv_slider_set_value(s_slider, st->brightness, LV_ANIM_OFF);
 }
 
-/* The line shows only while a discharge estimate exists; hidden, the buttons move up into its place */
+/* The line shows only while a discharge estimate exists. Its row stays reserved when hidden: the buttons keep one
+ * position on battery and on USB (the access point runs on USB only), so the tap area is the drawn button either way */
 void qs_battery_refresh(void)
 {
     if (!s_batt) {
@@ -79,8 +80,8 @@ void qs_battery_refresh(void)
         snprintf(b, sizeof b, HY_S_QS_BATTERY_LEFT, est);
         lv_label_set_text(s_batt, b);
         lv_obj_set_pos(s_batt, 24, y);
-        y += 21 + 13;
     }
+    y += 21 + 13;
     lv_obj_set_hidden(s_batt, !show);
     for (int i = 0; i < 2; i++) {
         lv_obj_set_y(s_btn[i], y);
