@@ -1,7 +1,9 @@
 /* Firmware update from GitHub releases: the release check and the download engine (see hy/update.h).
  *
- * One task per run, created by a user's press and deleted at its end. It runs below the LVGL task's priority, never
- * takes the board lock, and calls nothing that writes the store, the settings, the scheduler or the screen. Every
+ * One task per run, created by a user's press and deleted at its end. It runs below the LVGL task's priority and
+ * calls nothing that writes the store, the settings or the scheduler. Status subscribers run in this task between I/O
+ * steps and must not block; the screen's subscriber takes the board lock for at most 50 ms around one lv_async_call.
+ * publish() is never called while a socket read or a flash write is in progress. Every
  * byte that reaches flash goes through hy_fwimg, which checks the image head (a hygeia image for this chip whose
  * version equals the checked tag) before the slot is touched; the SHA-256 of the downloaded bytes is compared with
  * the SHA256SUMS line before esp_ota_end, and only then does the boot partition change.
@@ -599,6 +601,9 @@ hy_fw_err_t hy_update_check(void)
 
 hy_fw_err_t hy_update_install(const char *version)
 {
+    if (atomic_load(&s_running)) {
+        return refuse(HY_FWE_BUSY);
+    }
     bool fresh;
     int64_t t = now_s();
     portENTER_CRITICAL(&s_mux);

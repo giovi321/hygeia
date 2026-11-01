@@ -294,11 +294,16 @@ static void cancel_tap(void *ud)
 static void install_tap(void *ud)
 {
     (void)ud;
-    hy_fw_status_t st;
-    hy_update_status(&st);
+    /* Install the version the confirm page showed, not the live status: if the release moved meanwhile the engine
+       answers stale. */
+    if (!s_have || s_shown_st.state != HY_FWS_AVAILABLE) {
+        return;
+    }
+    char shown[sizeof s_shown_st.latest];
+    snprintf(shown, sizeof shown, "%s", s_shown_st.latest);
     s_confirm = false;
-    hy_fw_err_t e = hy_update_install(st.latest);
-    ESP_LOGI(TAG, "install %s: %s", st.latest, e == HY_FWE_NONE ? "started" : hy_fw_err_code(e));
+    hy_fw_err_t e = hy_update_install(shown);
+    ESP_LOGI(TAG, "install %s: %s", shown, e == HY_FWE_NONE ? "started" : hy_fw_err_code(e));
     sync();
 }
 

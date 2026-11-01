@@ -2,8 +2,10 @@
  *
  * Nothing here opens a connection on its own: a check or an install runs only when hy_update_check or
  * hy_update_install is called (a user's press). Each run is one task (8 KB internal stack, below the LVGL task's
- * priority) that is deleted when the run ends. The task calls no store, settings, scheduler or LVGL function; the UI
- * follows the status through hy_update_subscribe.
+ * priority) that is deleted when the run ends. The task calls no store, settings or scheduler function. The UI follows
+ * the status through hy_update_subscribe: subscribers run in the update task between I/O steps and must not block
+ * (the screen's subscriber takes the board lock for at most 50 ms around one lv_async_call), and the status is never
+ * published during a socket read or a flash write.
  *
  * Check: GET https://github.com/<repo>/releases/latest; the tag comes from the redirect's Location, the body is not
  * read. Install: SHA256SUMS of that tag, then hygeia.bin of that tag streamed through hy_fwimg (head check with the
@@ -33,8 +35,9 @@ void        hy_update_set_restart(bool (*restart)(void));
    is not HY_NS_CONNECTED), HY_FWE_BUSY (a check or install runs, or the heavy slot is held), HY_FWE_MEMORY (internal
    heap pre-check, or the task could not be created). */
 hy_fw_err_t hy_update_check(void);
-/* Any task. version must equal status.latest, state AVAILABLE, check finished less than 600 s ago, else
-   HY_FWE_STALE. Then, in order: NO_NETWORK, SELF_PENDING, BATTERY, BUSY, MEMORY as for a check. HY_FWE_NONE: the
+/* Any task. HY_FWE_BUSY first when a check or install runs. Then version must equal status.latest, state AVAILABLE,
+   check finished less than 600 s ago, else HY_FWE_STALE. Then, in order: NO_NETWORK, SELF_PENDING, BATTERY, BUSY
+   (heavy slot), MEMORY as for a check. HY_FWE_NONE: the
    download started. */
 hy_fw_err_t hy_update_install(const char *version);
 void        hy_update_status(hy_fw_status_t *out);           /* copy under the lock */
