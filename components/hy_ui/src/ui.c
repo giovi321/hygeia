@@ -287,7 +287,8 @@ typedef struct {
     void (*live)(int32_t);
     void (*commit)(int32_t);
     int32_t start;
-    bool ok;      /* the stroke began on an awake screen */
+    lv_point_t p0;   /* where the stroke began */
+    bool ok;      /* the stroke began on an awake screen and is still a slider drag */
 } slider_ctx_t;
 
 static void slider_event_cb(lv_event_t *e)
@@ -303,10 +304,25 @@ static void slider_event_cb(lv_event_t *e)
         ui_input_consume_force();   /* the slider owns the stroke, also one that starts in an edge zone */
         c->ok = !ui_input_waking();   /* false when the stroke only wakes the dimmed screen */
         c->start = lv_slider_get_value(s);
+        lv_indev_get_point(lv_event_get_indev(e), &c->p0);
         break;
-    case LV_EVENT_PRESSING:
+    case LV_EVENT_PRESSING: {
         ui_input_consume();
+        /* A mostly vertical stroke is a swipe (closing quick settings) that happens to cross the slider: the slider
+         * must neither follow it nor leave the brightness changed */
+        lv_point_t p;
+        lv_indev_get_point(lv_event_get_indev(e), &p);
+        int32_t dx = p.x > c->p0.x ? p.x - c->p0.x : c->p0.x - p.x;
+        int32_t dy = p.y > c->p0.y ? p.y - c->p0.y : c->p0.y - p.y;
+        if (c->ok && dy > 16 && dy > dx) {
+            c->ok = false;
+            lv_slider_set_value(s, c->start, LV_ANIM_OFF);
+            c->live(c->start);
+        } else if (!c->ok) {
+            lv_slider_set_value(s, c->start, LV_ANIM_OFF);
+        }
         break;
+    }
     case LV_EVENT_VALUE_CHANGED:
         if (c->ok) {
             c->live(lv_slider_get_value(s));
