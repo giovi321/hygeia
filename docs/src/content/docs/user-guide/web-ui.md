@@ -66,7 +66,22 @@ If the file holds settings or Wi-Fi networks, a box offers to apply them too. Do
 
 ## Firmware
 
-The page shows the installed version. Choose the file `hygeia.bin` from a build and tap Upload and restart. A bar shows the upload. After the upload the device checks the file, writes it and restarts. The page then says "The device restarts. This page reconnects when it is back" and asks the device for its version every 2 seconds for up to 60 seconds.
+The page shows the installed version and offers two ways to update.
+
+### Update from GitHub
+
+Tap Check for update. The device sends one request to github.com and reads the version of the latest release from the answer. Nothing is checked in the background: the device contacts GitHub only when you tap Check for update or Install, on this page or on the screen under Settings, About.
+
+- The device needs a Wi-Fi network with internet. In access point mode, or when Wi-Fi is off, the page says why it cannot check. The rest of the web UI keeps working
+- When a newer release exists the page shows "Install" with the version and a link to the release notes on GitHub. Tap Install, confirm, and the device downloads the firmware over HTTPS, checks it and restarts. A bar shows the download
+- The device installs the file only when its checksum matches the one published with the release and the file is the version it showed. Otherwise nothing is installed and the page says so
+- A development build is always offered the latest release, with a note that the installed firmware may be newer than the release. A release that is equal to or newer than the latest one shows "Up to date"
+- On battery the install needs a charge of 30 percent or more. A check works at any charge
+- A check or install that is already running on the screen or in another browser shows here too, and the buttons and the upload are disabled meanwhile
+
+### Upload a file
+
+Choose the file `hygeia.bin` from a build and tap Upload and restart. A bar shows the upload. After the upload the device checks the file, writes it and restarts. The page then says "The device restarts. This page reconnects when it is back" and asks the device for its version every 2 seconds for up to 60 seconds.
 
 - On battery the update needs a charge of 30 percent or more
 - The new firmware has to confirm itself soon after it starts. If it does not, the device restarts into the previous version after about 150 seconds. If the page gives up after 60 seconds, wait a little and reload: the device may be back on the previous version

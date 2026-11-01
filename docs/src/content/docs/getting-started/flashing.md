@@ -72,6 +72,8 @@ Every tagged version has a page under [Releases](https://github.com/giovi321/hyg
 - `hygeia.bin`: the application image. Upload it in the web UI to update a device that is already running
 - `SHA256SUMS`: checksums of both files, check them with `sha256sum -c SHA256SUMS`
 
+Once a device runs, later updates can also come from the web UI or the device itself without a computer: both fetch the latest release from GitHub (see [Web UI](../../user-guide/web-ui/#update-from-github)).
+
 The file names do not contain the version, so `https://github.com/giovi321/hygeia/releases/latest/download/hygeia.bin` always points at the newest stable release. Tags with a hyphen, such as `v1.0.0-rc1`, are published as pre-releases and are not served by `latest`.
 
 Each CI run on any branch also uploads the same three files as the workflow artifact `hygeia-firmware-<short commit>`. These builds report `dev-<short commit>` as their version.

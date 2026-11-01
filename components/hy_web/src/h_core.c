@@ -116,6 +116,7 @@ static esp_err_t h_info(web_req_t *r)
     if (o) {
         cJSON_AddNumberToObject(o, "api", HY_API_VERSION);
         cJSON_AddStringToObject(o, "fw", esp_app_get_description()->version);
+        cJSON_AddStringToObject(o, "repo", CONFIG_HY_UPDATE_REPO);
         cJSON_AddStringToObject(o, "name", st.host);
         cJSON_AddBoolToObject(o, "paired", r->sess >= 0);
         cJSON_AddNumberToObject(o, "utc_ms", (double)utc_ms_now());
@@ -452,6 +453,7 @@ __attribute__((weak)) web_handler_t web_log_route(hy_route_id_t id) { (void)id; 
 __attribute__((weak)) web_handler_t web_settings_route(hy_route_id_t id) { (void)id; return NULL; }
 __attribute__((weak)) web_handler_t web_wifi_route(hy_route_id_t id) { (void)id; return NULL; }
 __attribute__((weak)) web_handler_t web_data_route(hy_route_id_t id) { (void)id; return NULL; }
+__attribute__((weak)) web_handler_t web_update_route(hy_route_id_t id) { (void)id; return NULL; }
 
 web_handler_t web_route_handler(hy_route_id_t id)
 {
@@ -476,6 +478,9 @@ web_handler_t web_route_handler(hy_route_id_t id)
     }
     if (!h) {
         h = web_data_route(id);
+    }
+    if (!h) {
+        h = web_update_route(id);
     }
     return h;
 }

@@ -63,6 +63,18 @@ static void test_route_ids(void)
     TEST_ASSERT_NOT_NULL(r);
     TEST_ASSERT_EQUAL(HY_R_BROWSERS_DEL, r->id);
     TEST_ASSERT_NULL(hy_route_match(HY_M_DELETE, "/api/browsers/1", &id));
+
+    /* firmware update from GitHub */
+    r = hy_route_match(HY_M_GET, "/api/update", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_UPDATE, r->id);
+    r = hy_route_match(HY_M_POST, "/api/update/check", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_UPDATE_CHECK, r->id);
+    r = hy_route_match(HY_M_POST, "/api/update/install", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_UPDATE_INSTALL, r->id);
+    TEST_ASSERT_NULL(hy_route_match(HY_M_GET, "/api/update/check", &id));
 }
 
 static void test_route_table_complete(void)

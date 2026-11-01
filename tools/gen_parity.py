@@ -61,6 +61,9 @@ WEB_PAGE = {
     "HY_R_CHIME_TEST": "Settings",
     "HY_R_POWER_OFF": "Settings",
     "HY_R_OTA": "Firmware",
+    "HY_R_UPDATE": "Firmware",
+    "HY_R_UPDATE_CHECK": "Firmware",
+    "HY_R_UPDATE_INSTALL": "Firmware",
 }
 
 ROW = re.compile(r'\{\s*HY_M_(GET|POST|PUT|DELETE)\s*,\s*"([^"]+)"\s*,\s*(HY_R_[A-Z0-9_]+)\s*,[^,]+,\s*"([^"]*)"\s*\}')

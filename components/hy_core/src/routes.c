@@ -42,6 +42,9 @@ static const hy_route_t TABLE[] = {
     { HY_M_POST,   "/api/chime/test",                 HY_R_CHIME_TEST,    0, "Settings > Sound" },
     { HY_M_POST,   "/api/power/off",                  HY_R_POWER_OFF,     0, "Power off screen" },
     { HY_M_POST,   "/api/ota",                        HY_R_OTA,           0, "" },
+    { HY_M_GET,    "/api/update",                     HY_R_UPDATE,        0, "Settings > About > Check for update" },
+    { HY_M_POST,   "/api/update/check",               HY_R_UPDATE_CHECK,  0, "Settings > About > Check for update" },
+    { HY_M_POST,   "/api/update/install",             HY_R_UPDATE_INSTALL, 0, "Settings > About > Check for update" },
 };
 
 _Static_assert(sizeof TABLE / sizeof TABLE[0] == HY_R_COUNT, "one row per route id");

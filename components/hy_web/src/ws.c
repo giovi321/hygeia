@@ -112,17 +112,9 @@ static void flush_work(void *arg)
     }
 }
 
-/* Any task (the event bus publisher): encode, push, queue the flush; never waits */
-static void on_event(const hy_event_t *ev, void *ctx)
+/* Any task: copy msg into the ring (the oldest goes when full and the clients resync), queue the flush; never waits */
+static void ring_push(const char *msg)
 {
-    (void)ctx;
-    if (atomic_load(&s_ncli) == 0) {
-        return;   /* a client fetches /api/state when it connects */
-    }
-    char msg[WS_MSG_LEN];
-    if (hy_api_event_json(ev, msg, sizeof msg) < 0) {
-        return;
-    }
     portENTER_CRITICAL(&s_qmux);
     if (s_qcount == WS_QUEUE) {   /* full: the oldest goes and the client is told to reload the state */
         s_qhead = (uint8_t)((s_qhead + 1) % WS_QUEUE);
@@ -138,6 +130,34 @@ static void on_event(const hy_event_t *ev, void *ctx)
             atomic_store(&s_flush_queued, false);
         }
     }
+}
+
+/* Any task (the event bus publisher): encode, push */
+static void on_event(const hy_event_t *ev, void *ctx)
+{
+    (void)ctx;
+    if (atomic_load(&s_ncli) == 0) {
+        return;   /* a client fetches /api/state when it connects */
+    }
+    char msg[WS_MSG_LEN];
+    if (hy_api_event_json(ev, msg, sizeof msg) < 0) {
+        return;
+    }
+    ring_push(msg);
+}
+
+void web_ws_push(const char *json)
+{
+    if (!json || atomic_load(&s_ncli) == 0) {
+        return;
+    }
+    char msg[WS_MSG_LEN] = {0};
+    size_t n = strlen(json);
+    if (n >= WS_MSG_LEN) {
+        return;
+    }
+    memcpy(msg, json, n);
+    ring_push(msg);
 }
 
 static void ping_work(void *arg)

@@ -12,6 +12,7 @@ idf_component_register(
         "src/h_wifi.c"
         "src/h_backup.c"
         "src/h_ota.c"
+        "src/h_update.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS

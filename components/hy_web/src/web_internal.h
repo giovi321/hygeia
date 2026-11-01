@@ -68,6 +68,9 @@ web_handler_t web_log_route(hy_route_id_t id);        /* log, history, schedule 
 web_handler_t web_settings_route(hy_route_id_t id);   /* settings, time, chime, power off */
 web_handler_t web_wifi_route(hy_route_id_t id);       /* Wi-Fi */
 web_handler_t web_data_route(hy_route_id_t id);       /* export, import, firmware update */
+web_handler_t web_update_route(hy_route_id_t id);     /* firmware update from GitHub (h_update.c) */
+/* Subscribes once to the update status; each change goes out as a live event (h_update.c, at server start) */
+void web_update_start(void);
 
 /* Export and import (h_backup.c). busy: an import is writing, other web writes answer 409 "busy". stop: refuses new
  * exports and imports, asks a running one to end and waits for it however long (server stop, before httpd_stop).
@@ -149,6 +152,8 @@ void      web_ws_detach(void);
 esp_err_t web_ws_register(httpd_handle_t srv);
 /* httpd close_fn hook */
 void      web_ws_on_close(int fd);
+/* Any task: queues one message (under 192 bytes) for the open live-event sockets, in the ring the bus events use */
+void      web_ws_push(const char *json);
 /* Closes live-event sockets whose session was forgotten (queued to the httpd task) */
 void      web_ws_sessions_changed(void);
 /* Queues fn to the httpd task when the server runs; false otherwise */

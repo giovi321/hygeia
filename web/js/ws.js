@@ -1,4 +1,5 @@
-// Live updates: any event from the device, or a resync, refetches the current page's data.
+// Live updates: any event from the device, or a resync, refetches the current page's data. Firmware update events go to
+// HY.onUpdate (set by the Firmware page) and do not refetch.
 HY.ws = (function () {
   var sock = null, stable = null, timer = null, wait = null, tries = 0, running = false;
   var delays = [1000, 2000, 5000, 10000];
@@ -25,7 +26,16 @@ HY.ws = (function () {
       stable = setTimeout(function () { tries = 0; }, 5000);   // a socket that drops at once keeps backing off
       poke();
     };
-    sock.onmessage = function () { tries = 0; poke(); };
+    sock.onmessage = function (e) {
+      tries = 0;
+      var msg = null;
+      try { msg = JSON.parse(e.data); } catch (x) { msg = null; }
+      if (msg && msg.ev === "update") {   // firmware update progress: no page refetch
+        if (typeof HY.onUpdate === "function") { HY.onUpdate(msg); }
+        return;
+      }
+      poke();
+    };
     sock.onclose = function () { clearTimeout(stable); sock = null; retry(); };
     sock.onerror = function () { /* onclose follows */ };
   }

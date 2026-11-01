@@ -3,6 +3,7 @@
 
     python tools/webmock.py [--port 8484] [--unpaired] [--slow] [--stale] [--clock-invalid] [--skew SECONDS] [--zone NAME] [--busy]
                             [--low-battery] [--ota-pending]
+                            [--update uptodate|available|dev|offline|checksum]
 
 Serves the bundle made by tools/web_bundle.py from web/ (rebuilt on every request, so edits show on reload) and
 answers /api/* from the sample files in tools/webmock/samples/ plus in-memory changes. Routes the firmware does not
@@ -20,6 +21,11 @@ uploaded image's version in /api/info.
   --busy           writes answer 503 busy; the first GET of each read route answers 503 once
   --low-battery    POST /api/ota answers 409 battery (on battery below 30 %)
   --ota-pending    POST /api/ota answers 503 busy (the running firmware has not confirmed itself yet)
+  --update MODE    the GitHub update (default available): uptodate = installed v0.5.0 is the latest release;
+                   available = installed v0.4.0, latest v0.5.0; dev = installed dev-a88c56d, latest v0.5.0;
+                   offline = a check answers 409 no_network; checksum = an install ends FAILED checksum.
+                   A check answers 202 and finishes 1 s later; an install downloads in 10 % steps every 300 ms,
+                   then restarts like an upload. State changes go out as live events
 """
 
 import argparse
@@ -104,7 +110,9 @@ class Device:
         self.pair_until = 0
         self.blocked_until = 0
         self.clients = []
-        self.fw = "0.0.0-mock"
+        self.upd_mode = args.update
+        self.fw = {"uptodate": "v0.5.0", "dev": "dev-a88c56d"}.get(args.update, "v0.4.0")
+        self.upd = {"state": "idle", "err": None, "latest": "", "pct": 0, "checked": 0}
         self.restart_at = 0.0   # an upload finished: unreachable from restart_at for OTA_BOOT_S
         self.next_fw = None
         self.ota_busy = False   # an upload body is being read (outside the device lock)
@@ -122,6 +130,7 @@ class Device:
             if t < self.restart_at + OTA_BOOT_S:
                 return True
             self.fw, self.next_fw, self.restart_at = self.next_fw, None, 0.0
+            self.upd = {"state": "idle", "err": None, "latest": "", "pct": 0, "checked": 0}
             self.clients = []
             return False
 
@@ -162,6 +171,57 @@ class Device:
             out.append(t)
         return out
 
+    def upd_status(self):
+        u = self.upd
+        failed = u["state"] == "failed"
+        return {"state": u["state"], "installed": self.fw, "latest": u["latest"],
+                "installed_release": re.fullmatch(r"v\d+\.\d+\.\d+", self.fw) is not None, "pct": u["pct"],
+                "error": u["err"] if failed else None, "message": UPD_ERR[u["err"]] if failed else None,
+                "checked_ago_s": int(time.time() - u["checked"]) if u["checked"] else None}
+
+    def upd_event(self):
+        u = self.upd
+        ev = {"ev": "update", "state": u["state"], "pct": u["pct"]}
+        if u["state"] == "failed":
+            ev["error"] = u["err"]
+        frame = ws_frame(json.dumps(ev))
+        for c in list(self.clients):
+            try:
+                c.sendall(frame)
+            except OSError:
+                self.clients.remove(c)
+
+    def upd_set(self, **kw):
+        with self.lock:
+            self.upd.update(kw)
+            self.upd_event()
+
+    def upd_finish_check(self):
+        with self.lock:
+            if self.upd["state"] != "checking":
+                return
+            newer = self.upd_mode != "uptodate" and self.fw != UPD_LATEST
+            self.upd.update(state="available" if newer else "up_to_date", latest=UPD_LATEST, err=None,
+                            checked=time.time())
+            self.upd_event()
+
+    def upd_download(self):
+        for pct in range(0, 101, 10):
+            if self.upd_mode == "checksum" and pct == 60:
+                self.upd_set(state="verifying", pct=100)
+                time.sleep(0.5)
+                self.upd_set(state="failed", err="checksum", pct=0)
+                return
+            self.upd_set(state="downloading", pct=pct)
+            time.sleep(0.3)
+        self.upd_set(state="verifying", pct=100)
+        time.sleep(0.5)
+        with self.lock:
+            self.next_fw = self.upd["latest"]
+            self.restart_at = time.time() + OTA_RESTART_S
+            self.upd.update(state="restarting", pct=100)
+            self.upd_event()
+
     def broadcast(self, ev):
         frame = ws_frame(json.dumps({"ev": ev, "ts": int(time.time()), "med_id": 0, "log_id": 0, "slot": 0,
                                      "value": 0}))
@@ -170,6 +230,13 @@ class Device:
                 c.sendall(frame)
             except OSError:
                 self.clients.remove(c)
+
+
+UPD_LATEST = "v0.5.0"
+UPD_ERR = {"no_network": "Not connected to a Wi-Fi network. Connect to a network with internet to check for updates",
+           "busy": "Another update, upload, export or import is running",
+           "stale": "Check for updates again before installing",
+           "checksum": "The download does not match its checksum. Nothing was installed"}
 
 
 def ws_frame(text):
@@ -392,8 +459,33 @@ class Handler(BaseHTTPRequestHandler):
         if extra is not None:
             return extra
 
+        if path == "/api/update" and m == "GET":
+            return 200, dev.upd_status()
+
+        if path == "/api/update/check" and m == "POST":
+            if dev.upd["state"] in ("checking", "downloading", "verifying", "restarting"):
+                return 409, err(409, "busy", None, UPD_ERR["busy"])[1]
+            if dev.upd_mode == "offline":
+                dev.upd.update(state="failed", err="no_network")
+                return 409, err(409, "no_network", None, UPD_ERR["no_network"])[1]
+            dev.upd.update(state="checking", err=None, pct=0)
+            threading.Timer(1.0, dev.upd_finish_check).start()
+            return 202, dev.upd_status()
+
+        if path == "/api/update/install" and m == "POST":
+            ver = body.get("version") if isinstance(body, dict) else None
+            if not isinstance(ver, str):
+                return 400, err(400, "invalid", "version", "Send the version to install as {\"version\":\"vX.Y.Z\"}")[1]
+            if dev.upd["state"] in ("checking", "downloading", "verifying", "restarting"):
+                return 409, err(409, "busy", None, UPD_ERR["busy"])[1]
+            if dev.upd["state"] != "available" or ver != dev.upd["latest"]:
+                return 409, err(409, "stale", None, UPD_ERR["stale"])[1]
+            dev.upd.update(state="downloading", pct=0)
+            threading.Thread(target=dev.upd_download, daemon=True).start()
+            return 202, dev.upd_status()
+
         if path == "/api/info" and m == "GET":
-            return 200, {"api": 1, "fw": dev.fw, "name": "hygeia",
+            return 200, {"api": 1, "fw": dev.fw, "name": "hygeia", "repo": "giovi321/hygeia",
                          "paired": (not dev.args.unpaired) or self.session() in dev.sessions,
                          "utc_ms": dev.now_ms(), "clock_valid": dev.clock_valid}
 
@@ -1041,6 +1133,7 @@ def main(argv=None):
     ap.add_argument("--busy", action="store_true")
     ap.add_argument("--low-battery", action="store_true")
     ap.add_argument("--ota-pending", action="store_true")
+    ap.add_argument("--update", choices=["uptodate", "available", "dev", "offline", "checksum"], default="available")
     args = ap.parse_args(argv)
     Handler.dev = Device(args)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)

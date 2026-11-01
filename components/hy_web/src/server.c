@@ -536,6 +536,7 @@ esp_err_t hy_web_start(void)
     }
     web_pair_init();
     web_ws_init();
+    web_update_start();
     if (xTaskCreateWithCaps(ctl_task, "web_ctl", CTL_STACK, NULL, 3, &s_ctl,
                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         ESP_LOGE(TAG, "control task not created");

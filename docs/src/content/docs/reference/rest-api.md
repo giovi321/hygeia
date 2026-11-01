@@ -73,7 +73,9 @@ The path has no version. `GET /api/info` and `GET /api/state` carry `"api": 1`. 
 
 ## Live events
 
-`/ws` is a WebSocket for paired browsers. It sends one JSON text frame per event, for example `{"ev":"taken","ts":1793181600,"med_id":1,"log_id":12,"slot":1793181000,"value":0}`. The events are `taken`, `skipped`, `missed`, `due`, `snoozed`, `undone`, `log_edited`, `meds_changed`, `untracked`, `battery_low`, `battery_critical` and `clock_invalid`. The frame `{"ev":"resync"}` means events were dropped: read the data again. The web UI refetches the page it shows on every frame.
+`/ws` is a WebSocket for paired browsers. It sends one JSON text frame per event, for example `{"ev":"taken","ts":1793181600,"med_id":1,"log_id":12,"slot":1793181000,"value":0}`. The events are `taken`, `skipped`, `missed`, `due`, `snoozed`, `undone`, `log_edited`, `meds_changed`, `untracked`, `battery_low`, `battery_critical` and `clock_invalid`. The frame `{"ev":"resync"}` means events were dropped: read the data again. The web UI refetches the page it shows on every frame, except the update frames below.
+
+During a firmware update from GitHub the device sends `{"ev":"update","state":"downloading","pct":42}` on every state change and on each 5 percent of the download. `state` is one of `checking`, `up_to_date`, `available`, `downloading`, `verifying`, `restarting` and `failed`; a failed frame adds `"error":"<code>"`. Read `GET /api/update` for the rest.
 
 ## Routes
 
@@ -102,7 +104,8 @@ The path has no version. `GET /api/info` and `GET /api/state` carry `"api": 1`. 
 | `PUT /api/wifi/ap` | access point password and host name |
 | `GET /api/export.csv`, `GET /api/export.json`, `POST /api/import` | export and import |
 | `POST /api/chime/test`, `POST /api/power/off` | play the chime, power off |
-| `POST /api/ota` | firmware update |
+| `POST /api/ota` | firmware update from an uploaded file |
+| `GET /api/update`, `POST /api/update/check`, `POST /api/update/install` | firmware update from GitHub |
 
 Passwords are write-only. No route returns a Wi-Fi password, except `GET /api/export.json?secrets=1`, which writes the saved passwords into the file.
 
@@ -117,6 +120,25 @@ Passwords are write-only. No route returns a Wi-Fi password, except `GET /api/ex
 ### Firmware
 
 `POST /api/ota` takes the firmware file `hygeia.bin` as the raw body and answers `{"reboot_in_s":2}`. The device checks the first bytes of the file, writes it to the other update slot and restarts two seconds later. Errors: `422` `not_hygeia` (not a Hygeia image), `422` `corrupt`, `413` (above 3 MB), `409` `battery` (on battery below 30 percent), `409` `busy` (another export, import or update runs, or a restart is pending), `503` `busy` (the running firmware has not confirmed itself yet, retry in a few seconds).
+
+### Firmware update from GitHub
+
+- `GET /api/update` answers the status: `{"state":"available","installed":"dev-a88c56d","latest":"v0.5.0","installed_release":false,"pct":0,"error":null,"message":null,"checked_ago_s":12}`. `latest` is empty and `checked_ago_s` is `null` before the first check. `installed_release` is false for a development build
+- `POST /api/update/check` starts a check and answers `202` with the status. The device sends one request to github.com; poll `GET /api/update` or watch the live events for the result
+- `POST /api/update/install` takes `{"version":"v0.5.0"}`, which has to be the `latest` of a check made less than 10 minutes ago, and answers `202` with the status. The device then downloads, verifies and restarts. A missing or non-string `version` answers `400` with the field `version`
+
+Errors use the usual shape. A status in the `failed` state carries the same `error` and `message`.
+
+| Status | `error` | Meaning |
+|---|---|---|
+| `409` | `no_network` | not connected to a Wi-Fi network (access point mode, Wi-Fi off or no link) |
+| `409` | `busy` | a check, install, upload, export or import runs |
+| `409` | `stale` | install without a recent check, or `version` is not the checked `latest` |
+| `409` | `battery` | on battery below 30 percent (install only) |
+| `503` | `busy` | the running firmware has not confirmed itself yet; `Retry-After: 2` |
+| `503` | `memory` | not enough memory right now; `Retry-After: 2` |
+
+Failures after the start show in the status: `no_internet` (GitHub cannot be reached), `tls`, `no_release`, `bad_release`, `mismatch`, `checksum`, `corrupt`, `flash` and `timeout`. Nothing is installed in any of these cases.
 
 The new firmware has to confirm itself on its first scheduler pass. If it does not, the device restarts into the previous version after 150 seconds. The first install of a firmware with this feature has to be done by USB: see [Build and flash](../../getting-started/flashing/).
 
@@ -178,6 +200,15 @@ curl -s -b "$C" -X POST -H "X-Hygeia: 1" -H "Content-Type: application/octet-str
   --data-binary @build/hygeia.bin http://192.168.1.23/api/ota
 ```
 
+Check for a release on GitHub and install it:
+
+```bash
+curl -s -b "$C" -X POST -H "X-Hygeia: 1" http://192.168.1.23/api/update/check
+curl -s -b "$C" http://192.168.1.23/api/update
+curl -s -b "$C" -X POST -H "X-Hygeia: 1" -H "Content-Type: application/json" \
+  -d '{"version":"v0.5.0"}' http://192.168.1.23/api/update/install
+```
+
 ## Screen and web parity
 
 Every action on the screen has a route. The table lists each route, the web UI page that uses it and the place on the screen that does the same. "web only" means the screen has no equivalent. The table is generated from the route table in the firmware source by `tools/gen_parity.py`; do not edit it by hand.
@@ -224,4 +255,7 @@ Every action on the screen has a route. The table lists each route, the web UI p
 | `POST /api/chime/test` | Settings | Settings > Sound |
 | `POST /api/power/off` | Settings | Power off screen |
 | `POST /api/ota` | Firmware | web only |
+| `GET /api/update` | Firmware | Settings > About > Check for update |
+| `POST /api/update/check` | Firmware | Settings > About > Check for update |
+| `POST /api/update/install` | Firmware | Settings > About > Check for update |
 <!-- parity:end -->
