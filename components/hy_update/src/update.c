@@ -47,8 +47,9 @@ static const char *TAG = "update";
 #define UPD_TIMEOUT_MS       10000
 #define UPD_DEADLINE_US      (300LL * 1000000)    /* whole install */
 #define UPD_MAX_HOPS         3
-#define UPD_LOC_MAX          512                  /* Location header, terminator included */
-#define UPD_URL_MAX          512
+#define UPD_CHECK_LOC_MAX    512                  /* Location of releases/latest, terminator included */
+#define UPD_LOC_MAX          2048                 /* Location of an asset redirect (signed URLs), terminator included */
+#define UPD_URL_MAX          2048
 #define UPD_BUF              4096
 #define UPD_ACTIVITY         (64 * 1024)          /* restart the radio's battery idle timer every 64 KB */
 #define UPD_RESTART_MS       2000
@@ -58,10 +59,11 @@ typedef enum { RUN_CHECK = 0, RUN_INSTALL } run_kind_t;
 
 typedef struct {
     char *loc;          /* Location of the last response, "" when none */
+    size_t loc_max;     /* capacity of loc, terminator included */
     bool loc_long;      /* the Location did not fit */
 } hdr_t;
 
-/* One PSRAM block for a run. */
+/* One PSRAM block for a run (loc and url are 2 KB each; the block is never on a task stack). */
 typedef struct {
     char loc[UPD_LOC_MAX];
     char url[UPD_URL_MAX];
@@ -145,7 +147,7 @@ static esp_err_t on_event(esp_http_client_event_t *evt)
     if (evt->event_id == HTTP_EVENT_ON_HEADER && h && evt->header_key && evt->header_value &&
         strcasecmp(evt->header_key, "Location") == 0) {
         size_t n = strlen(evt->header_value);
-        if (n >= UPD_LOC_MAX) {
+        if (n >= h->loc_max) {
             h->loc_long = true;
             h->loc[0] = 0;
         } else {
@@ -236,7 +238,7 @@ static bool is_redirect(int status)
    200. A 404, another status, a long or refused Location, or a fourth redirect: BAD_RELEASE. */
 static hy_fw_err_t get_asset(run_mem_t *m, esp_http_client_handle_t *out)
 {
-    hdr_t hdr = {.loc = m->loc};
+    hdr_t hdr = {.loc = m->loc, .loc_max = sizeof m->loc};
     for (int hop = 0;; hop++) {
         int status = 0;
         hy_fw_err_t e = open_url(m->url, &hdr, out, &status);
@@ -269,7 +271,7 @@ static hy_fw_err_t get_asset(run_mem_t *m, esp_http_client_handle_t *out)
 static hy_fw_err_t run_check(run_mem_t *m)
 {
     esp_http_client_handle_t c = NULL;
-    hdr_t hdr = {.loc = m->loc};
+    hdr_t hdr = {.loc = m->loc, .loc_max = UPD_CHECK_LOC_MAX};
     int status = 0;
     char tag[32];
     snprintf(m->url, sizeof m->url, UPD_GH "%s/releases/latest", CONFIG_HY_UPDATE_REPO);
