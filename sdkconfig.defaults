@@ -41,3 +41,9 @@ CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT=y
 CONFIG_CJSON_NESTING_LIMIT=16
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_LV_USE_QRCODE=y
+# Firmware update from GitHub releases: TLS roots from the common bundle (GitHub's are in it), mbedTLS buffers in PSRAM.
+# CONFIG_MBEDTLS_HAVE_TIME_DATE stays off (the default): certificate dates are not checked, so a device whose clock
+# is wrong can still update
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

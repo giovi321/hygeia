@@ -1,0 +1,10 @@
+menu "Hygeia firmware update"
+
+    config HY_UPDATE_REPO
+        string "GitHub repository the device updates from"
+        default "giovi321/hygeia"
+        help
+            owner/name of the GitHub repository whose latest release the device checks and installs.
+            A fork sets its own repository so its devices follow its own releases.
+
+endmenu

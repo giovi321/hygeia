@@ -56,6 +56,9 @@ void      hy_web_pair_cancel(void);
 esp_err_t hy_web_forget_all(void);
 /* Number of paired browsers (0..4). Any task. */
 size_t    hy_web_paired_count(void);
+/* Any task. Restarts the device from the LVGL task, the only task that writes the store, so no write is cut halfway.
+ * False when the restart could not be posted (no screen task, or LVGL busy for a second): the caller restarts. */
+bool      hy_web_restart(void);
 
 #if CONFIG_HY_DEBUG_CONSOLE
 /* "web": server, sockets, sessions, the last 5 requests with route and status, live-event queue */

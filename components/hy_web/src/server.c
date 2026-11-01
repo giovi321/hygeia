@@ -611,6 +611,7 @@ static void a_restart(void *arg)
 
 const hy_web_ui_t *web_ui(void) { return s_ui; }
 bool web_ui_restart(void) { return ui_post(a_restart, NULL); }
+bool hy_web_restart(void) { return web_ui_restart(); }
 bool web_ui_power_off(void) { return ui_post(a_power_off, NULL); }
 void web_ui_pair_hide(int reason) { ui_post(a_pair_hide, (void *)(intptr_t)reason); }
 void web_ui_toast_ok(const char *text) { ui_post(a_toast_ok, (void *)text); }

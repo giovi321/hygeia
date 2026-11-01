@@ -1,14 +1,22 @@
 idf_component_register(
     SRCS
         "src/fwimg.c"
+        "src/update.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         esp_app_format
+        hy_core
     PRIV_REQUIRES
         app_update
+        esp_http_client
+        esp-tls
         esp_system
+        esp_timer
+        freertos
         heap
         log
         mbedtls
+        hy_net
+        hy_power
 )

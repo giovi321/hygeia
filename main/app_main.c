@@ -25,6 +25,7 @@
 #include "hy/sched_run.h"
 #include "hy/store.h"
 #include "hy/ui.h"
+#include "hy/update.h"
 #include "hy/web.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -210,6 +211,7 @@ static void cmd_settings(const char *args) { (void)args; hy_ui_debug_settings();
 static void cmd_wifi(const char *args) { hy_net_debug(args); }
 static void cmd_web(const char *args) { hy_web_debug(args); }
 static void cmd_webjob(const char *args) { hy_web_debug_job(args); }
+static void cmd_upd(const char *args) { hy_update_debug(args); }
 /* "pair": the running pairing code (console only); "pair show|hide": the overlay with an example code */
 static void cmd_pair(const char *args)
 {
@@ -599,6 +601,8 @@ void app_main(void)
     bool store_ok = init_storage();
     esp_err_t nerr = hy_net_init();   /* NVS is up: networks, access point password; the radio stays off */
     ESP_LOGI(TAG, "hy_net_init: %s", esp_err_to_name(nerr));
+    hy_update_init();   /* the installed version; no connection until a user's check */
+    hy_update_set_restart(hy_web_restart);   /* the restart the web upload uses: through the LVGL task */
     hy_net_set_keep_batt(settings.wifi_keep_batt);
     if (err == ESP_OK) {
         esp_err_t perr = hy_power_init();
@@ -673,6 +677,7 @@ void app_main(void)
     console_register("wifi", cmd_wifi);
     console_register("web", cmd_web);
     console_register("webjob", cmd_webjob);
+    console_register("upd", cmd_upd);
     console_register("pair", cmd_pair);
     console_register("ui", cmd_ui);
     console_register("otafail", cmd_otafail);
