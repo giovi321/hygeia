@@ -214,7 +214,7 @@
       var m = medById(e.med_id);
       var origLocal = (e.local || "").slice(0, 16);
       dialog("Edit entry" + (m ? ", " + m.name : ""), [
-        HY.h("div", { class: "row2" }, lab("Date", "le-date", dateIn), lab("Time", "le-time", timeIn)),
+        HY.h("div", { class: "row2 eq" }, lab("Date", "le-date", dateIn), lab("Time", "le-time", timeIn)),
         lab("Status", "le-status", st), lab("Note", "le-note", note)], "Save", function () {
         var body = { orig_ts: e.ts, status: st.value, note: note.value };
         if (dateIn.value + " " + timeIn.value !== origLocal) {
@@ -257,7 +257,7 @@
       var note = HY.h("input", { id: "la-note", type: "text", maxlength: "63", autocomplete: "off" });
       dialog("Add a past dose", [
         lab("Medicine", "la-med", sel),
-        HY.h("div", { class: "row2" }, lab("Date", "la-date", dateIn), lab("Time", "la-time", timeIn)),
+        HY.h("div", { class: "row2 eq" }, lab("Date", "la-date", dateIn), lab("Time", "la-time", timeIn)),
         lab("Note", "la-note", note)], "Add", function () {
         if (!dateIn.value || !timeIn.value) { return Promise.resolve("Enter a date and a time"); }
         var ts = HY.wallToEpoch(dateIn.value, timeIn.value, zone);

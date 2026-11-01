@@ -119,7 +119,7 @@ HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, sav
       ctl.quiet_on = on; ctl.quiet_from = from; ctl.quiet_to = to;
       return section("Quiet hours", [
         HY.h("label", { class: "check", for: "s-quiet-on" }, on, "Quiet hours on"),
-        HY.h("div", { class: "row2" }, field("From", "s-quiet-from", from), field("To", "s-quiet-to", to)),
+        HY.h("div", { class: "row2 eq" }, field("From", "s-quiet-from", from), field("To", "s-quiet-to", to)),
         HY.h("div", { class: "hint" }, "Reminders stay silent in this period")
       ]);
     }
@@ -294,7 +294,7 @@ HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, sav
         errBox.textContent = "";
         if (!ctl.volume) { build(); loadClock(); loadBrowsers(); }
         sync();
-        ctl.rot_show.textContent = "Current orientation: position " + s.rot + " of 0 to 3";
+        ctl.rot_show.textContent = "Current orientation: " + (s.rot * 90) + "\u00B0";
       }, function (e) {
         // keep the page that is on screen; the next good answer clears the message
         if (HY.alive(token)) { errBox.textContent = HY.errText(e) || "Could not load the settings"; }

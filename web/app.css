@@ -78,7 +78,7 @@ input[type=text], input[type=number], input[type=time], input[type=date] {
   width: 100%; min-height: 44px; padding: 8px 10px; background: var(--in); color: var(--tx);
   border: 1px solid var(--inline); border-radius: 8px; font: inherit; font-size: 16px;
 }
-input[type=time], input[type=date] { min-width: 0; }
+input[type=time], input[type=date] { display: block; min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; text-align: left; }
 input[type=checkbox] { width: 24px; height: 24px; margin: 0; accent-color: var(--acc); }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 label, .lbl { display: block; color: var(--mut); font-size: 13px; margin: 12px 0 4px; }
@@ -105,9 +105,13 @@ label, .lbl { display: block; color: var(--mut); font-size: 13px; margin: 12px 0
 .sw.on { outline: 3px solid #fff; outline-offset: 2px; }
 .times { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
 .trow { display: flex; gap: 8px; }
-.trow input { flex: 1; }
+.trow input { flex: 1; min-width: 0; }
 .row2 { display: flex; gap: 12px; }
-.row2 .field:last-child { flex: 1; min-width: 0; }
+.row2 .field { min-width: 0; }
+.row2 .field:last-child { flex: 1; }
+.row2.eq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.row2.eq .field { min-width: 0; }
+@media (max-width: 339px) { .row2.eq { grid-template-columns: minmax(0, 1fr); gap: 0; } }
 .cols { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
 @media (min-width: 900px) { .cols { grid-template-columns: 1.2fr 1fr; align-items: start; } }
 
@@ -178,6 +182,7 @@ h3 { font-size: 15px; margin: 16px 0 4px; }
 .tabs { margin-bottom: 14px; }
 .tabs .chip { text-decoration: none; }
 .filters { display: grid; grid-template-columns: 1fr; gap: 0 12px; }
+.filters > * { min-width: 0; }
 .filters .btn { margin-top: 12px; }
 @media (min-width: 700px) { .filters { grid-template-columns: repeat(3, 1fr) auto; align-items: end; } }
 .entry { padding: 4px 0; }
