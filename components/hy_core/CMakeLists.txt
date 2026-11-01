@@ -30,6 +30,7 @@ idf_component_register(
         "src/api_log.c"
         "src/api_set.c"
         "src/import.c"
+        "src/fwupdate.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
