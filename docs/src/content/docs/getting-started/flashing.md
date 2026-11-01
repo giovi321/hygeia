@@ -3,7 +3,7 @@ title: Build and flash
 description: Build Hygeia with ESP-IDF v6.0.2 and flash it to the board.
 ---
 
-There are no prebuilt release images yet. You build the firmware from source.
+Prebuilt images are published on GitHub for tagged versions (see Firmware downloads below). You can also build the firmware from source.
 
 ## Requirements
 
@@ -63,3 +63,15 @@ GPIO 0 is a strapping pin. To enter ROM download mode, hold BOOT while connectin
 ## Continuous integration
 
 The repository builds the firmware (debug and release configurations) in the official ESP-IDF container for v6.0.2 on every push and pull request.
+
+## Firmware downloads
+
+Every tagged version has a page under [Releases](https://github.com/giovi321/hygeia/releases) with three files:
+
+- `hygeia-full.bin`: bootloader, partition table and application merged into one image. Use it for the first install over USB: `esptool --chip esp32s3 write_flash 0x0 hygeia-full.bin`
+- `hygeia.bin`: the application image. Upload it in the web UI to update a device that is already running
+- `SHA256SUMS`: checksums of both files, check them with `sha256sum -c SHA256SUMS`
+
+The file names do not contain the version, so `https://github.com/giovi321/hygeia/releases/latest/download/hygeia.bin` always points at the newest stable release. Tags with a hyphen, such as `v1.0.0-rc1`, are published as pre-releases and are not served by `latest`.
+
+Each CI run on any branch also uploads the same three files as the workflow artifact `hygeia-firmware-<short commit>`. These builds report `dev-<short commit>` as their version.
