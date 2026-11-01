@@ -292,6 +292,18 @@ void webqr_show(void);
 void webqr_hide(hy_view_t next);
 void webqr_net_changed(void);
 
+/* update.c: the firmware update view. upd_ui_init follows hy_update (LVGL lock held); the view follows the status
+ * while it shows, and the toasts for an install that is not on screen come from here. upd_view_open pushes the view
+ * and starts a check unless one finished less than 60 s ago. */
+void upd_ui_init(void);
+void upd_view_create(void);
+void upd_view_show(void);
+void upd_view_hide(hy_view_t next);
+void upd_view_open(void);
+#if CONFIG_HY_DEBUG_CONSOLE
+void upd_view_debug(const char *arg);            /* "checking|latest|available|dev|confirm|downloading [pct]|verifying|restarting|failed [code]|auto" */
+#endif
+
 /* storage_down.c */
 lv_obj_t *storage_down_create(lv_obj_t *parent);
 

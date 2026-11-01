@@ -24,7 +24,7 @@
 
 static const char *TAG = "ui_debug";
 
-enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS, J_MADCTL, J_ROT, J_SHAKE, J_NET, J_PAIR, J_HIT };
+enum { J_TAP, J_UNDO, J_LOGS, J_SEED4, J_SHOT, J_REMINDTEST, J_PERF, J_GESTURE, J_NAV, J_STOREFAIL, J_IDLE, J_TAPSTROKE, J_DUE, J_HISTORY, J_DETAIL, J_NOTE, J_EARLIER, J_QS, J_SETTZ, J_SETTINGS, J_GAPS, J_POWEROFF, J_SCR, J_MF, J_ARCHIVE, J_LIMITS, J_MADCTL, J_ROT, J_SHAKE, J_NET, J_PAIR, J_HIT, J_UPD };
 typedef struct {
     int kind;
     char arg[96];
@@ -995,6 +995,9 @@ static void run_job(void *arg)
     case J_HIT:
         job_hit(j->arg);
         break;
+    case J_UPD:
+        upd_view_debug(j->arg);
+        break;
     case J_STOREFAIL:
         ui_set_storage_down(strcmp(j->arg, "off") != 0);
         break;
@@ -1058,5 +1061,6 @@ void hy_ui_debug_shake(void) { post(J_SHAKE, NULL); }
 void hy_ui_debug_net(const char *arg) { post(J_NET, arg); }
 void hy_ui_debug_pair(const char *arg) { post(J_PAIR, arg); }
 void hy_ui_debug_hit(const char *arg) { post(J_HIT, arg); }
+void hy_ui_debug_upd(const char *arg) { post(J_UPD, arg); }
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

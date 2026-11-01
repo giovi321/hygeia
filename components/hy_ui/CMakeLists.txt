@@ -31,6 +31,7 @@ idf_component_register(
         "src/wifi.c"
         "src/apinfo.c"
         "src/webqr.c"
+        "src/update.c"
         "fonts/hy_inter_14.c"
         "fonts/hy_inter_17.c"
         "fonts/hy_inter_b17.c"
@@ -60,6 +61,7 @@ idf_component_register(
         hy_power
         hy_motion
         hy_net
+        hy_update
         hy_web
         joltwallet__littlefs
 )

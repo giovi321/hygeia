@@ -31,6 +31,7 @@ static lv_obj_t *s_zone_root, *s_region, *s_city;
 static lv_obj_t *s_sound_root, *s_vol_lbl, *s_vol_slider;
 static lv_obj_t *s_disp_root, *s_bright_lbl, *s_bright_slider, *s_rot_val;
 static lv_obj_t *s_about_root, *s_about[4];
+#define ABOUT_UPD_Y (64 + 4 * 44 + 8)
 static const char *s_regions[MAX_REGIONS];
 static size_t s_nreg, s_city_first, s_city_n;
 
@@ -328,6 +329,12 @@ static void about_refresh(void)
     lv_label_set_text_fmt(s_about[3], HY_S_ABOUT_MEDS, (unsigned)act, (unsigned)arch);
 }
 
+static void upd_row_tap(void *ud)
+{
+    (void)ud;
+    upd_view_open();
+}
+
 static void about_create(void)
 {
     s_about_root = ui_view_box();
@@ -337,6 +344,8 @@ static void about_create(void)
         s_about[i] = ui_label(s_about_root, hy_type.body, i ? HY_C_TEXT2 : HY_C_TEXT, "");
         lv_obj_set_pos(s_about[i], 24, 64 + i * 44);
     }
+    lv_obj_t *upd = ui_list_row(s_about_root, 66, HY_S_UPD_ROW, upd_row_tap, NULL);
+    lv_obj_set_pos(lv_obj_get_parent(upd), MARGIN, ABOUT_UPD_Y);
 }
 
 /* ---- the list ---- */

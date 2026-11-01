@@ -26,7 +26,7 @@ static volatile bool s_storage_down;
 static const char *const view_names[N_VIEWS] = {
     "HOME", "OVERVIEW", "HISTORY", "DETAIL", "NOTE", "EARLIER", "QS", "SETTINGS", "SET_ZONE", "SET_TIME",
     "SET_SOUND", "SET_DISPLAY", "ABOUT", "CLOCK_INVALID", "STORAGE_DOWN",
-    "MEDFORM", "MED_ARCHIVE", "SET_WIFI", "AP_INFO", "WEB_QR",
+    "MEDFORM", "MED_ARCHIVE", "SET_WIFI", "AP_INFO", "WEB_QR", "UPDATE",
 };
 _Static_assert(sizeof view_names / sizeof view_names[0] == N_VIEWS, "view_names covers every view");
 
@@ -125,6 +125,9 @@ static void refresh_view(hy_view_t v)
     case HY_V_WEB_QR:
         webqr_show();
         break;
+    case HY_V_UPDATE:
+        upd_view_show();
+        break;
     case HY_V_SET_TIME:
         timeset_show(false);
         break;
@@ -183,6 +186,9 @@ void ui_show_view(hy_view_t v)
     }
     if (s_shown == HY_V_WEB_QR && v != HY_V_WEB_QR) {
         webqr_hide(v);
+    }
+    if (s_shown == HY_V_UPDATE && v != HY_V_UPDATE) {
+        upd_view_hide(v);
     }
     if (s_shown == HY_V_CLOCK_INVALID && v != HY_V_CLOCK_INVALID) {
         timeset_hide();
@@ -448,6 +454,7 @@ static lazy_t lazy_of(hy_view_t v, bool *is_lazy)
         return LZ_SETTINGS;
     case HY_V_AP_INFO:
     case HY_V_WEB_QR:
+    case HY_V_UPDATE:
         return LZ_NET;
     case HY_V_SET_TIME:
         return LZ_TIME;
@@ -501,6 +508,7 @@ static void create_lazy(lazy_t k)
     case LZ_NET:
         apinfo_create();
         webqr_create();
+        upd_view_create();
         break;
     default:
         break;

@@ -524,6 +524,7 @@ esp_err_t hy_ui_start(void)
     hy_power_set_ui(&power_ui);
     pair_register();
     net_ui_init();
+    upd_ui_init();
     hy_board_unlock();
 
     if (sub < 0) {

@@ -64,6 +64,7 @@ void hy_ui_debug_shake(void);             /* the shake callback as the motion ta
 void hy_ui_debug_mf(const char *arg);     /* the medicine form: "new|edit <code>|name <text>|dose [text]|code <xy>|color <n>|type fixed|asneeded|time add HH:MM|time del <idx>|interval <min>|next|back|save|state" */
 void hy_ui_debug_net(const char *arg);    /* "off|paused|connecting|connected|weak|failing|ap|auto": the screens show that network state whatever the radio does */
 void hy_ui_debug_hit(const char *arg);    /* "<x> <y>": log the object a touch there reaches and its parents */
+void hy_ui_debug_upd(const char *arg);    /* "checking|latest|available|dev|confirm|downloading [pct]|verifying|restarting|failed [code]|auto": the update view shows that state with sample versions */
 void hy_ui_debug_pair(const char *arg);   /* "show|hide": the pairing overlay with an example code */
 #endif
 

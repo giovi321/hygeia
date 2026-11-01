@@ -36,7 +36,7 @@ bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap);
 typedef enum { HY_V_HOME = 0, HY_V_OVERVIEW, HY_V_HISTORY, HY_V_DETAIL, HY_V_NOTE, HY_V_EARLIER, HY_V_QS,
                HY_V_SETTINGS, HY_V_SET_ZONE, HY_V_SET_TIME, HY_V_SET_SOUND, HY_V_SET_DISPLAY, HY_V_ABOUT,
                HY_V_CLOCK_INVALID, HY_V_STORAGE_DOWN, HY_V_MEDFORM, HY_V_MED_ARCHIVE,
-               HY_V_SET_WIFI, HY_V_AP_INFO, HY_V_WEB_QR, HY_V_COUNT } hy_view_t;
+               HY_V_SET_WIFI, HY_V_AP_INFO, HY_V_WEB_QR, HY_V_UPDATE, HY_V_COUNT } hy_view_t;
 typedef enum { HY_FX_NONE = 0, HY_FX_WAKE, HY_FX_SNOOZE, HY_FX_DUE_NEXT,
                HY_FX_FORM_BACK, /* the UI steps the medicine form back one page, or asks to discard on the first */
                HY_FX_DUE_PREV } hy_nav_fx_t;
