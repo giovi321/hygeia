@@ -86,6 +86,10 @@ static void audio_task(void *arg)
     }
 }
 
+/* Above the LVGL task (6): building a screen holds that task for up to 170 ms, longer than the I2S ring plays,
+ * so a lower priority starves the feeder and the chime stutters. The task sleeps in the I2S write between refills. */
+#define AUDIO_TASK_PRIO 7
+
 static atomic_bool s_pending = true;
 
 /* The BSP's I2S pins and format (waveshare esp32_s3_touch_amoled_2_16 2.0.1, BSP_I2S_DUPLEX_MONO_CFG(22050) and
@@ -194,7 +198,7 @@ static esp_err_t audio_init_impl(void)
     }
     memset(s_buf + s_samples, 0, silence * sizeof(int16_t));
     s_total = s_samples + silence;
-    if (xTaskCreate(audio_task, "hy_audio", 4096, NULL, 5, &s_task) != pdPASS) {
+    if (xTaskCreate(audio_task, "hy_audio", 4096, NULL, AUDIO_TASK_PRIO, &s_task) != pdPASS) {
         s_task = NULL;
         err = ESP_ERR_NO_MEM;
         goto fail_free;
