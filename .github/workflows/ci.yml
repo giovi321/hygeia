@@ -19,16 +19,66 @@ jobs:
 
   firmware-release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - name: Free runner disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
-      - name: Build firmware without the debug console
+      - name: Work out the version
+        id: ver
+        run: |
+          short="${GITHUB_SHA::7}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then ver="${GITHUB_REF_NAME}"; else ver="dev-${short}"; fi
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+          echo "short=${short}" >> "$GITHUB_OUTPUT"
+      - name: Build and package the release firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.2
           target: esp32s3
-          command: idf.py -B build-rel -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build && ! grep -qw console_start build-rel/hygeia.map
+          command: .github/scripts/package-release.sh "${{ steps.ver.outputs.version }}"
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: hygeia-firmware-${{ steps.ver.outputs.short }}
+          path: |
+            dist/hygeia.bin
+            dist/hygeia-full.bin
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: [firmware, firmware-release, host-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hygeia-firmware-*
+          merge-multiple: true
+          path: dist
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          flags=""
+          case "$TAG" in *-*) flags="--prerelease" ;; esac
+          cat > notes.md <<NOTES
+          Firmware ${TAG} for the ESP32-S3 board.
+
+          - hygeia.bin: application image, upload it in the web UI to update a running device.
+          - hygeia-full.bin: bootloader, partition table and application merged into one image, flash it at offset 0x0 over USB for a first install.
+          - SHA256SUMS: checksums of both files.
+          NOTES
+          sed -i 's/^ *//' notes.md
+          gh release create "$TAG" --repo "$REPO" --title "$TAG" --notes-file notes.md $flags \
+            dist/hygeia.bin dist/hygeia-full.bin dist/SHA256SUMS
 
   host-tests:
     runs-on: ubuntu-latest

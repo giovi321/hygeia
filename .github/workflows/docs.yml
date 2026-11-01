@@ -47,8 +47,8 @@ jobs:
 
   deploy:
     needs: build
-    # Pages is off while the repository is private; the build above still runs.
-    if: ${{ !github.event.repository.private && github.ref == 'refs/heads/main' }}
+    # Deploy only from main (push or manual run); other refs and PRs only build.
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && !github.event.repository.private }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
