@@ -6,7 +6,7 @@ description: The pages of the web UI, backup and restore, firmware update and wh
 The device serves the web UI itself, in a browser on the same network. It edits everything the screen edits and more: every weekday, window and pill count of a medicine, the whole log, the Wi-Fi networks and backups. The page works on a phone and on a desktop. To reach it, see [Wi-Fi setup](../../getting-started/wifi/).
 
 :::caution[Keep it on a trusted LAN]
-The device has no TLS. Anything on the network can read what travels between the browser and the device. Use it at home, or on the device's own access point.
+The web UI is plain HTTP on the local network by design. It is protected by pairing, the `X-Hygeia` header and the host allow-list, not by encryption, so anything on the network can read what travels between the browser and the device. Use it at home, or on the device's own access point. The firmware download from GitHub is outbound and uses HTTPS.
 :::
 
 ![The web UI dashboard in a desktop browser](/hygeia/screenshots/webui-dashboard.png)

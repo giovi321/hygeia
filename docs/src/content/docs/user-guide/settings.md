@@ -39,7 +39,7 @@ Settings has these entries:
 - Wi-Fi: the mode (Off, Wi-Fi, Access point), the saved networks (tap one to connect to it), the Access point row (it opens the join screen with the name and password), the web UI address, the number of paired browsers with Forget all, and Keep Wi-Fi on battery. Networks are added only in the web UI
 
 ![Design mockup of Settings, Wi-Fi](/hygeia/assets/mockups/10-settings-wi-fi.png)
-- About: version, clock sync state, storage used and free, and the number of active and archived medicines
+- About: version, clock sync state, storage used and free, and the number of active and archived medicines, and Check for update. Check for update asks GitHub when tapped (a result under 60 seconds old is reused) and shows the result; Install asks for confirmation first. It needs Wi-Fi with internet access, and installing needs USB power or at least 30 % battery
 
 The Time zone page changes the zone for future occurrences. Scheduled times keep their wall-clock time in the new zone. See [Scheduling rules](../../reference/scheduling/).
 

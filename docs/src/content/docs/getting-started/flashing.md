@@ -68,7 +68,7 @@ The repository builds the firmware (debug and release configurations) in the off
 
 Every tagged version has a page under [Releases](https://github.com/giovi321/hygeia/releases) with three files:
 
-- `hygeia-full.hex`: bootloader, partition table, otadata and application as an Intel HEX file. Use it for the first install over USB: `python -m esptool --chip esp32s3 write-flash 0x0 hygeia-full.hex`. The address is required by the command line and ignored, because the file carries its own addresses. The file leaves gaps over the settings (NVS) and storage partitions, so settings, medicines and the log survive a full reflash. Only `esptool erase-flash` wipes them
+- `hygeia-full.hex`: bootloader, partition table, otadata and application as an Intel HEX file. Use it for the first install over USB: `python -m esptool --chip esp32s3 write-flash 0x0 hygeia-full.hex`. The address is required by the command line and ignored, because the file carries its own addresses. Use esptool 5 or later (the version ESP-IDF v6.0.2 installs); older versions pad the file into one image and would overwrite the settings. The file leaves gaps over the settings (NVS) and storage partitions, so settings, medicines and the log survive a full reflash. Only `esptool erase-flash` wipes them
 - `hygeia.bin`: the application image. Upload it in the web UI to update a device that is already running
 - `SHA256SUMS`: checksums of both files, check them with `sha256sum -c SHA256SUMS`
 

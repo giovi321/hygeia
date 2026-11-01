@@ -6,7 +6,7 @@ description: The HTTP API of the device, pairing, errors, versioning, curl examp
 The device serves a REST API and the web UI over plain HTTP on port 80, in Wi-Fi client mode and in access point mode. The web UI uses nothing else, so everything it does can be done with `curl`.
 
 :::caution[Keep the device on a trusted LAN]
-The device has no TLS. Requests, the session cookie and exported files travel unencrypted. Do not forward port 80 to the internet. Join it from the home network or from its own access point only.
+The web UI is plain HTTP on the local network by design. It is protected by pairing, the `X-Hygeia` header and the host allow-list, not by encryption. Do not forward port 80 to the internet. Join it from the home network or from its own access point only. The firmware download from GitHub is outbound and uses HTTPS.
 :::
 
 See also the [security notes](../security/).
@@ -57,7 +57,7 @@ Every error has this shape:
 | 403 | `forbidden` |
 | 404 | `not_found` |
 | 408 | `timeout` |
-| 409 | `busy` (also pairing while a reminder shows), `battery`, `confirm`, `full`, `changed`, `code_dup`, `clock_invalid` (the clock is not set), `too_soon` (a dose within the minimum interval) |
+| 409 | `busy` (also pairing while a reminder shows), `battery`, `confirm`, `full`, `changed`, `code_dup`, `clock_invalid` (the clock is not set), `too_soon` (a dose within the minimum interval), `no_network` (a firmware check or install without a network), `stale` (a firmware install of a version that is no longer the checked one) |
 | 412, 428 | `stale`, `precondition_required` (a medicine is written with `If-Match` and the `etag` of the last read) |
 | 410 | `undo_expired` |
 | 413 | `too_large` |
@@ -65,7 +65,7 @@ Every error has this shape:
 | 422 | the medicine rules `code`, `name`, `dose`, `times` and `interval` (each names its `field`); `not_hygeia` and `corrupt` for a bad firmware image |
 | 429 | `blocked`, `too_many` |
 | 500 | `internal`, `flash` (a firmware write failed) |
-| 503 | `busy`, `storage` |
+| 503 | `busy`, `storage`, `memory` (not enough internal memory for a firmware check or install) |
 
 ## Version rule
 
@@ -81,7 +81,7 @@ During a firmware update from GitHub the device sends `{"ev":"update","state":"d
 
 | Route | Use |
 |---|---|
-| `GET /api/info` | name, firmware version, `api`, clock state, `paired` (open) |
+| `GET /api/info` | name, firmware version, `api`, clock state, `paired`, `repo` (the GitHub repository the device updates from) (open) |
 | `POST /api/pair/start`, `POST /api/pair` | pairing (open) |
 | `GET /api/browsers`, `DELETE /api/browsers` | list and forget paired browsers |
 | `GET /api/state` | everything the dashboard needs |

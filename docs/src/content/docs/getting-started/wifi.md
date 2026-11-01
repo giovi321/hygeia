@@ -6,7 +6,7 @@ description: Join the device by its access point and QR code, add your network, 
 The device serves the web UI over Wi-Fi. It has two network modes besides off: the access point, where the device makes its own network, and Wi-Fi client, where it joins your home network. Networks are added only in the web UI, so the first setup always uses the access point.
 
 :::caution[Keep it on a trusted LAN]
-The web UI has no TLS. Use it on your home network or on the device's own access point, and do not forward port 80 to the internet. See [REST API](../../reference/rest-api/).
+The web UI is plain HTTP on the local network by design. It is protected by pairing, the `X-Hygeia` header and the host allow-list, not by encryption. Use it on your home network or on the device's own access point, and do not forward port 80 to the internet. The firmware download from GitHub is outbound and uses HTTPS. See [REST API](../../reference/rest-api/).
 :::
 
 ## First setup with the access point

@@ -359,8 +359,8 @@ The web UI is embedded in the app image (gzipped, expected well under 300 KB), s
 Release artefacts:
 
 - `hygeia.bin`: application image, for the web UI update and the GitHub update
-- `hygeia-full.hex`: bootloader, partition table, otadata and application as an Intel HEX file, flashed with `esptool write-flash 0x0 hygeia-full.hex` for a first install. HEX leaves the gaps between regions unwritten, so flashing it writes nothing inside the NVS and storage partitions: settings, medicines and the log survive a full reflash
-- `SHA256SUMS`: SHA-256 of both. The device's GitHub update depends on these three names
+- `hygeia-full.hex`: bootloader, partition table, otadata and application as an Intel HEX file, flashed with `esptool write-flash 0x0 hygeia-full.hex` (esptool 5 or later, as installed by ESP-IDF v6.0.2) for a first install. HEX leaves the gaps between regions unwritten, so flashing it writes nothing inside the NVS and storage partitions: settings, medicines and the log survive a full reflash
+- `SHA256SUMS`: SHA-256 of both. The device's GitHub update depends on the names `hygeia.bin` and `SHA256SUMS`
 - `hygeia-<ver>-factory.bin` (planned, CI does not publish it yet): full image including an empty storage partition, for first install or a deliberate wipe; the docs label it as erasing all data
 - Store and settings carry a schema version; migrations run on boot after an update, with a backup of the old files kept until the next successful boot
 
