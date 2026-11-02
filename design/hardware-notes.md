@@ -154,3 +154,16 @@ Still owed:
 - LVGL task stack minimum free: 6996 bytes
 
 - Verified by hand on firmware 7e3466d: taps on other tiles while the logged toast shows do not log, Undo still removes the entry, and a second tap within 5 s after the too-soon warning logs the dose (serial log not captured for this check)
+
+## Firmware update from GitHub
+
+Measured on the board on firmware v0.4.0-16-ga1298af (debug build), 2026-11-02, on a Wi-Fi network without internet access, 3 active medicines, one live-event socket open.
+
+- Check without internet: refused as `no_internet` after the 10 s connect timeout (10011 to 10032 ms over 10 runs); the live event shows `checking`, then `failed` with `no_internet`; `GET /api/update` follows the same states
+- Check in access point mode: refused at once as `no_network`
+- Internal heap for a check that ends at the connect timeout: free before 104975 to 105095 bytes, minimum during 85871 bytes (about 19 KB in use at the peak), free after within 1 KB of the value before on 7 of 10 runs and 1008 bytes lower on 3; free memory also moved by up to 3 KB with no run in progress, so no leak can be told apart at this resolution
+- Update task stack: 5556 to 5596 bytes of 8192 left unused after a check (high-water mark about 2.6 KB)
+- Certificate bundle (common set): 16742 bytes of flash in the release image
+- Upload of the same image through `POST /api/ota`: 2408592 bytes written to the other slot in 25.6 s, worker stack 3392 bytes left, restart, confirmed 40 ms after the first scheduler pass; a text file answers 422 `not_hygeia` and an image cut at 600000 bytes answers 422 `corrupt`, both with the running slot unchanged
+
+Not measured yet, because the network had no route to GitHub: the redirect host of a release asset and both TLS handshakes, the download duration, and the internal heap minimum and stack high-water mark during a full download and checksum
