@@ -113,8 +113,8 @@ esp_err_t hy_board_imu_sample_once(int16_t mg[3]);
    hy_cab_wom_hit) routed to the interrupt pin found at bring-up, initial level 0, 4 samples blanked; *rest = a
    settled reading taken first (hy_board_imu_wait_settled, accel at 125 Hz). Records the pin level after arming.
    The pin changes level on every WoM event and stays there; re-arming resets it. ESP_ERR_INVALID_STATE when the
-   IMU or the pin is unavailable, ESP_ERR_INVALID_ARG for thr_mg 0 or above 255. On any error the IMU is left
-   powered down. */
+   IMU or the pin is unavailable, ESP_ERR_INVALID_ARG for thr_mg 0 or above 255 (both leave the IMU as it was). On
+   any other error the IMU is left out of wake on motion and powered down. */
 esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3]);
 esp_err_t hy_board_imu_wom_disarm(void);          /* WoM off, sensor powered down (CTRL7 0, CTRL1 disable) */
 /* Accel +-8 g and gyro +-1024 dps at 112.1 Hz with the low-pass filters on (13.37 % of ODR, 15 Hz); the first gyro

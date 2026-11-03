@@ -438,12 +438,15 @@ esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3])
     uint8_t cal1h = (uint8_t)((s_int_chip == 2 ? QMI_CAL1H_INT2 : 0) | QMI_WOM_BLANK);   /* initial level 0 */
     uint8_t ctrl1 = QMI_CTRL1_AI_LE | (s_int_chip == 2 ? QMI_CTRL1_INT2_EN : QMI_CTRL1_INT1_EN);
     if (err == ESP_OK && (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_LP21)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CAL1_L, (uint8_t)thr_mg)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CAL1_H, cal1h)) == ESP_OK && (err = ctrl9(QMI_CMD_WOM)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CTRL1, ctrl1)) == ESP_OK) {
-        s_mode = M_WOM;   /* from here a failure needs the WoM exit */
-        err = reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACCEL);
+        (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_LP21)) == ESP_OK) {
+        /* From the threshold write on, the chip may hold a WoM setting: every failure below, and every later power
+           change, must run the WoM exit, or the accel stream gets no data (datasheet chapter 6) */
+        s_mode = M_WOM;
+        if ((err = reg_write(QMI_REG_CAL1_L, (uint8_t)thr_mg)) == ESP_OK &&
+            (err = reg_write(QMI_REG_CAL1_H, cal1h)) == ESP_OK && (err = ctrl9(QMI_CMD_WOM)) == ESP_OK &&
+            (err = reg_write(QMI_REG_CTRL1, ctrl1)) == ESP_OK) {
+            err = reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACCEL);
+        }
     }
     int level = 0;
     if (err == ESP_OK) {
@@ -451,7 +454,7 @@ esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3])
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "wom arm: %s", esp_err_to_name(err));
-        hy_board_imu_power(false);
+        hy_board_imu_power(false);   /* WoM exit (mode M_WOM), then powered down as the motion task expects */
         return err;
     }
     for (int i = 0; i < 3; i++) {

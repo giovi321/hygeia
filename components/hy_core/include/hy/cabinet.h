@@ -12,7 +12,8 @@
 #define HY_CAB_QUIET_MS        400
 #define HY_CAB_QUIET_DDPS      100     /* 10 dps */
 #define HY_CAB_QUIET_MG         40
-#define HY_CAB_GYRO_START_MS    60     /* provisional; set from the board measurement */
+#define HY_CAB_GYRO_START_MS   180     /* datasheet gyro turn-on 150 ms + 3 / ODR at 112.1 Hz, rounded up to
+                                          20 ms; the board measurement may lower it */
 #define HY_CAB_TEACH_TRIG_MG    40
 #define HY_CAB_TRIG_MIN_MG      40
 #define HY_CAB_TRIG_MAX_MG     250
@@ -38,7 +39,9 @@ uint16_t hy_cab_wom_mg(uint8_t sens);                        /* 250, 160, 100, 6
    between successive samples with the threshold, not the deviation from a reference, so a slow drift never fires. */
 bool       hy_cab_wom_hit(hy_accel_t prev, hy_accel_t a, uint16_t thr_mg);
 /* The sensor's previous sample seen from a HY_CAB_RATE_HZ stream: the value HY_CAB_WOM_PERIOD_MS before the
-   current sample, interpolated linearly between back2 and back3 (the stream samples 2 and 3 steps earlier). */
+   current sample, interpolated linearly between back2 and back3 (the stream samples 2 and 3 steps earlier).
+   Evaluated at every stream sample this is a sliding window, an upper bound on the sensor, which compares only its
+   own 21 Hz samples at an unknown phase: it overstates the detection of short movements, never the false wakes. */
 hy_accel_t hy_cab_wom_prev(hy_accel_t back2, hy_accel_t back3);
 /* hy_cab_wom_hit for sample i of q against hy_cab_wom_prev of its samples i - 2 and i - 3; before sample 0 the
    stream is at q->rest. */

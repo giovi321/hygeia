@@ -894,22 +894,20 @@ esp_err_t board_imu_int_attach(int gpio, int *level)
 
 void board_imu_int_detach(void)
 {
-    portENTER_CRITICAL(&s_wake_mux);
     int pin = s_imu_pin;
-    s_imu_pin = -1;
-    if (pin >= 0) {
-        if (s_wake_live & (1u << pin)) {
-            gpio_ll_wakeup_disable(&GPIO, (uint32_t)pin);
-            s_wake_live &= ~(1u << pin);
-        }
-        s_wake_armed &= ~(1u << pin);
-    }
-    portEXIT_CRITICAL(&s_wake_mux);
     if (pin < 0) {
         return;
     }
-    gpio_intr_disable((gpio_num_t)pin);
+    gpio_intr_disable((gpio_num_t)pin);       /* first: no edge reaches the hook once detach has begun */
     gpio_isr_handler_remove((gpio_num_t)pin);
+    portENTER_CRITICAL(&s_wake_mux);
+    s_imu_pin = -1;
+    if (s_wake_live & (1u << pin)) {
+        gpio_ll_wakeup_disable(&GPIO, (uint32_t)pin);
+        s_wake_live &= ~(1u << pin);
+    }
+    s_wake_armed &= ~(1u << pin);
+    portEXIT_CRITICAL(&s_wake_mux);
     gpio_reset_pin((gpio_num_t)pin);
 }
 
@@ -1018,7 +1016,11 @@ void hy_board_sleep_wake_arm(bool on)
         if (imu >= 0) {
             imu_wake_enable_locked(imu);   /* only while wake on motion is armed */
         }
+        bool imu_pending = imu >= 0 && gpio_get_level((gpio_num_t)imu) != s_imu_level;
         portEXIT_CRITICAL(&s_wake_mux);
+        if (imu_pending) {
+            ESP_LOGW(TAG, "sleep wake: imu gpio %d already toggled, wakes at once", imu);
+        }
         esp_sleep_enable_gpio_wakeup();
         char list[48] = "";
         size_t n = 0;

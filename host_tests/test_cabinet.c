@@ -141,7 +141,7 @@ static void test_feat_gyro_mask(void)
             TEST_ASSERT_EQUAL_FLOAT(0.0f, f[i].gh);
         }
     }
-    TEST_ASSERT_TRUE(f[3].gh > 0.0f);      /* first unmasked row (60 ms) */
+    TEST_ASSERT_TRUE(f[HY_CAB_GYRO_START_MS / CAB_SYN_STEP_MS].gh > 0.0f);   /* first unmasked row */
 
     q.has_gyro = false;
     hy_cab_features(&q, f);
