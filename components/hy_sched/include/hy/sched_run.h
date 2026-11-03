@@ -46,6 +46,10 @@ bool      hy_sched_take_flash(void);
 void      hy_sched_run_invalidate(void);
 /* next_wake of the last evaluation (epoch s), 0 when none or not tracking. Spinlock copy: any task. */
 int64_t   hy_sched_run_next_wake(void);
+/* Attention instant of the last evaluation (hy_sched_attention_from with count_snoozed true and the window
+   cab_window_min from the settings), 0 when none or not tracking. Spinlock copy: any task. A settings change
+   of cab_window_min calls hy_sched_run_invalidate. */
+int64_t   hy_sched_run_attention_from(void);
 /* Debug: duration of the log query in the last evaluation (us). */
 uint32_t  hy_sched_run_query_us(void);
 

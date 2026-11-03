@@ -87,4 +87,13 @@ void    hy_sched_stop_tracking(hy_sched_t *s);               /* clock invalid: e
 int64_t hy_sched_tracked_since(const hy_sched_t *s, uint32_t med_id); /* 0 when not tracking; tracking_since for a medicine not yet seen */
 void    hy_sched_eval(hy_sched_t *s, const hy_sched_in_t *in, hy_sched_out_t *out);
 
+/* From when a cabinet reaction is allowed, epoch s; 0 = not now and not before the next evaluation.
+   Not tracking: 0. Any open entry (DUE or LATE; snoozed ones only when count_snoozed): the earliest open base.
+   Else, for each tracked fixed, non-archived medicine, its first occurrence after in->now whose state is UPCOMING
+   (an early taken or skipped log makes it TAKEN or SKIPPED and it is passed over for the next one):
+   base - min(window_min, early_window_min) * 60; the minimum of those; 0 when window_min is 0 or none exists.
+   Pure; call after hy_sched_eval with the same s, in and out. */
+int64_t hy_sched_attention_from(const hy_sched_t *s, const hy_sched_in_t *in, const hy_sched_out_t *out,
+                                uint16_t window_min, bool count_snoozed);
+
 #endif

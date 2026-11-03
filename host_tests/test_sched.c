@@ -748,6 +748,126 @@ static void test_added_time_inside_window_due(void)
     TEST_ASSERT_EQUAL_UINT(0, out.n_to_miss);
 }
 
+/* ---- attention instant ---- */
+
+#define U(h, m) (1793577600LL + (h) * HOUR + (m) * MIN)  /* 2026-11-02 00:00 UTC + h:m */
+
+/* V fixed daily 08:00 (early 60, late 30, missed 120), zone UTC, tracking since the previous day. */
+static hy_med_t *att_setup(void)
+{
+    reset();
+    tz = "UTC0";
+    hy_med_t *v = add_v();
+    hy_sched_start_tracking(&s, U(0, 0) - DAY);
+    return v;
+}
+
+static int64_t att(int64_t now, uint16_t window, bool count_snoozed)
+{
+    hy_sched_in_t in;
+    memset(&in, 0, sizeof in);
+    in.meds = meds;
+    in.n_meds = n_meds;
+    in.logs = logs;
+    in.n_logs = n_logs;
+    in.snoozes = snoozes;
+    in.n_snoozes = n_snoozes;
+    in.tz = tz;
+    in.last_change = change;
+    in.now = now;
+    hy_sched_eval(&s, &in, &out);
+    return hy_sched_attention_from(&s, &in, &out, window, count_snoozed);
+}
+
+static void test_attention_default_window(void)
+{
+    att_setup();
+    TEST_ASSERT_EQUAL_INT64(U(7, 45), att(U(7, 40), 15, true));
+    TEST_ASSERT_EQUAL_INT64(U(7, 45), att(U(7, 46), 15, true));
+}
+
+static void test_attention_window_zero(void)
+{
+    att_setup();
+    TEST_ASSERT_EQUAL_INT64(0, att(U(7, 59), 0, true));
+    TEST_ASSERT_EQUAL_INT64(U(8, 0), att(U(8, 1), 0, true));
+}
+
+static void test_attention_window_max(void)
+{
+    hy_med_t *v = att_setup();
+    TEST_ASSERT_EQUAL_INT64(U(7, 0), att(U(6, 30), 120, true));
+    v->early_window_min = 120;
+    TEST_ASSERT_EQUAL_INT64(U(6, 0), att(U(5, 30), 120, true));
+}
+
+static void test_attention_capped_by_early_window(void)
+{
+    hy_med_t *v = att_setup();
+    v->early_window_min = 30;
+    TEST_ASSERT_EQUAL_INT64(U(7, 30), att(U(7, 0), 90, true));
+}
+
+static void test_attention_open_late(void)
+{
+    att_setup();
+    TEST_ASSERT_EQUAL_INT64(U(8, 0), att(U(8, 40), 15, true));
+}
+
+static void test_attention_snoozed(void)
+{
+    att_setup();
+    snoozes[0].med_id = 2;
+    snoozes[0].slot = U(8, 0);
+    snoozes[0].until = U(8, 15);
+    n_snoozes = 1;
+    TEST_ASSERT_EQUAL_INT64(U(8, 0), att(U(8, 5), 15, true));
+    TEST_ASSERT_EQUAL_INT64(U(7, 45) + DAY, att(U(8, 5), 15, false));
+}
+
+static void test_attention_early_log_skips_slot(void)
+{
+    att_setup();
+    add_log(2, U(7, 30), HY_TAKEN, U(8, 0));
+    TEST_ASSERT_EQUAL_INT64(U(7, 45) + DAY, att(U(7, 50), 15, true));
+}
+
+static void test_attention_after_missed(void)
+{
+    att_setup();
+    add_log(2, U(10, 0), HY_MISSED, U(8, 0));
+    TEST_ASSERT_EQUAL_INT64(U(7, 45) + DAY, att(U(10, 1), 15, true));
+}
+
+static void test_attention_two_meds(void)
+{
+    att_setup();
+    hy_med_t *m = add_m();
+    m->times[0] = 7 * 60 + 50;
+    TEST_ASSERT_EQUAL_INT64(U(7, 35), att(U(7, 0), 15, true));
+}
+
+static void test_attention_not_tracking(void)
+{
+    att_setup();
+    hy_sched_stop_tracking(&s);
+    TEST_ASSERT_EQUAL_INT64(0, att(U(7, 40), 15, true));
+}
+
+static void test_attention_as_needed_only(void)
+{
+    att_setup();
+    meds[0].type = HY_SCHED_AS_NEEDED;
+    TEST_ASSERT_EQUAL_INT64(0, att(U(7, 40), 15, true));
+}
+
+static void test_attention_archived(void)
+{
+    att_setup();
+    meds[0].archived = true;
+    TEST_ASSERT_EQUAL_INT64(0, att(U(7, 40), 15, true));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -778,5 +898,17 @@ int main(void)
     RUN_TEST(test_edit_name_keeps_open);
     RUN_TEST(test_edit_times_drops_open);
     RUN_TEST(test_added_time_inside_window_due);
+    RUN_TEST(test_attention_default_window);
+    RUN_TEST(test_attention_window_zero);
+    RUN_TEST(test_attention_window_max);
+    RUN_TEST(test_attention_capped_by_early_window);
+    RUN_TEST(test_attention_open_late);
+    RUN_TEST(test_attention_snoozed);
+    RUN_TEST(test_attention_early_log_skips_slot);
+    RUN_TEST(test_attention_after_missed);
+    RUN_TEST(test_attention_two_meds);
+    RUN_TEST(test_attention_not_tracking);
+    RUN_TEST(test_attention_as_needed_only);
+    RUN_TEST(test_attention_archived);
     return UNITY_END();
 }

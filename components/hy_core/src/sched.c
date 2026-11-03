@@ -250,3 +250,37 @@ void hy_sched_eval(hy_sched_t *s, const hy_sched_in_t *in, hy_sched_out_t *out)
     out->next_wake = wake;
     s->last_eval = now;
 }
+
+int64_t hy_sched_attention_from(const hy_sched_t *s, const hy_sched_in_t *in, const hy_sched_out_t *out,
+                                uint16_t window_min, bool count_snoozed)
+{
+    if (!s || !in || !out || s->tracking_since == 0) return 0;
+
+    for (size_t i = 0; i < out->n_open; i++)
+        if (count_snoozed || out->open[i].snoozed_until == 0) return out->open[i].base;
+    if (window_min == 0 || !in->meds) return 0;
+
+    const int64_t now = in->now;
+    const char *tz = in->tz ? in->tz : "UTC0";
+    static HY_EXT_BSS int64_t occ[SCHED_OCC_MAX];
+    int64_t best = 0;
+
+    for (size_t i = 0; i < in->n_meds; i++) {
+        const hy_med_t *m = &in->meds[i];
+        if (!tracked_med(m)) continue;
+
+        hy_gap_t gap = { 0, hy_sched_tracked_since(s, m->id) };
+        size_t n = hy_occurrences(m, now + 1, now + 1 + SCHED_WINDOW_S, tz, occ, SCHED_OCC_MAX);
+        for (size_t k = 0; k < n; k++) {
+            int64_t next = k + 1 < n ? occ[k + 1] : 0;
+            hy_occ_state_t st = hy_occ_state(m, occ[k], next, now, tz, in->logs, in->n_logs,
+                                             &gap, 1, in->last_change);
+            if (st != HY_OCC_UPCOMING) continue;
+            uint16_t w = window_min < m->early_window_min ? window_min : m->early_window_min;
+            int64_t from = hy_occ_base(m, occ[k], tz, in->last_change) - (int64_t)w * 60;
+            if (best == 0 || from < best) best = from;
+            break;
+        }
+    }
+    return best;
+}

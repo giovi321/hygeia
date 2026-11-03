@@ -56,12 +56,22 @@ static hy_gap_pending_t s_pend;
 /* out.next_wake of the last evaluation, 0 when none or not tracking; read by the power task */
 static portMUX_TYPE s_wake_mux = portMUX_INITIALIZER_UNLOCKED;
 static int64_t s_next_wake;
+static int64_t s_attention_from;   /* under the same spinlock */
 
-static void set_next_wake(int64_t t)
+static void set_next_wake(int64_t t, int64_t attention_from)
 {
     portENTER_CRITICAL(&s_wake_mux);
     s_next_wake = t;
+    s_attention_from = attention_from;
     portEXIT_CRITICAL(&s_wake_mux);
+}
+
+int64_t hy_sched_run_attention_from(void)
+{
+    portENTER_CRITICAL(&s_wake_mux);
+    int64_t t = s_attention_from;
+    portEXIT_CRITICAL(&s_wake_mux);
+    return t;
 }
 
 int64_t hy_sched_run_next_wake(void)
@@ -419,7 +429,7 @@ static void evaluate(int64_t now, bool pre_jump)
         }
     }
 
-    set_next_wake(out.next_wake);
+    set_next_wake(out.next_wake, hy_sched_attention_from(&s_sched, &in, &out, hy_settings()->cab_window_min, true));
     esp_err_t aerr = hy_clock_alarm_set(out.next_wake);
     if (aerr != ESP_OK) {
         ESP_LOGW(TAG, "alarm_set %lld: %s", (long long)out.next_wake, esp_err_to_name(aerr));
@@ -489,7 +499,7 @@ void hy_sched_run_tick(void)
             s_snap.sched = &s_sched;
             s_last_minute = -1;
             hy_clock_alarm_set(0);
-            set_next_wake(0);
+            set_next_wake(0, 0);
             s_gen++;
             s_invalid_published = true;
             ESP_LOGI(TAG, "clock invalid, reminders paused");

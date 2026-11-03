@@ -556,6 +556,9 @@ static void job_settings(void *arg)
     next.rot = old.rot;
     c->save = hy_settings_update(&next);
     hy_settings_t now = *hy_settings();
+    if (now.cab_window_min != old.cab_window_min) {
+        hy_sched_run_invalidate();   /* the attention instant depends on the window */
+    }
     hy_audio_set_volume(now.volume);
     hy_net_set_keep_batt(now.wifi_keep_batt);
     const hy_web_ui_t *ui = web_ui();

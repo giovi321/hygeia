@@ -81,6 +81,9 @@ static void job_settings_put(void *arg)
     next.rot = old.rot;
     c->save = hy_settings_update(&next);   /* the RAM copy is updated even when the save fails */
     c->now = *hy_settings();
+    if (c->now.cab_window_min != old.cab_window_min) {
+        hy_sched_run_invalidate();   /* the attention instant depends on the window */
+    }
     hy_audio_set_volume(c->now.volume);
     hy_net_set_keep_batt(c->now.wifi_keep_batt);
     const hy_web_ui_t *ui = web_ui();
