@@ -17,6 +17,7 @@
 #include "hy/audio.h"
 #include "hy/board.h"
 #include "hy/actions.h"
+#include "hy/cabinet_run.h"
 #include "hy/clock.h"
 #include "hy/motion.h"
 #include "hy/motion_run.h"
@@ -197,6 +198,8 @@ static void cmd_imu(const char *args)
     hy_motion_imu(raw, rec, rec ? secs * 50 : 10);
 }
 static void cmd_motion(const char *args) { hy_motion_debug(args); }
+static void cmd_cab(const char *args) { hy_cab_run_debug(args); }
+static void cmd_cabstat(const char *args) { (void)args; hy_cab_run_debug_stat(); }
 static void cmd_tapstroke(const char *args) { hy_ui_debug_tapstroke(args); }
 static void cmd_due(const char *args) { hy_ui_debug_due(args); }
 static void cmd_history(const char *args) { hy_ui_debug_history(args); }
@@ -625,6 +628,10 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "hy_sched_run_init: %s: reminders are OFF", esp_err_to_name(rerr));
     }
+    /* Before hy_ui_start, which starts the motion task: the template and the interrupt hook are in place */
+    esp_err_t cberr = hy_cab_run_init(NULL);
+    ESP_LOGI(TAG, "hy_cab_run_init: %s", esp_err_to_name(cberr));
+    hy_cab_run_config(&settings);
     bool ui_ok = false;
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
@@ -681,6 +688,8 @@ void app_main(void)
     console_register("sleepstat", cmd_sleepstat);
     console_register("imu", cmd_imu);
     console_register("motion", cmd_motion);
+    console_register("cab", cmd_cab);
+    console_register("cabstat", cmd_cabstat);
     console_register("madctl", cmd_madctl);
     console_register("rot", cmd_rot);
     console_register("shake", cmd_shake);

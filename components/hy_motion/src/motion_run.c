@@ -1,7 +1,9 @@
 /* The motion task: owns the IMU after hy_board_imu_init. It samples every 20 ms while the screen is on or dimmed,
    feeds the orientation state and the shake detector, and posts to the LVGL task. It never calls LVGL itself except
    lv_async_call under a bounded hy_board_lock. While the screen is off the IMU is powered down and the task blocks
-   on its notification with no timeout: no timer, no wake source, no power lock. */
+   on its notification with no timeout: no timer, no wake source, no power lock. With cabinet open live
+   (cabinet_run.c) the screen-off IMU belongs to the cabinet runner instead (wake on motion), and the stream also
+   feeds its software trigger. */
 #include "hy/motion_run.h"
 
 #include <math.h>
@@ -14,6 +16,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "cabinet_int.h"
+#include "esp_attr.h"
 #include "hy/board.h"
 #include "lvgl.h"
 
@@ -25,10 +29,11 @@ static const char *TAG = "motion";
 #define FAILS_MAX      3
 #define TASK_PRIO      4
 #if CONFIG_HY_DEBUG_CONSOLE
-#define TASK_STACK     4096   /* printf of the debug sample lines */
+#define TASK_STACK     6144   /* printf of the debug sample lines; the cabinet runner (float logs, matcher, the
+                                 template file write on LittleFS) */
 #define DBG_ARM_MS     30000
 #else
-#define TASK_STACK     3072
+#define TASK_STACK     5120
 #endif
 
 enum { EV_ROTATE = 1, EV_SHAKE = 2 };
@@ -169,6 +174,42 @@ static void imu_req_sample(uint32_t t_ms, const int16_t mg[3])
 }
 #endif
 
+bool hy_motion_int_on(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    bool on = s_want;
+#if CONFIG_HY_DEBUG_CONSOLE
+    on = on && !s_dbg_hold;
+#endif
+    portEXIT_CRITICAL(&s_mux);
+    return on;
+}
+
+bool hy_motion_int_off_end(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    bool end = s_want;
+#if CONFIG_HY_DEBUG_CONSOLE
+    end = end || s_dbg_hold;
+#endif
+    portEXIT_CRITICAL(&s_mux);
+    return end;
+}
+
+void hy_motion_int_wake(void)
+{
+    wake_task();
+}
+
+void IRAM_ATTR hy_motion_int_wake_isr(void)
+{
+    if (s_task) {
+        BaseType_t hp = pdFALSE;
+        vTaskNotifyGiveFromISR(s_task, &hp);
+        portYIELD_FROM_ISR(hp);
+    }
+}
+
 static void motion_task(void *arg)
 {
     hy_orient_t o;
@@ -181,7 +222,7 @@ static void motion_task(void *arg)
     TickType_t last = xTaskGetTickCount();
 
     for (;;) {
-        bool want, lock, arm, set_req;
+        bool want, lock, arm, set_req, dbg_hold = false;
         hy_rot_t applied;
         uint32_t seq, arm_seq, shake_gen, gen;
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -190,7 +231,8 @@ static void motion_task(void *arg)
         portENTER_CRITICAL(&s_mux);
         want = s_want;
 #if CONFIG_HY_DEBUG_CONSOLE
-        want = want && !s_dbg_hold;
+        dbg_hold = s_dbg_hold;
+        want = want && !dbg_hold;
 #endif
         lock = s_lock;
         arm = s_arm;
@@ -207,9 +249,11 @@ static void motion_task(void *arg)
         }
 #endif
         portEXIT_CRITICAL(&s_mux);
+        lock = lock || hy_cab_int_rot_locked();   /* teach and test pause the rotation */
 
         if (!want) {
             snap_publish(&o, false);
+            hy_cab_int_screen_off();
             if (powered) {
                 esp_err_t derr = ESP_FAIL;
                 for (int i = 0; i < 3 && derr != ESP_OK; i++) {
@@ -229,11 +273,20 @@ static void motion_task(void *arg)
             imu_req_end();
 #endif
             shake_on = false;
+            if (!dbg_hold && hy_cab_int_sleep_live()) {
+                s_powered = true;   /* the cabinet runner holds the IMU: a debug hold waits for it */
+                hy_cab_int_sleep_step();
+                s_powered = hy_cab_int_imu_held();
+                continue;
+            }
+            hy_cab_int_sleep_end();
+            s_powered = false;
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   /* no timeout: nothing wakes the CPU for the IMU while off */
             continue;
         }
 
         if (!powered) {
+            hy_cab_int_screen_on();   /* the power up below leaves wake on motion */
             esp_err_t perr = hy_board_imu_power(true);
             if (perr != ESP_OK) {
                 if (!imu_bad_logged) {
@@ -291,8 +344,15 @@ static void motion_task(void *arg)
             seen_seq = seq;
         }
 
-        int16_t mg[3];
-        if (hy_board_imu_read(mg) != ESP_OK) {
+        if (hy_cab_int_stream_repower()) {
+            powered = false;   /* a cabinet capture could not switch the IMU back: power it up as after a wake */
+            continue;
+        }
+        int16_t mg[3], gd[3];
+        bool g6 = hy_cab_int_stream_gyro();   /* a cabinet capture: accel and gyro */
+        esp_err_t rerr = g6 ? hy_board_imu_read6(mg, gd) : hy_board_imu_read(mg);
+        if (rerr != ESP_OK) {
+            hy_cab_int_stream_error(rerr);
             if (++fails >= FAILS_MAX) {
                 if (!fail_logged) {
                     ESP_LOGE(TAG, "motion: imu read failed");
@@ -334,6 +394,7 @@ static void motion_task(void *arg)
             post(EV_SHAKE, hy_orient_current(&o), shake_gen);
 #endif
         }
+        hy_cab_int_stream_sample(t, a, g6 ? gd : NULL, arm);   /* suspended while the shake detector is armed */
 #if CONFIG_HY_DEBUG_CONSOLE
         imu_req_sample(t, mg);
 #endif
@@ -392,9 +453,10 @@ void hy_motion_enable(bool on)
 
 bool hy_motion_pose_held(hy_rot_t *out)
 {
+    bool cab_lock = hy_cab_int_rot_locked();
     portENTER_CRITICAL(&s_mux);
     hy_orient_t o = s_snap;
-    bool ok = s_snap_ok && s_want && !s_lock;
+    bool ok = s_snap_ok && s_want && !s_lock && !cab_lock;
     portEXIT_CRITICAL(&s_mux);
     return ok && hy_orient_held(&o, (uint32_t)now_ms(), HY_OR_WAKE_DWELL_MS, out);
 }

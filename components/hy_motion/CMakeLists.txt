@@ -1,12 +1,17 @@
 idf_component_register(
     SRCS
         "src/motion_run.c"
+        "src/cabinet_run.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         hy_core
     PRIV_REQUIRES
         hy_board
+        hy_clock
+        hy_power
+        hy_sched
+        hy_store
         lvgl__lvgl
         esp_timer
         freertos

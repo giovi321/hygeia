@@ -72,9 +72,11 @@ static bool s_alive_on;             /* the runner tracks: the power task's perio
 /* ---- sleep mode state ---- */
 /* W_UI: the LVGL task left the sleep mode itself (the screen left OFF before the pausing pass ended) */
 /* W_NET: hy_power_net_hold(true) (the radio started) */
-typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_UI, W_TIMER, W_NET, W_N } wake_cause_t;
+/* W_MOTION: hy_power_motion_wake (a cabinet open reaction) */
+typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_UI, W_TIMER, W_NET, W_MOTION,
+               W_N } wake_cause_t;
 static const char *const k_cause[W_N] = {"pwr", "usb", "touch", "key", "rtc", "next_wake", "batt", "debug",
-                                         "ui", "timer-only", "net"};
+                                         "ui", "timer-only", "net", "motion"};
 static int64_t (*volatile s_next_wake_fn)(void);
 static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
 static StaticSemaphore_t s_sleep_mu_buf;
@@ -91,7 +93,7 @@ static int64_t s_sleep_t0_ms;              /* s_sleep_mu */
 /* sleepstat counters, all under s_mux. They live in RTC slow memory without initialisation, so a software, panic,
  * watchdog or brownout reset keeps them and a power-on reset (or a wrong magic word) clears them. Plain loads and
  * stores to that memory are safe from the ISRs: it is not behind the flash cache. */
-#define CTR_MAGIC 0x48595345u   /* "HYSE": change it when the struct layout changes */
+#define CTR_MAGIC 0x48595346u   /* "HYSF": change it when the struct layout changes */
 #define BOOT_HIST 4             /* boots kept with their reset reason and last known uptime */
 #define UPTIME_SAVE_S 10        /* the current boot's uptime goes to RTC memory at most this often */
 typedef struct {
@@ -624,6 +626,13 @@ void hy_power_net_hold(bool on)
     }
 }
 
+void hy_power_motion_wake(void)
+{
+    if (s_sleep_mu) {
+        exit_sleep(W_MOTION);   /* no-op when the sleep mode is not on */
+    }
+}
+
 void hy_power_chime_on_battery(void)
 {
     portENTER_CRITICAL(&s_mux);
@@ -1053,9 +1062,9 @@ void hy_power_sleep_stats(void)
              (long long)ms, chimes, (long long)longest, req, vbus, net_hold);
     ESP_LOGI(TAG, "sleepstat wakes: pwr %" PRIu32 ", usb %" PRIu32 ", touch %" PRIu32 ", key %" PRIu32 ", rtc %" PRIu32
              ", next_wake %" PRIu32 ", batt %" PRIu32 ", debug %" PRIu32 ", ui %" PRIu32 ", timer-only %" PRIu32
-             ", net %" PRIu32,
+             ", net %" PRIu32 ", motion %" PRIu32,
              w[W_PWR], w[W_USB], w[W_TOUCH], w[W_KEY], w[W_RTC], w[W_NEXT], w[W_BATT], w[W_DEBUG], w[W_UI],
-             w[W_TIMER], w[W_NET]);
+             w[W_TIMER], w[W_NET], w[W_MOTION]);
     ESP_LOGI(TAG, "sleepstat boot: uptime %lld s, reset reason %s, boots since power-on %" PRIu32 " (counters cover all boots since power-on)",
              (long long)mono_s(), reset_name(esp_reset_reason()), boots);
     /* Newest first. The current boot shows its uptime now; earlier boots show the last uptime saved before the reset. */

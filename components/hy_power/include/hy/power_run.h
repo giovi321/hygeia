@@ -42,6 +42,9 @@ void      hy_power_screen_state(uint8_t scr);    /* batlog scr column: 0 on, 1 d
  * resumes, no light sleep); the screen state is untouched. hy_net holds it while the radio is on. Counted:
  * hold(true) twice needs two releases. */
 void      hy_power_net_hold(bool on);
+/* Any task, after hy_power_init. Ends the sleep mode with cause W_MOTION (counted in sleepstat); no-op when it is
+ * not on. The cabinet open reaction queues its UI work first, then calls this. */
+void      hy_power_motion_wake(void);
 void      hy_power_chime_on_battery(void);       /* sleepstat: a chime moment while on battery */
 /* Heartbeat: NVS namespace "power", key "alive" (i64), key "clean" (u8). */
 bool      hy_power_alive_load(hy_alive_t *out);
