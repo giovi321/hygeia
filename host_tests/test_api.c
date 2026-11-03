@@ -706,6 +706,7 @@ static hy_settings_t full_settings(void)
     s.dim_s = 45; s.off_bat_s = 300; s.off_usb_s = 900; s.rot_lock = true; s.rot = 2;
     s.quiet_from = 22 * 60; s.quiet_to = 7 * 60 + 30; s.wifi_keep_batt = true;
     s.cab_on = true; s.cab_mode = HY_CAB_TAUGHT; s.cab_chime = false; s.cab_light = true; s.cab_sens = 4; s.cab_window_min = 45;
+    s.wake_single_tap = true;
     return s;
 }
 
@@ -730,6 +731,7 @@ static void assert_settings_eq(const hy_settings_t *a, const hy_settings_t *b)
     TEST_ASSERT_EQUAL(a->cab_light, b->cab_light);
     TEST_ASSERT_EQUAL_UINT8(a->cab_sens, b->cab_sens);
     TEST_ASSERT_EQUAL_UINT8(a->cab_window_min, b->cab_window_min);
+    TEST_ASSERT_EQUAL(a->wake_single_tap, b->wake_single_tap);
 }
 
 static void test_settings_roundtrip(void)
@@ -871,6 +873,33 @@ static void test_api_settings_cab_roundtrip(void)
     TEST_ASSERT_NOT_NULL(strstr(js, "\"cabinet\":{\"on\":true,\"mode\":\"any\",\"chime\":false,\"light\":false,"
                                     "\"sensitivity\":5,\"window_min\":0}"));
     free(js);
+}
+
+static void test_api_settings_wake_tap(void)
+{
+    hy_settings_t cur, out;
+    hy_settings_defaults(&cur);
+    hy_api_err_t err;
+    char *js = hy_api_settings_json(&cur);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"wake_single_tap\":false"));
+    free(js);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"wake_single_tap\":true}", &cur, &out, &err));
+    TEST_ASSERT_TRUE(out.wake_single_tap);
+    out.wake_single_tap = cur.wake_single_tap;
+    assert_settings_eq(&cur, &out);   /* only that one changed */
+    cur.wake_single_tap = true;
+    js = hy_api_settings_json(&cur);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"wake_single_tap\":true"));
+    free(js);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"volume\":10}", &cur, &out, &err));   /* absent keeps the value */
+    TEST_ASSERT_TRUE(out.wake_single_tap);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"wake_single_tap\":false}", &cur, &out, &err));
+    TEST_ASSERT_FALSE(out.wake_single_tap);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json("{\"wake_single_tap\":1}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("wake_single_tap", err.field);
+    TEST_ASSERT_EQUAL_INT(400, err.http);
 }
 
 static void test_api_settings_cab_bad(void)
@@ -1328,6 +1357,7 @@ int main(void)
     RUN_TEST(test_settings_clamped);
     RUN_TEST(test_api_settings_cab_roundtrip);
     RUN_TEST(test_api_settings_cab_bad);
+    RUN_TEST(test_api_settings_wake_tap);
     RUN_TEST(test_route_cabinet);
     RUN_TEST(test_api_cabinet_json_not_taught);
     RUN_TEST(test_api_cabinet_json_taught);

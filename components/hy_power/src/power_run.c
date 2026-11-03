@@ -30,6 +30,7 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/clock.h"
+#include "hy/wake_gate.h"
 #include "lvgl.h"
 #include "nvs.h"
 
@@ -38,6 +39,8 @@
 #define TASK_STACK      4096
 #define LOOP_MS         200
 #define SLEEP_LOOP_MS   1000   /* the loop timeout in the sleep mode: PMU poll */
+#define WG_LOOP_MS      15     /* polling the touch controller while a touch is judged (sleep mode) */
+#define WG_REARM_MS     50     /* waiting for the finger to lift before the touch wake is armed again */
 #define READ_EVERY_S    10
 #define SLEEP_READ_S    60     /* battery reading interval in the sleep mode */
 #define CPU_MIN_MHZ     40
@@ -78,6 +81,14 @@ typedef enum { W_PWR, W_USB, W_TOUCH, W_KEY, W_RTC, W_NEXT, W_BATT, W_DEBUG, W_U
 static const char *const k_cause[W_N] = {"pwr", "usb", "touch", "key", "rtc", "next_wake", "batt", "debug",
                                          "ui", "timer-only", "net", "motion"};
 static int64_t (*volatile s_next_wake_fn)(void);
+static bool (*volatile s_wake_single_fn)(void);
+/* A touch woke the CPU with "wake on single tap" off: the power task judges the touches itself (power task only,
+ * except that exit_sleep clears the flags). s_wg_rearm: the touch INT wake is still disarmed, re-armed once the finger
+ * is up and the pin reads high. */
+static hy_wake_gate_t s_wg;
+static volatile bool s_wg_active, s_wg_rearm, s_wg_down;
+static int16_t s_wg_x, s_wg_y;
+static int64_t s_wg_rearm_t0_ms;
 static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
 static StaticSemaphore_t s_sleep_mu_buf;
 static esp_pm_lock_handle_t s_pm_lock;     /* CPU max: see awake_lock_wanted */
@@ -409,6 +420,70 @@ void hy_power_set_next_wake_fn(int64_t (*fn)(void))
     s_next_wake_fn = fn;
 }
 
+void hy_power_set_wake_single_fn(bool (*fn)(void))
+{
+    s_wake_single_fn = fn;
+}
+
+static bool wake_single(void)
+{
+    bool (*fn)(void) = s_wake_single_fn;
+    return !fn || fn();
+}
+
+/* Power task, asleep, a touch woke the CPU and a single tap does not wake the screen: starts judging it. */
+static void wg_begin(void)
+{
+    hy_wake_gate_reset(&s_wg);
+    s_wg_active = true;
+    s_wg_down = false;
+    s_wg_rearm = false;
+    ESP_LOGI(TAG, "touch wake: judging (double tap needed)");
+}
+
+static void wg_end(const char *why)
+{
+    s_wg_active = false;
+    s_wg_down = false;
+    s_wg_rearm = true;   /* the touch INT wake fired and stays disarmed until the finger is up */
+    s_wg_rearm_t0_ms = mono_ms();
+    hy_wake_gate_reset(&s_wg);
+    ESP_LOGI(TAG, "touch wake: %s, back to sleep", why);
+}
+
+/* One step of the judgment: polls the touch controller (LVGL is paused, nothing else reads it) and feeds the gate. */
+static hy_wg_act_t wg_step(void)
+{
+    uint32_t t = (uint32_t)mono_ms();
+    bool down = false;
+    int16_t x = 0, y = 0;
+    hy_wg_act_t act = HY_WG_NONE;
+    if (hy_board_touch_poll(&down, &x, &y)) {
+        if (down && !s_wg_down) {
+            s_wg_down = true;
+            act = hy_wake_gate_down(&s_wg, false, t, x, y);
+        } else if (down) {
+            hy_wake_gate_move(&s_wg, x, y);
+        } else if (s_wg_down) {
+            s_wg_down = false;
+            act = hy_wake_gate_up(&s_wg, t, s_wg_x, s_wg_y);
+        } else if (s_wg.st == 0) {
+            return HY_WG_SLEEP;   /* the INT edge came with no finger on the glass: noise */
+        }
+        if (down) {
+            s_wg_x = x;
+            s_wg_y = y;
+        }
+    }
+    if (act == HY_WG_NONE || act == HY_WG_WAIT) {
+        hy_wg_act_t tk = hy_wake_gate_tick(&s_wg, t);
+        if (tk != HY_WG_NONE) {
+            act = tk;
+        }
+    }
+    return act;
+}
+
 static void pm_set(bool light)
 {
     esp_pm_config_t c = {.max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, .min_freq_mhz = CPU_MIN_MHZ,
@@ -569,6 +644,7 @@ static void exit_sleep(wake_cause_t cause)
     portENTER_CRITICAL(&s_mux);
     s_asleep = false;
     s_sleep_req = false;
+    s_wg_active = s_wg_rearm = s_wg_down = false;
     s_ctr.wake[cause]++;
     s_ctr.ms_asleep += asleep_ms;
     s_stretch_open = true;
@@ -770,7 +846,7 @@ static void power_task(void *arg)
     hy_power_state(&st);
     int32_t saved_rate = st.batt.rate_cph;
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(s_asleep ? SLEEP_LOOP_MS : LOOP_MS));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(!s_asleep ? LOOP_MS : s_wg_active ? WG_LOOP_MS : s_wg_rearm ? WG_REARM_MS : SLEEP_LOOP_MS));
         int64_t mono = mono_s();
         if (mono - last_up >= UPTIME_SAVE_S) {   /* RTC memory, no flash write */
             last_up = mono;
@@ -797,6 +873,8 @@ static void power_task(void *arg)
         portEXIT_CRITICAL(&s_mux);
         wake_cause_t cause = W_N;
         bool seen_asleep = s_asleep;
+        bool double_tap = false;
+        const bool single = wake_single();
         if (seen_asleep) {
             int64_t (*nw)(void) = s_next_wake_fn;
             int64_t next = nw ? nw() : 0;
@@ -806,7 +884,7 @@ static void power_task(void *arg)
                 /* light sleep must match the real VBUS (on: no VBUS). A lost VBUS IRQ, or a sleep entered on a VBUS
                  * reading taken before an unplug, ends the sleep mode; the UI asks again with the fresh reading */
                 cause = W_USB;
-            } else if (touch) {
+            } else if (touch && single) {
                 cause = W_TOUCH;
             } else if (key) {
                 cause = W_KEY;
@@ -815,10 +893,44 @@ static void power_task(void *arg)
             } else if (next && hy_clock_valid() && (int64_t)time(NULL) >= next) {
                 cause = W_NEXT;
             }
+            bool judging = false;
+            if (cause == W_N && !single) {
+                /* a touch only wakes the CPU: LVGL stays paused and the screen OFF while it is judged */
+                if (touch && !s_wg_active && !s_wg_rearm) {
+                    wg_begin();
+                }
+                if (s_wg_active) {
+                    judging = true;
+                    hy_wg_act_t act = wg_step();
+                    if (act == HY_WG_WAKE) {
+                        cause = W_TOUCH;
+                        double_tap = true;
+                        judging = false;
+                    } else if (act == HY_WG_SLEEP) {
+                        wg_end("not a double tap");
+                        judging = false;
+                    }
+                } else if (s_wg_rearm) {
+                    bool down = false;
+                    int16_t x, y;
+                    if (hy_board_touch_poll(&down, &x, &y) && !down && hy_board_touch_wake_rearm()) {
+                        s_wg_rearm = false;
+                        portENTER_CRITICAL(&s_mux);
+                        s_touch_isr = false;   /* the edges of the touches just judged */
+                        portEXIT_CRITICAL(&s_mux);
+                    } else if (mono_ms() - s_wg_rearm_t0_ms > 3000) {
+                        s_wg_rearm = false;    /* give up waiting; the next sleep entry arms every pin again */
+                        ESP_LOGW(TAG, "touch wake: not re-armed after 3 s");
+                    }
+                    judging = true;
+                }
+            } else if (cause == W_N && single) {
+                s_wg_rearm = false;
+            }
             if (cause == W_RTC) {
                 hy_clock_alarm_note_int();   /* the masked ISR missed the edge: the next tick takes and clears AF */
             }
-            if (cause == W_N) {
+            if (cause == W_N && !judging) {
                 portENTER_CRITICAL(&s_mux);
                 s_ctr.wake[W_TIMER]++;
                 portEXIT_CRITICAL(&s_mux);
@@ -826,7 +938,7 @@ static void power_task(void *arg)
         }
         /* The UI work is queued first and the sleep mode ends after it (exit_sleep): LVGL runs it in its first pass */
         if (cause == W_TOUCH) {
-            post(async_wake, (void *)(uintptr_t)HY_PWAKE_TOUCH);
+            post(async_wake, (void *)(uintptr_t)(double_tap ? HY_PWAKE_DOUBLE_TAP : HY_PWAKE_TOUCH));
         }
         if (key) {
             post(async_wake, (void *)(uintptr_t)HY_PWAKE_KEY);

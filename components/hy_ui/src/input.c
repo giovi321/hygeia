@@ -13,6 +13,7 @@
 
 #include "esp_log.h"
 #include "hy/net.h"
+#include "hy/wake_gate.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_input";
@@ -44,6 +45,8 @@ static bool s_last_double; /* the last finished stroke was the second tap of a d
 static hy_stroke_t s_prev_tap;
 static bool s_have_prev;   /* s_prev_tap is a tap that may start a double tap */
 static bool s_waking;      /* the stroke started on the dimmed screen: it only wakes */
+static bool s_gated;       /* ... and "wake on single tap" is off: only a double tap of such strokes wakes (s_gate) */
+static hy_wake_gate_t s_gate;
 
 static uint16_t dev_of(int32_t x, int32_t y)
 {
@@ -78,6 +81,9 @@ static void read_wrap(lv_indev_t *indev, lv_indev_data_t *data)
      * display is registered with ESP_LV_ADAPTER_ROTATE_0 (board.c; swap and mirror happen in the touch
      * driver). A rotated display must rotate a copy of the point here first. */
     if (down && s_active) {
+        if (s_gated) {
+            hy_wake_gate_move(&s_gate, (int16_t)data->point.x, (int16_t)data->point.y);
+        }
         uint16_t d = dev_of(data->point.x, data->point.y);
         if (d > s_st.max_dev) {
             s_st.max_dev = d;
@@ -93,7 +99,11 @@ static void finish(int32_t x, int32_t y, uint32_t t);
 static bool stroke_waking(void)
 {
     bool guard = screen_wake_guard_take();
-    return ui_nav_idle() || guard;
+    bool idle = ui_nav_idle();
+    /* a stroke that follows a CPU wake by touch (guard) is already past the decision; a dimmed screen under an
+     * overlay that wakes on any touch (power-off confirmation, pairing code) is not gated either */
+    s_gated = idle && !guard && idle_double_tap_required();
+    return idle || guard;
 }
 
 /* The pressed object is inside the list that is moving and the list is on screen */
@@ -135,6 +145,11 @@ static void indev_cb(lv_event_t *e)
         lv_display_trigger_activity(NULL);
         hy_net_activity();   /* someone is using the device: the radio stays up on battery */
         s_waking = stroke_waking();
+        if (s_gated) {
+            hy_wake_gate_down(&s_gate, false, lv_tick_get(), (int16_t)p.x, (int16_t)p.y);
+        } else {
+            hy_wake_gate_reset(&s_gate);
+        }
         screen_activity();
         s_glide_stop = s_glide_pending && !s_waking && glide_target(lv_indev_get_active_obj());
         s_glide_pending = false;
@@ -199,7 +214,13 @@ static void finish(int32_t x, int32_t y, uint32_t t)
         /* the stroke began on the dimmed screen: it only wakes. When a due card woke the screen under the
          * finger the navigation is no longer idle and the stroke is dropped, so it cannot snooze or step it. */
         if (ui_nav_idle()) {
-            ui_nav_gesture(g);
+            /* gated: the second tap of a double tap wakes; a lone tap, a long press or a swipe is dropped and the
+             * screen stays as it is (the gate remembers a first tap for HY_DOUBLE_TAP_MS) */
+            if (!s_gated || hy_wake_gate_up(&s_gate, t, (int16_t)x, (int16_t)y) == HY_WG_WAKE) {
+                ui_nav_gesture(g);
+            } else {
+                ESP_LOGI(TAG, "waking stroke dropped: not a double tap");
+            }
         } else {
             ESP_LOGI(TAG, "waking stroke dropped: the screen woke under the finger");
         }

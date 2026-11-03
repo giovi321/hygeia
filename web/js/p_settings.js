@@ -104,7 +104,8 @@ HY.settingsLinks.push({ href: "#/settings/cabinet", text: "Cabinet open", note: 
         number("snooze_min", "Snooze (minutes)", 1, 120),
         number("dim_s", "Dim the screen after (seconds)", 10, 600),
         number("off_bat_s", "Screen off on battery after (seconds)", 30, 3600),
-        number("off_usb_s", "Screen off on USB after (seconds)", 0, 86400, "0 keeps the screen on. Otherwise 60 or more")
+        number("off_usb_s", "Screen off on USB after (seconds)", 0, 86400, "0 keeps the screen on. Otherwise 60 or more"),
+        check("wake_single_tap", "Wake on single tap", "Off: tap twice to wake the dimmed or dark screen")
       ]);
     }
 

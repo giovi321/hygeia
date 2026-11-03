@@ -1070,6 +1070,51 @@ void hy_board_sleep_wake_arm(bool on)
     portEXIT_CRITICAL(&s_wake_mux);
 }
 
+bool hy_board_touch_poll(bool *down, int16_t *x, int16_t *y)
+{
+    if (!s_tp) {
+        return false;
+    }
+    if (esp_lcd_touch_read_data(s_tp) != ESP_OK) {
+        return false;
+    }
+    esp_lcd_touch_point_data_t pt[1];
+    uint8_t n = 0;
+    if (esp_lcd_touch_get_data(s_tp, pt, &n, 1) != ESP_OK) {
+        return false;
+    }
+    *down = n > 0;
+    if (n > 0) {
+        *x = (int16_t)pt[0].x;
+        *y = (int16_t)pt[0].y;
+    }
+    return true;
+}
+
+bool hy_board_touch_wake_rearm(void)
+{
+    const uint32_t bit = 1u << BSP_LCD_TOUCH_INT;
+    bool ok = false;
+    bool armed_now = false;
+    portENTER_CRITICAL(&s_wake_mux);
+    if (s_sleep_set) {
+        if (s_wake_live & bit) {
+            ok = true;
+        } else if (gpio_get_level((gpio_num_t)BSP_LCD_TOUCH_INT) != 0) {
+            /* the live bit and the level type change together: the pin's ISR sees both or neither */
+            gpio_wakeup_enable((gpio_num_t)BSP_LCD_TOUCH_INT, GPIO_INTR_LOW_LEVEL);
+            s_wake_live |= bit;
+            s_wake_armed |= bit;
+            ok = armed_now = true;
+        }
+    }
+    portEXIT_CRITICAL(&s_wake_mux);
+    if (armed_now) {
+        ESP_LOGI(TAG, "sleep wake: touch re-armed");
+    }
+    return ok;
+}
+
 bool hy_board_rtc_int_low(void)
 {
     return gpio_get_level((gpio_num_t)RTC_INT_GPIO) == 0;

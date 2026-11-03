@@ -140,6 +140,9 @@ static void power_wake(hy_power_wake_t cause)
     case HY_PWAKE_TOUCH:
         screen_touch_wake();
         break;
+    case HY_PWAKE_DOUBLE_TAP:
+        screen_double_tap_wake();
+        break;
     case HY_PWAKE_KEY:
         screen_event(HY_SE_USER_KEY);
         break;
@@ -150,6 +153,12 @@ static void power_wake(hy_power_wake_t cause)
         screen_tick();
         break;
     }
+}
+
+/* The power task reads this while asleep: the setting is live, so every save path (device, web, restore) applies */
+static bool wake_single_tap_now(void)
+{
+    return hy_settings()->wake_single_tap;
 }
 
 /* The first snapshot, as soon as the LVGL task runs; the tiles stay blank until then */
@@ -523,6 +532,7 @@ esp_err_t hy_ui_start(void)
                                            .usb = power_usb,
                                            .wake = power_wake};
     hy_power_set_ui(&power_ui);
+    hy_power_set_wake_single_fn(wake_single_tap_now);
     pair_register();
     net_ui_init();
     upd_ui_init();

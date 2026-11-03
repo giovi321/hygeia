@@ -726,7 +726,7 @@ class Handler(BaseHTTPRequestHandler):
                 rng = {"volume": (0, 100), "brightness": (10, 100), "snooze_min": (1, 120), "dim_s": (10, 600),
                        "off_bat_s": (30, 3600), "off_usb_s": (0, 86400)}
                 for k, v in body.items():
-                    if k in ("sound", "dnd", "rot_lock", "wifi_keep_batt"):
+                    if k in ("sound", "dnd", "rot_lock", "wifi_keep_batt", "wake_single_tap"):
                         if not isinstance(v, bool):
                             return 400, err(400, "invalid", k, "Wrong type")[1]
                         new[k] = v

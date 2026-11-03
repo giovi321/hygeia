@@ -79,6 +79,14 @@ void      hy_board_set_user_key_isr_hook(void (*fn)(void));
    hy_board_imu_wom_arm (also when wake on motion is armed after this call, until off); its ISR disarms it the same
    way. off: every armed pin back to its edge interrupt. Task context. */
 void      hy_board_sleep_wake_arm(bool on);
+/* Power task, only while LVGL is paused by the sleep mode (the adapter's worker is blocked, nothing else reads the
+   touch controller): reads it once. false when the read failed. *down: a finger is on the glass, then *x and *y are
+   its position. */
+bool      hy_board_touch_poll(bool *down, int16_t *x, int16_t *y);
+/* Power task, in the sleep mode: arms the touch INT level wake again after it fired and the CPU decided to stay in
+   the sleep mode. Only when the INT pin reads high (a low pin would wake at once). true: armed (also when it
+   already was). false outside the light-sleep arming, or while the pin reads low. */
+bool      hy_board_touch_wake_rearm(void);
 bool      hy_board_rtc_int_low(void);                /* RTC INT (GPIO 13) reads low: an alarm is pending */
 
 /* QMI8658 at 0x6b on the shared bus, 400 kHz. WHO_AM_I (0x00) must read 0x05, else ESP_ERR_NOT_FOUND and every

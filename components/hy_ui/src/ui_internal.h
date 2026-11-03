@@ -344,6 +344,8 @@ void screen_tick(void);                          /* ui.c, every second: USB sync
 void screen_sched_evaluated(void);               /* after each scheduler evaluation: CHIME on a chime moment */
 void screen_usb(bool in);                        /* hy_power_ui_t.usb: USB_IN / USB_OUT */
 void screen_touch_wake(void);                    /* a touch woke the CPU from the sleep mode */
+void screen_double_tap_wake(void);               /* the power task saw a double tap on the OFF screen */
+bool idle_double_tap_required(void);             /* input.c: a dimmed screen wakes on a double tap only (setting off) */
 bool screen_wake_guard_take(void);               /* input.c at a press: a stroke right after screen_touch_wake only wakes */
 void screen_activity(void);                      /* input.c: a stroke on an awake screen restarts the timers */
 void screen_pwr_short(void);                     /* PWR short with no confirmation: toggles ON <-> OFF */

@@ -22,7 +22,10 @@ void      hy_power_start(void);                  /* after hy_ui_start: starts th
 void      hy_power_state(hy_power_state_t *out);
 /* Wake causes the power task posts to the UI. TOUCH: a touch woke the CPU from the sleep mode; KEY: the user key
  * (also when awake); TICK: the next_wake time or the RTC alarm, the UI runs its scheduler tick at once. */
-typedef enum { HY_PWAKE_TOUCH = 0, HY_PWAKE_KEY, HY_PWAKE_TICK } hy_power_wake_t;
+typedef enum { HY_PWAKE_TOUCH = 0, HY_PWAKE_KEY, HY_PWAKE_TICK, HY_PWAKE_DOUBLE_TAP } hy_power_wake_t;
+/* DOUBLE_TAP: the power task saw a double tap while the screen was OFF (LVGL paused, the setting "wake on single
+ * tap" off). Both taps are over and LVGL never saw them, so no stroke needs to be swallowed. TOUCH is the
+ * single-tap wake: the finger may still be down, the UI swallows the stroke that is under it. */
 /* LVGL-task callbacks registered by the UI; each is called through lv_async_call. */
 typedef struct { void (*battery)(uint32_t flags); void (*pwr_short)(void); void (*pwr_long)(void);
                  void (*usb)(bool in); void (*wake)(hy_power_wake_t cause); } hy_power_ui_t;
@@ -30,6 +33,11 @@ void      hy_power_set_ui(const hy_power_ui_t *ui);
 /* The scheduler's next_wake (epoch s, 0 = none), read by the power task while asleep. hy_power does not depend on
  * hy_sched: app_main registers hy_sched_run_next_wake here. */
 void      hy_power_set_next_wake_fn(int64_t (*fn)(void));
+/* The setting "wake on single tap", read by the power task while asleep (any task may change it). Without a
+ * function a touch wakes at once. With the setting off, a touch wakes the CPU only to judge it: the power task polls
+ * the touch controller with LVGL still paused and the screen OFF, wakes on a double tap (hy_wake_gate) and
+ * otherwise returns to light sleep. */
+void      hy_power_set_wake_single_fn(bool (*fn)(void));
 
 /* Sleep mode. The UI calls hy_power_screen_off(true) from the LVGL task, and only from there, when the screen state
  * is OFF (again after each tick while it stays OFF): LVGL pauses at the end of the current lv_timer_handler pass and,

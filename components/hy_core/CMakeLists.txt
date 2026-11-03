@@ -19,6 +19,7 @@ idf_component_register(
         "src/battery.c"
         "src/gap.c"
         "src/screen.c"
+        "src/wake_gate.c"
         "src/orient.c"
         "src/shake.c"
         "src/cabinet.c"

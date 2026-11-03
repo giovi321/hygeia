@@ -417,6 +417,20 @@ void screen_touch_wake(void)
     event(HY_SE_TOUCH, "touch");
 }
 
+/* A double tap wakes the dimmed or dark screen when "wake on single tap" is off. The overlays that a touch always
+ * wakes (power-off confirmation, countdown, pairing code) do not need one. */
+bool idle_double_tap_required(void)
+{
+    return !hy_settings()->wake_single_tap && !poweroff_visible() && !poweroff_countdown_visible() && !pair_visible();
+}
+
+/* The power task judged a double tap while the screen was OFF: both taps are over and LVGL never saw them, so no
+ * guard for the next stroke */
+void screen_double_tap_wake(void)
+{
+    event(HY_SE_TOUCH, "double tap");
+}
+
 bool screen_wake_guard_take(void)
 {
     bool g = s_guard && lv_tick_elaps(s_guard_t0) < GUARD_MS;

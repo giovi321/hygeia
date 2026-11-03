@@ -145,6 +145,7 @@
 #define HY_S_SET_DISPLAY   "Display"
 #define HY_S_SET_BRIGHT    "Brightness %u%%"
 #define HY_S_SET_ROT_LOCK  "Rotation lock"
+#define HY_S_SET_WAKE_TAP  "Wake on single tap"
 #define HY_S_SET_WIFI      "Wi-Fi"
 #define HY_S_SET_ABOUT     "About"
 #define HY_S_SET_SET       "Set"

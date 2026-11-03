@@ -64,6 +64,7 @@ char *hy_api_settings_json(const hy_settings_t *s)
              cJSON_AddNumberToObject(c, "sensitivity", s->cab_sens) &&
              cJSON_AddNumberToObject(c, "window_min", s->cab_window_min);
     }
+    ok = ok && cJSON_AddBoolToObject(o, "wake_single_tap", s->wake_single_tap);
     char *js = ok ? cJSON_PrintUnformatted(o) : NULL;
     cJSON_Delete(o);
     return js;
@@ -180,6 +181,7 @@ hy_err_t hy_api_settings_from_json(const char *body, const hy_settings_t *cur, h
             }
         }
     }
+    if (r == HY_OK) r = get_bool(o, "wake_single_tap", &s.wake_single_tap, err);
     if (r == HY_OK) {
         const cJSON *c = cJSON_GetObjectItemCaseSensitive(o, "cabinet");
         if (c && !cJSON_IsNull(c)) r = cab_from_json(c, &s, err);

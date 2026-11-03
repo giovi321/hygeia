@@ -162,6 +162,18 @@ static void test_settings_cab_clamp(void)
     TEST_ASSERT_EQUAL_UINT8(0, s.cab_window_min);
 }
 
+static void test_settings_wake_tap(void)
+{
+    hy_settings_t s;
+    memset(&s, 0, sizeof s);
+    s.wake_single_tap = true;   /* the defaults must reset it */
+    hy_settings_defaults(&s);
+    TEST_ASSERT_FALSE(s.wake_single_tap);
+    s.wake_single_tap = true;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_TRUE(s.wake_single_tap);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -174,5 +186,6 @@ int main(void)
     RUN_TEST(test_settings_rot_clamp);
     RUN_TEST(test_settings_cab_defaults);
     RUN_TEST(test_settings_cab_clamp);
+    RUN_TEST(test_settings_wake_tap);
     return UNITY_END();
 }

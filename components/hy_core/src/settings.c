@@ -21,6 +21,7 @@ void hy_settings_defaults(hy_settings_t *s)
     s->cab_light = true;
     s->cab_sens = 3;
     s->cab_window_min = 15;
+    s->wake_single_tap = false;
 }
 
 void hy_settings_clamp(hy_settings_t *s)

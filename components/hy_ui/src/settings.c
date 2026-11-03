@@ -29,7 +29,7 @@ enum { R_ZONE, R_DATETIME, R_SOUND, R_DISPLAY, R_CABINET, R_WIFI, R_ABOUT, R_N }
 static lv_obj_t *s_root, *s_list, *s_val[R_N];
 static lv_obj_t *s_zone_root, *s_region, *s_city;
 static lv_obj_t *s_sound_root, *s_vol_lbl, *s_vol_slider;
-static lv_obj_t *s_disp_root, *s_bright_lbl, *s_bright_slider, *s_rot_val;
+static lv_obj_t *s_disp_root, *s_bright_lbl, *s_bright_slider, *s_rot_val, *s_wake1_val;
 static lv_obj_t *s_about_root, *s_about[4];
 #define ABOUT_UPD_Y (64 + 4 * 44 + 8)
 static const char *s_regions[MAX_REGIONS];
@@ -263,6 +263,20 @@ static void rot_lock_tap(void *ud)
     rot_lock_refresh();
 }
 
+static void wake1_refresh(void)
+{
+    lv_label_set_text(s_wake1_val, hy_settings()->wake_single_tap ? HY_S_ON : HY_S_OFF);
+}
+
+static void wake1_tap(void *ud)
+{
+    (void)ud;
+    hy_settings_t s = *hy_settings();
+    s.wake_single_tap = !s.wake_single_tap;
+    save(&s);
+    wake1_refresh();
+}
+
 static void display_create(void)
 {
     s_disp_root = ui_view_box();
@@ -274,6 +288,8 @@ static void display_create(void)
     lv_obj_set_pos(s_bright_slider, MARGIN, 116);
     s_rot_val = ui_list_row(s_disp_root, 66, HY_S_SET_ROT_LOCK, rot_lock_tap, NULL);
     lv_obj_set_pos(lv_obj_get_parent(s_rot_val), MARGIN, 176);
+    s_wake1_val = ui_list_row(s_disp_root, 66, HY_S_SET_WAKE_TAP, wake1_tap, NULL);
+    lv_obj_set_pos(lv_obj_get_parent(s_wake1_val), MARGIN, 254);
 }
 
 /* ---- about ---- */
@@ -483,6 +499,7 @@ void settings_show(hy_view_t v)
         lv_slider_set_value(s_bright_slider, st->brightness, LV_ANIM_OFF);
         lv_label_set_text_fmt(s_bright_lbl, HY_S_SET_BRIGHT, (unsigned)st->brightness);
         rot_lock_refresh();   /* a lock changed from the console shows when the page opens */
+        wake1_refresh();      /* and one changed from the web */
         break;
     case HY_V_ABOUT:
         about_refresh();
