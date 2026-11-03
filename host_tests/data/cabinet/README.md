@@ -14,7 +14,7 @@ The file the web UI downloads from `GET /api/cabinet/samples.csv`, unchanged. He
 | ax, ay, az | acceleration in mg, device frame |
 | gx, gy, gz | rotation rate in deci-dps (0.1 degree per second); all 0 when the gyro was off |
 
-A row of kind `rest` (`rest,<take>,0,ax,ay,az,0,0,0`) gives the rest vector of that take. Without it the replay takes the last sample of each sequence as its rest, which is where the capture became quiet.
+A row of kind `rest_<kind>` (`rest_teach`, `rest_test` or `rest_live`, as in `rest_live,<take>,0,ax,ay,az,0,0,0`) gives the rest vector of the one sequence with that kind and take, so a teach take and a live capture with the same number keep their own rests. Without it the replay takes the last sample of each sequence as its rest, which is where the capture became still.
 
 ## Naming
 

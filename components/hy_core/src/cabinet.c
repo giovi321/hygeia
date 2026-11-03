@@ -96,18 +96,38 @@ void hy_cab_cap_start(hy_cab_cap_t *c, hy_accel_t rest, bool has_gyro, uint32_t 
     c->last_move_ms = t_ms;
 }
 
-/* x is a sample taken ms after the start of the capture. */
-static bool sample_quiet(const hy_cab_seq_t *q, const hy_imu6_t *x, uint32_t ms)
+/* Sample j of a capture (j * STEP_MS after its start) turns slower than HY_CAB_QUIET_DDPS, or its gyro does not
+   count (absent, or still starting up). */
+static bool gyro_quiet(const hy_cab_seq_t *q, uint16_t j)
 {
-    if (iabs32((int32_t)x->a[0] - q->rest.x) > HY_CAB_QUIET_MG ||
-        iabs32((int32_t)x->a[1] - q->rest.y) > HY_CAB_QUIET_MG ||
-        iabs32((int32_t)x->a[2] - q->rest.z) > HY_CAB_QUIET_MG)
-        return false;
-    if (q->has_gyro && ms >= HY_CAB_GYRO_START_MS) {
-        int32_t g2 = (int32_t)x->g[0] * x->g[0] + (int32_t)x->g[1] * x->g[1] + (int32_t)x->g[2] * x->g[2];
-        if (g2 >= (int32_t)HY_CAB_QUIET_DDPS * HY_CAB_QUIET_DDPS) return false;
+    if (!q->has_gyro || (uint32_t)j * STEP_MS < HY_CAB_GYRO_START_MS) return true;
+    const int16_t *g = q->s[j].g;
+    int32_t g2 = (int32_t)g[0] * g[0] + (int32_t)g[1] * g[1] + (int32_t)g[2] * g[2];
+    return g2 < (int32_t)HY_CAB_QUIET_DDPS * HY_CAB_QUIET_DDPS;
+}
+
+/* The first sample of the still tail: the earliest k >= 1 such that over samples k to n - 1 every accel axis stays
+   within a range of HY_CAB_QUIET_MG and the gyro is quiet. n when the last sample is not quiet itself. The pose
+   the tail holds does not matter, so a movement that ends in a new pose ends as well as one that comes back. */
+static uint16_t still_tail(const hy_cab_seq_t *q)
+{
+    int16_t lo[3] = { 0, 0, 0 }, hi[3] = { 0, 0, 0 };
+    uint16_t k = q->n;
+    while (k > 1) {
+        const hy_imu6_t *x = &q->s[k - 1];
+        if (!gyro_quiet(q, (uint16_t)(k - 1))) break;
+        bool ok = true;
+        for (int a = 0; a < 3; a++) {
+            int16_t l = k == q->n ? x->a[a] : (x->a[a] < lo[a] ? x->a[a] : lo[a]);
+            int16_t h = k == q->n ? x->a[a] : (x->a[a] > hi[a] ? x->a[a] : hi[a]);
+            if ((int32_t)h - l > HY_CAB_QUIET_MG) ok = false;
+            lo[a] = l;
+            hi[a] = h;
+        }
+        if (!ok) break;
+        k--;
     }
-    return true;
+    return k;
 }
 
 hy_cap_res_t hy_cab_cap_feed(hy_cab_cap_t *c, uint32_t t_ms, const hy_imu6_t *x)
@@ -116,12 +136,11 @@ hy_cap_res_t hy_cab_cap_feed(hy_cab_cap_t *c, uint32_t t_ms, const hy_imu6_t *x)
     if (q->n >= HY_CAB_MAX_N) return HY_CAP_TOO_LONG;
     q->s[q->n++] = *x;
 
-    /* The trigger sample (n == 1) counts as movement whatever it reads. */
-    bool quiet = q->n > 1 && sample_quiet(q, x, t_ms - c->t0_ms);
-    if (!quiet) c->last_move_ms = t_ms;
-
-    if (quiet && t_ms - c->last_move_ms >= HY_CAB_QUIET_MS) {
-        while (q->n > 1 && sample_quiet(q, &q->s[q->n - 1], (uint32_t)(q->n - 1) * STEP_MS)) q->n--;
+    /* The trigger sample (index 0) counts as movement whatever it reads. */
+    uint16_t k = still_tail(q);
+    if (k == q->n) c->last_move_ms = t_ms;
+    if ((uint32_t)(q->n - k) * STEP_MS >= HY_CAB_QUIET_MS) {
+        q->n = k;
         return (uint32_t)q->n * STEP_MS < HY_CAB_MIN_MS ? HY_CAP_TOO_SHORT : HY_CAP_DONE;
     }
     return q->n >= HY_CAB_MAX_N ? HY_CAP_TOO_LONG : HY_CAP_MORE;

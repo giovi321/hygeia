@@ -160,7 +160,7 @@ static void test_wom_mapping(void)
     TEST_ASSERT_EQUAL_UINT16(40, hy_cab_wom_mg(6));
 }
 
-static void test_wom_hit_table_knock_default(void)
+static void test_wom_hit_table_knock_steps(void)
 {
     /* A knock peaking at 88 mg one sensor sample after a still one: under the least sensitive step, over 64 mg
        and the default (the default favours catching a door pulled by hand; see hy_cab_wom_mg). */
@@ -259,13 +259,35 @@ static void test_cap_too_short(void)
 
 static void test_cap_too_long(void)
 {
-    cab_syn_t p = noisy(CAB_SYN_TILT, 2);
-    p.dur = 5.0f;                          /* one slow 5 s wobble */
+    /* One slow swing of 4.8 s that never pauses (a tilt pauses at its turning point, which now ends a capture). */
+    cab_syn_t p = noisy(CAB_SYN_DOOR_OPEN, 2);
+    p.dur = 6.0f;
     hy_cab_cap_t c;
     uint32_t fed;
     TEST_ASSERT_EQUAL_INT(HY_CAP_TOO_LONG, run_capture(&p, 400, &c, &fed));
     TEST_ASSERT_EQUAL_UINT32(HY_CAB_MAX_N, fed);
     TEST_ASSERT_EQUAL_UINT16(HY_CAB_MAX_N, c.seq.n);
+}
+
+static void test_cap_new_pose_done(void)
+{
+    /* Turned by 60 degrees about x over 1 s at a steady 60 dps, then held: the capture ends in the new pose, far
+       from the rest vector, and keeps the whole turn (a steady turn is never still). */
+    const double pi = 3.14159265358979323846;
+    hy_cab_cap_t c;
+    hy_cab_cap_start(&c, (hy_accel_t){ 0, -1000, 0 }, true, 0);
+    hy_cap_res_t r = HY_CAP_MORE;
+    uint32_t i = 0;
+    for (; i < 150 && r == HY_CAP_MORE; i++) {
+        double t = i * 0.02, ang = (t < 1.0 ? t : 1.0) * 60.0 * pi / 180.0;
+        double rate = t < 1.0 ? 600.0 : 0.0;   /* deci-dps */
+        hy_imu6_t s = { { 0, cab_syn_i16(-1000.0 * cos(ang)), cab_syn_i16(1000.0 * sin(ang)) },
+                        { cab_syn_i16(rate), 0, 0 } };
+        r = hy_cab_cap_feed(&c, i * CAB_SYN_STEP_MS, &s);
+    }
+    TEST_ASSERT_EQUAL_INT(HY_CAP_DONE, r);
+    TEST_ASSERT_UINT16_WITHIN(2, 50, c.seq.n);
+    TEST_ASSERT_EQUAL_UINT32(50 + HY_CAB_QUIET_MS / CAB_SYN_STEP_MS, i);   /* ended once the hold was still */
 }
 
 static void test_cap_without_gyro_ignores_gyro(void)
@@ -325,13 +347,14 @@ int main(void)
     RUN_TEST(test_feat_rotation_invariant);
     RUN_TEST(test_feat_gyro_mask);
     RUN_TEST(test_wom_mapping);
-    RUN_TEST(test_wom_hit_table_knock_default);
+    RUN_TEST(test_wom_hit_table_knock_steps);
     RUN_TEST(test_wom_prev_interpolates);
     RUN_TEST(test_wom_hit_slope_not_drift);
     RUN_TEST(test_cap_door_done);
     RUN_TEST(test_cap_door_done_with_lead);
     RUN_TEST(test_cap_too_short);
     RUN_TEST(test_cap_too_long);
+    RUN_TEST(test_cap_new_pose_done);
     RUN_TEST(test_cap_without_gyro_ignores_gyro);
     RUN_TEST(test_still_tracker);
     return UNITY_END();

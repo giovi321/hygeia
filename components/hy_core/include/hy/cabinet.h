@@ -8,7 +8,8 @@
 
 #define HY_CAB_RATE_HZ          50
 #define HY_CAB_MAX_N           200     /* 4 s */
-#define HY_CAB_MIN_MS          300
+#define HY_CAB_MIN_MS          220     /* a 200 ms bump is too short (test_cap_too_short); taps in the recordings
+                                          capture as 20 to 60 ms and stay too short at any value from 120 */
 #define HY_CAB_QUIET_MS        400
 #define HY_CAB_QUIET_DDPS      100     /* 10 dps */
 #define HY_CAB_QUIET_MG         40
@@ -52,10 +53,12 @@ typedef struct { hy_cab_seq_t seq; uint32_t t0_ms, last_move_ms; } hy_cab_cap_t;
 /* Starts a capture. The first sample fed is the trigger sample and counts as movement. Samples are expected at
    HY_CAB_RATE_HZ. After a result other than HY_CAP_MORE the capture is finished and must be started again. */
 void         hy_cab_cap_start(hy_cab_cap_t *c, hy_accel_t rest, bool has_gyro, uint32_t t_ms);
-/* Appends the sample; DONE after HY_CAB_QUIET_MS quiet (quiet tail trimmed), TOO_SHORT when the movement before
-   the quiet tail lasted under HY_CAB_MIN_MS, TOO_LONG at HY_CAB_MAX_N samples. A sample is quiet when the gyro
-   magnitude is under HY_CAB_QUIET_DDPS (ignored when !has_gyro and within HY_CAB_GYRO_START_MS of the start) and
-   every accel axis is within HY_CAB_QUIET_MG of the rest vector. */
+/* Appends the sample; DONE after HY_CAB_QUIET_MS of stillness (the still tail trimmed), TOO_SHORT when the
+   movement before the still tail lasted under HY_CAB_MIN_MS, TOO_LONG at HY_CAB_MAX_N samples. The tail is still
+   when every accel axis stays within a range of HY_CAB_QUIET_MG over it and the gyro magnitude of each of its
+   samples is under HY_CAB_QUIET_DDPS (ignored when !has_gyro and for samples within HY_CAB_GYRO_START_MS of the
+   start, by index at HY_CAB_RATE_HZ). Stillness is around whatever pose the device holds, not the rest vector, so
+   a movement that ends in a new pose ends too; the rest vector stays the features' reference. */
 hy_cap_res_t hy_cab_cap_feed(hy_cab_cap_t *c, uint32_t t_ms, const hy_imu6_t *x);
 /* Rest tracker for the stream path: true once HY_CAB_STILL_MS of samples with every step under
    HY_CAB_STILL_STEP_MG; *rest is the mean of the last 10. */
@@ -69,11 +72,12 @@ bool hy_cab_still_feed(hy_cab_still_t *st, uint32_t t_ms, hy_accel_t a, hy_accel
 #define HY_CAB_OPEN_BEGIN_N  10      /* 200 ms */
 /* Threshold bounds from the replays (test_cabmatch.c, test_cab_rec.c). THR_MIN: the tightest model's variants
    need up to 0.200 (synthetic lift; door 0.289, tilt 0.629), so a model of near identical takes still accepts its
-   own movement. THR_MAX: putdown_pickup (accel only) has takes 1.898 from each other, its nearest negative window
-   in the other recordings is 3.072; 2.4 is about their geometric middle. A model reaches it only with d_self of
-   1.5 or more; the synthetic door models have 0.35 and their nearest negative, a door closing, is 1.880. */
+   own movement. THR_MAX: below the nearest negative of the recordings, 3.072 (a carry_walk window against the
+   putdown_pickup model, accel only), with a third to spare; that model's d_self (1.898, a property of its takes,
+   not a held-out positive) still fits under it. A model reaches it only with d_self of 1.25 or more; the
+   synthetic door models have 0.35, and their nearest negative, a door closing, is 1.880. */
 #define HY_CAB_THR_MIN     0.25f
-#define HY_CAB_THR_MAX     2.4f
+#define HY_CAB_THR_MAX     2.0f
 #define HY_CAB_ODD_RATIO   3.0f
 typedef struct { hy_cab_seq_t take[HY_CAB_TAKES]; float d_self; uint16_t trig_mg; bool valid; } hy_cab_model_t;
 

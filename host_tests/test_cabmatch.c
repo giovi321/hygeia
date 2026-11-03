@@ -131,6 +131,8 @@ static void expect_all(const hy_cab_model_t *m, cab_syn_kind_t kind, bool rotate
     uint32_t hits = count_matches(m, kind, rotate, &worst, &nearest);
     char msg[96];
     snprintf(msg, sizeof msg, "kind %d: worst %.3f, threshold %.3f", (int)kind, worst, hy_cab_threshold(m, 3));
+    printf("model %d: d_self %.3f, threshold %.3f, worst variant %.3f\n", (int)kind, m->d_self, hy_cab_threshold(m, 3),
+           worst);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(N_POS, hits, msg);
 }
 
@@ -140,6 +142,8 @@ static void expect_none(const hy_cab_model_t *m, cab_syn_kind_t kind)
     uint32_t hits = count_matches(m, kind, false, &worst, &nearest);
     char msg[96];
     snprintf(msg, sizeof msg, "kind %d: nearest %.3f, threshold %.3f", (int)kind, nearest, hy_cab_threshold(m, 3));
+    printf("model d_self %.3f, threshold %.3f: nearest kind %d %.3f\n", m->d_self, hy_cab_threshold(m, 3), (int)kind,
+           nearest);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, hits, msg);
 }
 

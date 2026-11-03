@@ -82,9 +82,9 @@ static bool load_motion(const char *name, rec_t *r)
 typedef enum { DL_TEACH, DL_CAPTURE } dl_kind_t;   /* capture: kind test or live */
 
 /* A sample download (kind,take,t_ms,ax,ay,az,gx,gy,gz): the sequences of the wanted kind, in file order, one per
-   (kind, take). An optional row of kind rest (rest,take,0,ax,ay,az,0,0,0) gives the rest vector of that take of
-   every kind; without it the rest is the last sample of the sequence, the point at which the segmenter found it
-   quiet. has_gyro is true when any gyro value in the file is not 0. Returns the number of sequences. */
+   (kind, take). An optional row of kind rest_<kind> (rest_teach, rest_test or rest_live: rest_live,take,0,ax,ay,az,
+   0,0,0) gives the rest vector of that one sequence; without it the rest is the last sample of the sequence, the
+   point at which the segmenter found it still. has_gyro is true when any gyro value in the file is not 0. Returns the number of sequences. */
 static int load_download(const char *path, dl_kind_t want, hy_cab_seq_t *out, int max)
 {
     FILE *f = open_or_fail(path);
@@ -97,6 +97,7 @@ static int load_download(const char *path, dl_kind_t want, hy_cab_seq_t *out, in
     bool rest_of[64], gyro = false;
     hy_accel_t rests[64];
     int n_rest = 0, rest_take[64];
+    char rest_kind[64][16];
     while (fgets(line, sizeof line, f)) {
         if (line[0] == '\r' || line[0] == '\n') continue;
         char kind[16];
@@ -106,8 +107,11 @@ static int load_download(const char *path, dl_kind_t want, hy_cab_seq_t *out, in
         TEST_ASSERT_EQUAL_MESSAGE(9, sscanf(line, "%15[^,],%d,%lu,%ld,%ld,%ld,%ld,%ld,%ld", kind, &take, &t, &v[0], &v[1],
                                             &v[2], &v[3], &v[4], &v[5]), path);
         for (int k = 0; k < 6; k++) TEST_ASSERT_TRUE_MESSAGE(in_i16(v[k]), path);
-        if (strcmp(kind, "rest") == 0) {
+        if (strncmp(kind, "rest_", 5) == 0) {
+            TEST_ASSERT_TRUE_MESSAGE(strcmp(kind + 5, "teach") == 0 || strcmp(kind + 5, "test") == 0 ||
+                                     strcmp(kind + 5, "live") == 0, path);
             TEST_ASSERT_TRUE(n_rest < 64);
+            snprintf(rest_kind[n_rest], sizeof rest_kind[n_rest], "%s", kind + 5);
             rest_take[n_rest] = take;
             rests[n_rest++] = (hy_accel_t){ (int16_t)v[0], (int16_t)v[1], (int16_t)v[2] };
             continue;
@@ -133,7 +137,7 @@ static int load_download(const char *path, dl_kind_t want, hy_cab_seq_t *out, in
     for (int i = 0; i < n; i++) {
         out[i].has_gyro = gyro;
         for (int k = 0; k < n_rest; k++)
-            if (rest_take[k] == take_of[i]) {
+            if (rest_take[k] == take_of[i] && strcmp(rest_kind[k], kind_of[i]) == 0) {
                 out[i].rest = rests[k];
                 rest_of[i] = true;
             }
@@ -321,8 +325,8 @@ static int file_index(const char *name)
 
 /* The person waits for the device between takes. The recordings leave some rests shorter than the device needs to
    re-arm (the segmenter's quiet tail plus HY_CAB_STILL_MS of the still tracker), so a take there would be lost.
-   The teach replay therefore inserts PAD_N samples of the recording's own rest (its last 10 samples, repeated)
-   before every sample at which the teach trigger fires after at least PAD_AFTER samples with every step under
+   The teach replay therefore inserts PAD_N samples of the recording's own rest (its last 10 samples, played
+   back and forth so every step is one the recording made, ending forward on the sample before) before every sample at which the teach trigger fires after at least PAD_AFTER samples with every step under
    HY_CAB_STILL_STEP_MG; the slope the trigger sees at that sample is unchanged. Live captures and windows use the
    recordings as they are. */
 #define PAD_N     (((HY_CAB_STILL_MS + 200) / STEP_MS + 9) / 10 * 10)
@@ -337,7 +341,11 @@ static void pad_rests(const rec_t *in, rec_t *out, int *pads)
     for (uint32_t i = 0; i < in->n; i++) {
         if (run >= PAD_AFTER && stream_hit(in->s, i, HY_CAB_TEACH_TRIG_MG)) {
             TEST_ASSERT_TRUE(out->n + PAD_N < REC_MAX);
-            for (uint32_t j = 0; j < PAD_N; j++) out->s[out->n++] = in->s[i - 10 + j % 10];
+            for (uint32_t j = 0; j < PAD_N; j++) {
+                uint32_t b = j / 10, o = j % 10;
+                bool fwd = (PAD_N / 10 - 1 - b) % 2 == 0;
+                out->s[out->n++] = in->s[i - 10 + (fwd ? o : 9 - o)];
+            }
             (*pads)++;
         }
         bool step = false;
@@ -490,8 +498,9 @@ static void expect_match_variants(model_t *md, int k)
 
 static void print_margin(const model_t *md)
 {
-    printf("%s model margin: largest positive %.3f, threshold %.3f, smallest negative %.3f (%s)\n", md->file,
-           md->pos_max, hy_cab_threshold(&md->m, 3), md->neg_min, md->neg_at);
+    printf("%s model margin: largest positive (variants of the takes) %.3f, d_self %.3f, threshold %.3f, smallest "
+           "negative %.3f (%s)\n", md->file, md->pos_max, md->m.d_self, hy_cab_threshold(&md->m, 3), md->neg_min,
+           md->neg_at);
 }
 
 /* ---- Any movement ---- */
@@ -551,6 +560,11 @@ static void test_any_counts_per_file(void)
        a door pulled by hand (see test_any_door_default). The default fires on them; the reaction still needs a due
        dose. Least sensitive step: the knock does not fire. */
     if (s_have[knock]) TEST_ASSERT_EQUAL_INT(0, counts[knock][0]);
+    /* Wakes stay bounded at the default: the measured counts, so a retune that multiplies them fails. */
+    const int tap = file_index("tap_double"), spin = file_index("flat_spin");
+    if (s_have[knock]) TEST_ASSERT_TRUE(counts[knock][2] <= 1);
+    if (s_have[tap]) TEST_ASSERT_TRUE(counts[tap][2] <= 5);
+    if (s_have[spin]) TEST_ASSERT_TRUE(counts[spin][2] <= 13);
 }
 
 /* The default fires on a nominal synthetic door, with or without the accel ramp, and on the ramped door at any
@@ -591,12 +605,13 @@ static void test_taught_putdown_pickup(void)
     model_t *md = model_of("putdown_pickup");
     TEST_ASSERT_TRUE_MESSAGE(build_model(md), "putdown_pickup: fewer than 3 captures");
     for (int k = 0; k < md->n_caps; k++) expect_match_variants(md, k);
-    /* A new take is like one the model has not seen: each take matches the other two at sensitivity 3. */
+    /* Each take fits the other two at sensitivity 3. The largest of these distances is d_self, so this holds
+       exactly when the threshold is not clamped under d_self (HY_CAB_THR_MAX >= d_self); it is not a held-out
+       positive, as the recording has no fourth take. */
     for (int k = 0; k < HY_CAB_TAKES; k++) {
         float b = INFINITY;
         for (int j = 0; j < HY_CAB_TAKES; j++)
             if (j != k) b = fminf(b, hy_cab_dist(&md->m.take[j], &md->m.take[k]));
-        if (b > md->pos_max) md->pos_max = b;
         char msg[96];
         snprintf(msg, sizeof msg, "take %d against the other two: %.3f over %.3f", k, b, hy_cab_threshold(&md->m, 3));
         TEST_ASSERT_TRUE_MESSAGE(b <= hy_cab_threshold(&md->m, 3), msg);
@@ -654,7 +669,9 @@ static int shake_detections(const hy_imu6_t *s, uint32_t n)
 }
 
 /* A door swing seen by the shake detector: 1 s at rest, the opening, 1 s at rest, the closing ending with a
-   1.5 g bump against the frame that rings out (+1.5 g, -0.75 g, +0.375 g on the axis normal to the door). */
+   1.5 g bump against the frame that rings out (+1.5 g, -0.75 g, +0.375 g on the axis normal to the door). One in
+   five swings slams with twice that (3 g): its first swing passes HY_SHK_SWING_MG, the ringing does not, so a
+   single stroke never makes a shake. */
 static void test_door_like_never_shakes(void)
 {
     static hy_imu6_t s[REC_MAX];
@@ -674,7 +691,9 @@ static void test_door_like_never_shakes(void)
         /* The bump at the end of the closing swing, on the door normal (the tangential axis of the swing). */
         uint32_t end = no + (1000 + cab_syn_move_ms(&pc)) / STEP_MS;
         static const int16_t bump[] = { 1500, -750, 375 };
-        for (int k = 0; k < 3; k++) s[end + (uint32_t)k].a[0] = (int16_t)(s[end + (uint32_t)k].a[0] + bump[k]);
+        const int slam = n % 5 == 4 ? 2 : 1;
+        for (int k = 0; k < 3; k++)
+            s[end + (uint32_t)k].a[0] = (int16_t)(s[end + (uint32_t)k].a[0] + slam * bump[k]);
         TEST_ASSERT_EQUAL_INT(0, shake_detections(s, no + nc));
     }
 }
@@ -698,6 +717,15 @@ static void test_taught_no_shake(void)
         if (!s_have[file_index(md->file)]) continue;
         build_model(md);
         for (int k = 0; k < md->n_caps; k++, fed++) TEST_ASSERT_EQUAL_INT(0, capture_shakes(&md->caps[k].seq));
+        if (!md->m.valid) continue;
+        /* and the augmented positives of the model's tests */
+        static hy_cab_seq_t q;
+        for (int k = 0; k < md->n_caps; k++)
+            for (uint32_t a = 1; a <= N_AUG; a++)
+                if (augment(md->teach.s, md->teach.n, &md->caps[k], 7919u * (uint32_t)k + a, md->m.trig_mg, &q)) {
+                    TEST_ASSERT_EQUAL_INT(0, capture_shakes(&q));
+                    fed++;
+                }
     }
     /* The synthetic movements a person might teach. */
     for (int kind = CAB_SYN_DOOR_OPEN; kind <= CAB_SYN_LIFT; kind++) {
