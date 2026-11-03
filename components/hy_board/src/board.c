@@ -6,9 +6,11 @@
 
 #include "hy/board.h"
 #include "hy/nav.h"
+#include "board_imu_int.h"
 #include "hy/power.h"
 
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include "bsp/esp-bsp.h"
@@ -67,11 +69,17 @@ static volatile uint8_t s_bri_want = 50;
 #define USER_KEY_GPIO 18   /* spec Hardware table: user key GPIO 18 */
 #define RTC_INT_GPIO  13   /* PCF85063 INT, owned by hy_clock (falling-edge interrupt) */
 
-/* Light-sleep GPIO wake: s_wake_armed is the set armed by hy_board_sleep_wake_arm(true) (task context only);
- * s_wake_live the armed pins whose ISR has not disarmed them yet (touch and key), under s_wake_mux. */
+/* Light-sleep GPIO wake: s_wake_armed is the set armed by hy_board_sleep_wake_arm(true); s_wake_live the armed
+ * pins whose ISR has not disarmed them yet (touch, key, IMU). Both under s_wake_mux: the motion task adds or removes
+ * the IMU pin while the set is armed. */
 static portMUX_TYPE s_wake_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_wake_armed;
 static volatile uint32_t s_wake_live;
+static bool s_sleep_set;   /* between hy_board_sleep_wake_arm(true) and (false), even when no pin could be armed */
+/* IMU interrupt (wake on motion): the GPIO while attached, else -1, and its level at attach; under s_wake_mux */
+static volatile int s_imu_pin = -1;
+static int s_imu_level;
+static void (*volatile s_imu_hook)(void);
 static lv_display_flush_cb_t s_orig_flush;
 static uint32_t s_flush_count;
 static int64_t s_verbose_until_us;
@@ -807,16 +815,112 @@ void hy_board_debug_madctl(uint8_t madctl, bool swap, bool mx, bool my, int16_t 
 }
 #endif
 
-/* An armed wake pin fired: back to its falling-edge interrupt before the low-level type re-triggers the ISR */
+/* An armed wake pin fired: back to its edge interrupt (both edges for the IMU pin, which toggles; falling for the
+ * others) before the level type re-triggers the ISR */
 static void IRAM_ATTR wake_pin_fired(uint32_t pin)
 {
     portENTER_CRITICAL_ISR(&s_wake_mux);
     if (s_wake_live & (1u << pin)) {
         gpio_ll_wakeup_disable(&GPIO, pin);
-        gpio_ll_set_intr_type(&GPIO, pin, GPIO_INTR_NEGEDGE);
+        gpio_ll_set_intr_type(&GPIO, pin, (int)pin == s_imu_pin ? GPIO_INTR_ANYEDGE : GPIO_INTR_NEGEDGE);
         s_wake_live &= ~(1u << pin);
     }
     portEXIT_CRITICAL_ISR(&s_wake_mux);
+}
+
+/* Level wake for the IMU pin, opposite the level recorded at attach. Caller holds s_wake_mux. */
+static void imu_wake_enable_locked(int pin)
+{
+    gpio_wakeup_enable((gpio_num_t)pin, s_imu_level ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
+    s_wake_live |= 1u << pin;
+    s_wake_armed |= 1u << pin;
+}
+
+static void IRAM_ATTR imu_isr(void *arg)
+{
+    wake_pin_fired((uint32_t)(uintptr_t)arg);
+    void (*fn)(void) = s_imu_hook;
+    if (fn) {
+        fn();
+    }
+}
+
+static esp_err_t isr_service_ready(void)
+{
+    esp_log_level_t old = esp_log_level_get("gpio");
+    esp_log_level_set("gpio", ESP_LOG_NONE);   /* the service is usually installed already (touch) */
+    esp_err_t err = gpio_install_isr_service(0);
+    esp_log_level_set("gpio", old);
+    return err == ESP_ERR_INVALID_STATE ? ESP_OK : err;
+}
+
+esp_err_t board_imu_int_attach(int gpio, int *level)
+{
+    board_imu_int_detach();
+    gpio_config_t gc = {
+        .pin_bit_mask = 1ULL << gpio,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,     /* the IMU drives the pin push-pull while its output is enabled */
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
+    };
+    esp_err_t err = gpio_config(&gc);
+    if (err == ESP_OK) {
+        err = isr_service_ready();
+    }
+    if (err == ESP_OK) {
+        err = gpio_isr_handler_add((gpio_num_t)gpio, imu_isr, (void *)(uintptr_t)gpio);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "imu int gpio %d: %s", gpio, esp_err_to_name(err));
+        gpio_reset_pin((gpio_num_t)gpio);
+        return err;
+    }
+    int lv = gpio_get_level((gpio_num_t)gpio);
+    portENTER_CRITICAL(&s_wake_mux);
+    s_imu_level = lv;
+    s_imu_pin = gpio;
+    bool sleep_armed = s_sleep_set;
+    if (sleep_armed) {
+        imu_wake_enable_locked(gpio);   /* armed during the sleep mode: the CPU must still wake on it */
+    }
+    portEXIT_CRITICAL(&s_wake_mux);
+    if (sleep_armed) {
+        ESP_LOGI(TAG, "sleep wake: armed gpio %d (imu)", gpio);
+    }
+    *level = lv;
+    return ESP_OK;
+}
+
+void board_imu_int_detach(void)
+{
+    portENTER_CRITICAL(&s_wake_mux);
+    int pin = s_imu_pin;
+    s_imu_pin = -1;
+    if (pin >= 0) {
+        if (s_wake_live & (1u << pin)) {
+            gpio_ll_wakeup_disable(&GPIO, (uint32_t)pin);
+            s_wake_live &= ~(1u << pin);
+        }
+        s_wake_armed &= ~(1u << pin);
+    }
+    portEXIT_CRITICAL(&s_wake_mux);
+    if (pin < 0) {
+        return;
+    }
+    gpio_intr_disable((gpio_num_t)pin);
+    gpio_isr_handler_remove((gpio_num_t)pin);
+    gpio_reset_pin((gpio_num_t)pin);
+}
+
+void hy_board_imu_int_hook(void (*fn)(void))
+{
+    s_imu_hook = fn;
+}
+
+bool hy_board_imu_int_armed(void)
+{
+    return s_imu_pin >= 0;
 }
 
 /* Runs inside the LVGL adapter's touch ISR (callbacks.on_interrupt); the adapter's handling is unchanged */
@@ -865,13 +969,7 @@ static void key_and_sleep_pins_init(void)
     };
     esp_err_t err = gpio_config(&gc);
     if (err == ESP_OK) {
-        esp_log_level_t old = esp_log_level_get("gpio");
-        esp_log_level_set("gpio", ESP_LOG_NONE);   /* the service is usually installed already (touch) */
-        err = gpio_install_isr_service(0);
-        esp_log_level_set("gpio", old);
-        if (err == ESP_ERR_INVALID_STATE) {
-            err = ESP_OK;
-        }
+        err = isr_service_ready();
     }
     if (err == ESP_OK) {
         err = gpio_isr_handler_add(USER_KEY_GPIO, key_isr, NULL);
@@ -890,7 +988,10 @@ void hy_board_sleep_wake_arm(bool on)
     static const uint32_t pins[] = {BSP_LCD_TOUCH_INT, RTC_INT_GPIO, USER_KEY_GPIO};
     if (on) {
         render_hold(false);   /* LVGL task (enter_sleep): never carry hy_render into light sleep; it blocks it */
-        if (s_wake_armed) {
+        portENTER_CRITICAL(&s_wake_mux);
+        bool already = s_wake_armed != 0;
+        portEXIT_CRITICAL(&s_wake_mux);
+        if (already) {
             return;
         }
         uint32_t armed = 0;
@@ -910,23 +1011,47 @@ void hy_board_sleep_wake_arm(bool on)
             portEXIT_CRITICAL(&s_wake_mux);
             armed |= 1u << p;
         }
+        portENTER_CRITICAL(&s_wake_mux);
+        int imu = s_imu_pin;
         s_wake_armed = armed;
+        s_sleep_set = true;
+        if (imu >= 0) {
+            imu_wake_enable_locked(imu);   /* only while wake on motion is armed */
+        }
+        portEXIT_CRITICAL(&s_wake_mux);
         esp_sleep_enable_gpio_wakeup();
         char list[48] = "";
-        for (size_t i = 0, n = 0; i < sizeof pins / sizeof pins[0]; i++) {
+        size_t n = 0;
+        for (size_t i = 0; i < sizeof pins / sizeof pins[0]; i++) {
             if (armed & (1u << pins[i])) {
                 n += snprintf(list + n, sizeof list - n, " %u", (unsigned)pins[i]);
             }
         }
+        if (imu >= 0) {
+            snprintf(list + n, sizeof list - n, " %d", imu);
+        }
         ESP_LOGI(TAG, "sleep wake: armed gpio%s", list[0] ? list : " none");
         return;
     }
-    if (!s_wake_armed) {
+    portENTER_CRITICAL(&s_wake_mux);
+    uint32_t was = s_wake_armed;
+    s_sleep_set = false;
+    int imu = s_imu_pin;
+    if (imu >= 0 && (was & (1u << imu))) {
+        /* the IMU pin stays attached: back to its both-edges interrupt */
+        if (s_wake_live & (1u << imu)) {
+            gpio_ll_wakeup_disable(&GPIO, (uint32_t)imu);
+            s_wake_live &= ~(1u << imu);
+        }
+        gpio_ll_set_intr_type(&GPIO, (uint32_t)imu, GPIO_INTR_ANYEDGE);
+    }
+    portEXIT_CRITICAL(&s_wake_mux);
+    if (!was) {
         return;
     }
     for (size_t i = 0; i < sizeof pins / sizeof pins[0]; i++) {
         uint32_t p = pins[i];
-        if (!(s_wake_armed & (1u << p))) {
+        if (!(was & (1u << p))) {
             continue;
         }
         portENTER_CRITICAL(&s_wake_mux);
@@ -938,7 +1063,9 @@ void hy_board_sleep_wake_arm(bool on)
             gpio_intr_enable((gpio_num_t)p);
         }
     }
+    portENTER_CRITICAL(&s_wake_mux);
     s_wake_armed = 0;
+    portEXIT_CRITICAL(&s_wake_mux);
 }
 
 bool hy_board_rtc_int_low(void)

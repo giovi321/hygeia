@@ -17,6 +17,22 @@ static hy_accel_t accel_of(const hy_imu6_t *s)
     return (hy_accel_t){ s->a[0], s->a[1], s->a[2] };
 }
 
+/* The trigger at stream sample k of p, against the sensor's previous sample; before sample 0 p is at rest. */
+static bool stream_hit(const cab_syn_t *p, uint32_t k, uint16_t trig_mg)
+{
+    hy_accel_t back[2];
+    for (uint32_t j = 0; j < 2; j++) {
+        if (k >= j + 2) {
+            hy_imu6_t b = cab_syn_sample(p, k - j - 2);
+            back[j] = accel_of(&b);
+        } else {
+            back[j] = p->rest;
+        }
+    }
+    hy_imu6_t s = cab_syn_sample(p, k);
+    return hy_cab_wom_hit(hy_cab_wom_prev(back[0], back[1]), accel_of(&s), trig_mg);
+}
+
 static cab_syn_t mv(cab_syn_kind_t kind, float amp, float dur, uint32_t seed)
 {
     cab_syn_t p = cab_syn_new(kind);
@@ -35,8 +51,7 @@ static bool try_capture(const cab_syn_t *p, uint16_t trig_mg, uint32_t pre, hy_c
 {
     uint32_t k = 0;
     for (; k < 400; k++) {
-        hy_imu6_t s = cab_syn_sample(p, k);
-        if (hy_cab_wom_hit(p->rest, accel_of(&s), trig_mg)) break;
+        if (stream_hit(p, k, trig_mg)) break;
     }
     if (k == 400) return false;
     uint32_t i = k >= pre ? k - pre : 0;
@@ -296,7 +311,10 @@ static void test_model_odd_take_accept(void)
     float worst = 0.0f;
     for (int k = 0; k < HY_CAB_TAKES; k++) {
         TEST_ASSERT_TRUE(m.take[k].n > 0 && m.take[k].n <= takes[k].n);
-        TEST_ASSERT_TRUE(hy_cab_wom_hit(m.take[k].rest, accel_of(&m.take[k].s[0]), m.trig_mg));
+        /* trimmed to the first sample of the take at which the trigger fires */
+        uint16_t cut = (uint16_t)(takes[k].n - m.take[k].n);
+        TEST_ASSERT_TRUE(hy_cab_wom_hit_at(&takes[k], cut, m.trig_mg));
+        for (uint16_t i = 0; i < cut; i++) TEST_ASSERT_FALSE(hy_cab_wom_hit_at(&takes[k], i, m.trig_mg));
         float best = INFINITY;
         for (int j = 0; j < HY_CAB_TAKES; j++)
             if (j != k) best = fminf(best, hy_cab_dist(&m.take[j], &m.take[k]));
@@ -348,11 +366,11 @@ static void test_model_trim_trigger(void)
     TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(&m, takes, &odd));
     TEST_ASSERT_TRUE(m.trig_mg >= HY_CAB_TRIG_MIN_MG && m.trig_mg <= HY_CAB_TRIG_MAX_MG);
     uint16_t k = 0;
-    while (k < orig.n && !hy_cab_wom_hit(orig.rest, accel_of(&orig.s[k]), m.trig_mg)) k++;
+    while (k < orig.n && !hy_cab_wom_hit_at(&orig, k, m.trig_mg)) k++;
     TEST_ASSERT_TRUE(k >= lead);
     TEST_ASSERT_EQUAL_UINT16(orig.n - k, m.take[0].n);
     TEST_ASSERT_EQUAL_MEMORY(&orig.s[k], &m.take[0].s[0], sizeof orig.s[0]);
-    TEST_ASSERT_TRUE(hy_cab_wom_hit(m.take[0].rest, accel_of(&m.take[0].s[0]), m.trig_mg));
+    TEST_ASSERT_TRUE(k < orig.n);
 }
 
 /* Host time per hy_cab_match with 200-sample takes and capture. */

@@ -96,14 +96,13 @@ float hy_cab_dist(const hy_cab_seq_t *tmpl, const hy_cab_seq_t *cap)
 static bool any_hit(const hy_cab_seq_t *q, uint16_t thr)
 {
     for (uint16_t i = 0; i < q->n; i++) {
-        hy_accel_t a = { q->s[i].a[0], q->s[i].a[1], q->s[i].a[2] };
-        if (hy_cab_wom_hit(q->rest, a, thr)) return true;
+        if (hy_cab_wom_hit_at(q, i, thr)) return true;
     }
     return false;
 }
 
-/* The peak deviation from rest as the trigger sees it: the smallest threshold at which no sample fires. Found by
-   bisection on hy_cab_wom_hit, so it follows the trigger's comparison rule. */
+/* The peak as the trigger sees it: the smallest threshold at which no sample fires. Found by bisection on
+   hy_cab_wom_hit_at, so it follows the trigger's comparison rule (the change over one sensor sample period). */
 static uint16_t peak_mg(const hy_cab_seq_t *q)
 {
     if (!any_hit(q, 0)) return 0;
@@ -119,11 +118,7 @@ static uint16_t peak_mg(const hy_cab_seq_t *q)
 static void trim_to_trigger(hy_cab_seq_t *q, uint16_t trig)
 {
     uint16_t k = 0;
-    while (k < q->n) {
-        hy_accel_t a = { q->s[k].a[0], q->s[k].a[1], q->s[k].a[2] };
-        if (hy_cab_wom_hit(q->rest, a, trig)) break;
-        k++;
-    }
+    while (k < q->n && !hy_cab_wom_hit_at(q, k, trig)) k++;
     if (k == 0 || k == q->n) return;
     memmove(q->s, &q->s[k], (size_t)(q->n - k) * sizeof q->s[0]);
     q->n = (uint16_t)(q->n - k);

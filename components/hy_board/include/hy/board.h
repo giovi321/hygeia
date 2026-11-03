@@ -75,7 +75,9 @@ void      hy_board_set_user_key_isr_hook(void (*fn)(void));
 /* Light-sleep GPIO wakes, low level: touch INT (GPIO 11), RTC INT (GPIO 13), user key (GPIO 18). on: each pin that
    reads high is armed (a pin already low would wake at once: logged, not armed); the RTC INT interrupt is masked
    while armed; touch and key disarm their own pin from their ISR on the first edge (no level-interrupt storm).
-   off: every armed pin back to its falling-edge interrupt. Task context. */
+   While hy_board_imu_int_armed(), the IMU interrupt pin is armed too, on the level opposite the one recorded by
+   hy_board_imu_wom_arm (also when wake on motion is armed after this call, until off); its ISR disarms it the same
+   way. off: every armed pin back to its edge interrupt. Task context. */
 void      hy_board_sleep_wake_arm(bool on);
 bool      hy_board_rtc_int_low(void);                /* RTC INT (GPIO 13) reads low: an alarm is pending */
 
@@ -84,7 +86,9 @@ bool      hy_board_rtc_int_low(void);                /* RTC INT (GPIO 13) reads 
    auto-increment, little-endian data; CTRL2 (0x03) accel +-8 g, ODR about 125 Hz; gyro never enabled; left powered
    down (CTRL7 (0x08) = 0, CTRL1 bit 0 sensor disable = 1). Called from hy_board_init after the power gate. */
 esp_err_t hy_board_imu_init(void);
-/* on: CTRL1 bit 0 = 0, CTRL7 = 0x01 (accel only), first valid sample about 20 ms later. off: CTRL7 = 0, CTRL1 bit 0 = 1 */
+/* on: leaves wake on motion or the capture mode if active, CTRL1 bit 0 = 0, CTRL2 = +-8 g at about 125 Hz, CTRL5 = 0
+   (filters off), CTRL7 = 0x01 (accel only), first valid sample about 20 ms later. off: the same exit, then CTRL7 = 0,
+   CTRL1 bit 0 = 1 */
 esp_err_t hy_board_imu_power(bool on);
 /* One burst read of AX_L..AZ_H (0x35..0x3A), converted to milli-g (raw * 1000 / 4096) and mapped to the screen
    frame of hy_accel_t through HY_IMU_MAP (a per-axis source index and sign) and HY_IMU_MOUNT_QUARTER_TURNS (an
@@ -104,9 +108,38 @@ esp_err_t hy_board_imu_wait_settled(int timeout_ms, int16_t mg[3]);
    ESP_OK. Else the error: ESP_ERR_INVALID_STATE when the IMU is absent, ESP_ERR_TIMEOUT when no settled sample
    arrived within 300 ms. */
 esp_err_t hy_board_imu_sample_once(int16_t mg[3]);
+/* Wake on motion. Accel low-power mode at the lowest ODR with a period of at most 50 ms (21 Hz, CTRL2 0x2D), gyro
+   off, WoM at thr_mg (1 to 255, a 1-byte threshold on the change between successive samples on any axis; see
+   hy_cab_wom_hit) routed to the interrupt pin found at bring-up, initial level 0, 4 samples blanked; *rest = a
+   settled reading taken first (hy_board_imu_wait_settled, accel at 125 Hz). Records the pin level after arming.
+   The pin changes level on every WoM event and stays there; re-arming resets it. ESP_ERR_INVALID_STATE when the
+   IMU or the pin is unavailable, ESP_ERR_INVALID_ARG for thr_mg 0 or above 255. On any error the IMU is left
+   powered down. */
+esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3]);
+esp_err_t hy_board_imu_wom_disarm(void);          /* WoM off, sensor powered down (CTRL7 0, CTRL1 disable) */
+/* Accel +-8 g and gyro +-1024 dps at 112.1 Hz with the low-pass filters on (13.37 % of ODR, 15 Hz); the first gyro
+   value is valid about HY_CAB_GYRO_START_MS later (measured on the board; the datasheet's gyro turn-on time is
+   150 ms + 3 / ODR). Leaves wake on motion first. Ended by hy_board_imu_power(false). */
+esp_err_t hy_board_imu_capture_on(void);
+/* One burst read of accel and gyro (0x35..0x40), both through HY_IMU_MAP and the mount turn; gyro in deci-dps. */
+esp_err_t hy_board_imu_read6(int16_t a_mg[3], int16_t g_ddps[3]);
+/* ISR-context hook for the interrupt pin, called on every level change of the pin while wake on motion is armed;
+   NULL removes it. fn must be ISR safe. While armed, the pin also joins the light-sleep wake set in
+   hy_board_sleep_wake_arm, on the level opposite the recorded one. */
+void      hy_board_imu_int_hook(void (*fn)(void));
+bool      hy_board_imu_int_armed(void);
+
 #if CONFIG_HY_DEBUG_CONSOLE
-/* CTRL1, CTRL2, CTRL7 as read from the chip */
-esp_err_t hy_board_imu_regs(uint8_t out[3]);
+#define HY_IMU_REGS_N 8
+/* CTRL1, CTRL2, CTRL3, CTRL5, CTRL7, CTRL8, CTRL9, STATUSINT as read from the chip */
+esp_err_t hy_board_imu_regs(uint8_t out[HY_IMU_REGS_N]);
+/* One register read, for the bring-up commands. Reading STATUS1 (0x2F) clears the WoM flag and resets the pin. */
+esp_err_t hy_board_imu_reg(uint8_t reg, uint8_t *v);
+/* Interrupt routing for the next hy_board_imu_wom_arm: chip_pin 1 (INT1) or 2 (INT2) and the ESP32-S3 GPIO it is
+   wired to. Default INT1 on GPIO 17 until the board check settles it. ESP_ERR_INVALID_ARG for another chip pin or
+   a GPIO that is not 17 or 21, ESP_ERR_INVALID_STATE while armed. */
+esp_err_t hy_board_imu_int_select(uint8_t chip_pin, int gpio);
+void      hy_board_imu_int_route(uint8_t *chip_pin, int *gpio);
 #endif
 
 #if CONFIG_HY_DEBUG_CONSOLE

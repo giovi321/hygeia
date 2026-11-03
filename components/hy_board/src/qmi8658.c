@@ -1,23 +1,38 @@
-/* QMI8658 accelerometer at 0x6b on the shared bus. Accel only, +-8 g, about 125 Hz, left powered down.
+/* QMI8658 at 0x6b on the shared bus. Accel only (+-8 g, about 125 Hz), wake on motion, or accel and gyro for a
+ * movement capture; left powered down.
  *
- * Register facts, cross-checked against two public references: SensorLib (MIT, lewisxhe/SensorLib, QMI8658 register
- * and driver sources) and the Waveshare qmi8658 component (Apache 2.0). No code is copied.
+ * Register facts, cross-checked against the QMI8658A datasheet (QST, document 13-52-25 Rev A, 2022) and two public
+ * references: SensorLib (MIT, lewisxhe/SensorLib, src/SensorQMI8658.hpp) and the Waveshare qmi8658 component
+ * (Apache 2.0). No code is copied.
  *   WHO_AM_I 0x00 = 0x05                       both
  *   CTRL1 0x02 bit 6 address auto-increment    both (Waveshare writes 0x60, which includes it)
  *   CTRL1 bit 5 data endianness (1 = big)      SensorLib; this driver keeps it 0 and decodes little endian
+ *   CTRL1 bit 4 INT2 output, bit 3 INT1 output (0 = high-Z, 1 = push-pull)   datasheet table 22, SensorLib enableINT
  *   CTRL1 bit 0 sensor disable                 SensorLib; internal oscillator off
  *   CTRL2 0x03 bits 6..4 range (2 = +-8 g)     both
- *   CTRL2 bits 3..0 ODR (6 = about 125 Hz accel only) both
- *   CTRL7 0x08 bit 0 accel enable              both
+ *   CTRL2 bits 3..0 ODR: 6 = 125 Hz accel only, 112.1 Hz with the gyro; 13 = 21 Hz low power (gyro off only)
+ *                                              datasheet table 22, SensorLib AccelODR
+ *   CTRL3 0x04 bits 6..4 gyro range (6 = +-1024 dps), bits 3..0 ODR (6 = 112.1 Hz)   datasheet table 22, SensorLib
+ *   CTRL5 0x06 bit 4 gyro LPF on, bits 6..5 its mode; bit 0 accel LPF on, bits 2..1 its mode; mode 3 = 13.37 % of
+ *                                              ODR    datasheet table 22, SensorLib configAccelerometer/configGyroscope
+ *   CTRL7 0x08 bit 0 accel enable, bit 1 gyro enable    both
+ *   CTRL8 0x09 bit 7 = 1: CTRL9 handshake on STATUSINT bit 7 instead of INT1   datasheet table 22 and 6.2
+ *   CTRL9 0x0A command; done = STATUSINT 0x2D bit 7; host acknowledges with 0x00, the bit then clears
+ *                                              datasheet 5.10.1 and 5.10.4, SensorLib writeCommand
+ *   WoM setting command 0x08: CAL1_L 0x0B threshold (1 mg, 0 = WoM off), CAL1_H 0x0C bit 7 initial level, bit 6
+ *     INT2 (0 = INT1), bits 5..0 blanking samples     datasheet 12.2 table 39, SensorLib configWakeOnMotion
+ *   STATUS1 0x2F bit 2 WoM; reading STATUS1 clears it and resets the pin to the initial level  datasheet 12.4
  *   RESET 0x60 <- 0xB0, RST_RESULT 0x4D = 0x80 SensorLib
- *   AX_L..AZ_H 0x35..0x3A, 6-byte burst       both
+ *   AX_L..AZ_H 0x35..0x3A, GX_L..GZ_H 0x3B..0x40, burst      both
  *   STATUS0 0x2E bit 0 accel data available   SensorLib (STATUS0_ACCEL_AVAIL; getDataReady masks 0x01 for accel only)
- *   +-8 g scale 4096 LSB/g                     both */
+ *   +-8 g scale 4096 LSB/g; +-1024 dps scale 32 LSB/dps      both */
 #include "hy/board.h"
 #include "hy/motion.h"
+#include "board_imu_int.h"
 
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -28,9 +43,17 @@ static const char *TAG = "imu";
 #define QMI_REG_WHOAMI    0x00
 #define QMI_REG_CTRL1     0x02
 #define QMI_REG_CTRL2     0x03
+#define QMI_REG_CTRL3     0x04
+#define QMI_REG_CTRL5     0x06
 #define QMI_REG_CTRL7     0x08
+#define QMI_REG_CTRL8     0x09
+#define QMI_REG_CTRL9     0x0A
+#define QMI_REG_CAL1_L    0x0B
+#define QMI_REG_CAL1_H    0x0C
+#define QMI_REG_STATUSINT 0x2D
 #define QMI_REG_STATUS0   0x2E
 #define QMI_STATUS0_ACCEL 0x01
+#define QMI_STATUSINT_DONE 0x80
 #define QMI_REG_RST_RES   0x4D
 #define QMI_REG_RESET     0x60
 #define QMI_REG_AX_L      0x35
@@ -38,14 +61,30 @@ static const char *TAG = "imu";
 #define QMI_RESET_CMD     0xB0
 #define QMI_RST_RES_OK    0x80
 #define QMI_CTRL1_AI_LE   0x40 /* address auto-increment, little endian, sensor enabled */
+#define QMI_CTRL1_INT1_EN 0x08
+#define QMI_CTRL1_INT2_EN 0x10
 #define QMI_CTRL1_DISABLE 0x01
-#define QMI_CTRL2_8G_125  0x26 /* range +-8 g (2 << 4) | ODR 125 Hz (6) */
+#define QMI_CTRL2_8G_125  0x26 /* range +-8 g (2 << 4) | ODR 125 Hz, 112.1 Hz with the gyro (6) */
+#define QMI_CTRL2_8G_LP21 0x2D /* range +-8 g | low-power ODR 21 Hz (13): period 47.6 ms, 42 uA typical */
+#define QMI_CTRL3_1024_112 0x66 /* range +-1024 dps (6 << 4) | ODR 112.1 Hz (6) */
+#define QMI_CTRL5_LPF_15HZ 0x77 /* gyro LPF on, mode 3; accel LPF on, mode 3: 13.37 % of 112.1 Hz = 15 Hz */
 #define QMI_CTRL7_ACCEL   0x01
+#define QMI_CTRL7_ACC_GYR 0x03
+#define QMI_CTRL8_HS_STAT 0x80 /* CTRL9 handshake on STATUSINT bit 7, INT1 untouched */
+#define QMI_CMD_ACK       0x00
+#define QMI_CMD_WOM       0x08
+#define QMI_CAL1H_INT2    0x40
+#define QMI_WOM_BLANK     4    /* samples ignored after arming: 190 ms at 21 Hz, past the 3 / ODR filter settling */
+#define QMI_WOM_THR_MAX   255  /* CAL1_L is one byte */
 #define QMI_LSB_PER_G     4096
+#define QMI_LSB_PER_DPS   32
 #define QMI_IO_TIMEOUT_MS 50
+#define QMI_CMD_TIMEOUT_MS 100
 #define QMI_SETTLE_MAX_MS 300
+#define QMI_WOM_SETTLE_MS 500
 
-/* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. The sensor is mounted mirrored: y is negated */
+/* Screen frame <- sensor axes: out[i] = sign * raw[src], applied first. The sensor is mounted mirrored: y is negated.
+ * The gyro uses the same map (the features need teach and live to agree, not a handedness convention). */
 static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
     { 0, 1 }, { 1, -1 }, { 2, 1 },
 };
@@ -60,8 +99,15 @@ static const struct { uint8_t src; int8_t sign; } HY_IMU_MAP[3] = {
  * (0, +940) top bar up and (-985, -104) left edge up, so the mount is mirrored (y negated above) and not turned. */
 #define HY_IMU_MOUNT_QUARTER_TURNS 0
 
+typedef enum { M_OFF, M_ACCEL, M_WOM, M_CAPTURE } qmi_mode_t;
+
 static i2c_master_dev_handle_t s_dev;
 static esp_err_t s_state = ESP_ERR_INVALID_STATE; /* ESP_OK after a good init, else what every call returns */
+static qmi_mode_t s_mode = M_OFF;
+/* Interrupt routing for wake on motion: chip pin 1 (INT1) or 2 (INT2) and its GPIO. INT1 on GPIO 17 until the board
+ * check settles it; INT2 is expected on GPIO 21. */
+static uint8_t s_int_chip = 1;
+static int s_int_gpio = 17;
 
 static esp_err_t reg_write(uint8_t reg, uint8_t v)
 {
@@ -79,6 +125,70 @@ static void power_down_best_effort(void)
 {
     reg_write(QMI_REG_CTRL7, 0x00);
     reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE);
+}
+
+/* STATUSINT bit 7 reaches want within QMI_CMD_TIMEOUT_MS. Fine polls for the first 5 ms, then one per tick. */
+static esp_err_t cmd_done_wait(bool want)
+{
+    int64_t t0 = esp_timer_get_time();
+    for (;;) {
+        uint8_t st = 0;
+        esp_err_t err = reg_read(QMI_REG_STATUSINT, &st, 1);
+        if (err == ESP_OK && ((st & QMI_STATUSINT_DONE) != 0) == want) {
+            return ESP_OK;
+        }
+        int64_t us = esp_timer_get_time() - t0;
+        if (us >= QMI_CMD_TIMEOUT_MS * 1000) {
+            return err != ESP_OK ? err : ESP_ERR_TIMEOUT;
+        }
+        if (us < 5000) {
+            esp_rom_delay_us(200);
+        } else {
+            vTaskDelay(1);
+        }
+    }
+}
+
+/* CTRL9 protocol: write the command, wait for CmdDone, acknowledge, wait for CmdDone to clear */
+static esp_err_t ctrl9(uint8_t cmd)
+{
+    esp_err_t err = reg_write(QMI_REG_CTRL8, QMI_CTRL8_HS_STAT);
+    if (err == ESP_OK) {
+        err = reg_write(QMI_REG_CTRL9, cmd);
+    }
+    if (err == ESP_OK) {
+        err = cmd_done_wait(true);
+    }
+    if (err == ESP_OK) {
+        err = reg_write(QMI_REG_CTRL9, QMI_CMD_ACK);
+    }
+    if (err == ESP_OK) {
+        err = cmd_done_wait(false);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ctrl9 0x%02x: %s", cmd, esp_err_to_name(err));
+    }
+    return err;
+}
+
+/* Out of wake on motion or the capture mode: sensors off, WoM threshold 0 (pins back to normal), outputs high-Z.
+ * The oscillator stays on. */
+static esp_err_t mode_exit(void)
+{
+    esp_err_t err = ESP_OK;
+    if (s_mode == M_WOM) {
+        board_imu_int_detach();   /* first: the exit must not reach the hook */
+        if ((err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK && (err = reg_write(QMI_REG_CAL1_L, 0)) == ESP_OK &&
+            (err = reg_write(QMI_REG_CAL1_H, 0)) == ESP_OK && (err = ctrl9(QMI_CMD_WOM)) == ESP_OK) {
+            err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE);
+        }
+    } else if (s_mode == M_CAPTURE) {
+        err = reg_write(QMI_REG_CTRL7, 0x00);
+    }
+    if (err == ESP_OK) {
+        s_mode = M_OFF;
+    }
+    return err;
 }
 
 esp_err_t hy_board_imu_init(void)
@@ -121,10 +231,12 @@ esp_err_t hy_board_imu_init(void)
     if (rr != QMI_RST_RES_OK) {
         ESP_LOGW(TAG, "reset result 0x%02x, expected 0x%02x", rr, QMI_RST_RES_OK);
     }
+    s_mode = M_OFF;
 
     if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_125)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL8, QMI_CTRL8_HS_STAT)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE)) == ESP_OK) {
         s_state = ESP_OK;
         ESP_LOGI(TAG, "ready: accel +-8 g, 125 Hz, powered down");
@@ -141,20 +253,57 @@ esp_err_t hy_board_imu_power(bool on)
     if (s_state != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    esp_err_t err;
+    esp_err_t err = mode_exit();
     if (on) {
-        if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) != ESP_OK) {
-            return err;
-        }
-        if ((err = reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACCEL)) != ESP_OK) {
+        if (err != ESP_OK || (err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) != ESP_OK) {
             power_down_best_effort();
             return err;
         }
+        if ((err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_125)) != ESP_OK ||
+            (err = reg_write(QMI_REG_CTRL5, 0x00)) != ESP_OK ||
+            (err = reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACCEL)) != ESP_OK) {
+            power_down_best_effort();
+            return err;
+        }
+        s_mode = M_ACCEL;
         return ESP_OK;
     }
     esp_err_t e1 = reg_write(QMI_REG_CTRL7, 0x00);
     esp_err_t e2 = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE);
-    return e1 != ESP_OK ? e1 : e2;
+    s_mode = M_OFF;
+    return err != ESP_OK ? err : e1 != ESP_OK ? e1 : e2;
+}
+
+static void apply_map(const int16_t r[3], int16_t out[3])
+{
+    int16_t m[3];
+    for (int i = 0; i < 3; i++) {
+        m[i] = (int16_t)(HY_IMU_MAP[i].sign * r[HY_IMU_MAP[i].src]);
+    }
+    switch (HY_IMU_MOUNT_QUARTER_TURNS & 3) {
+    case 0:
+        out[0] = m[0];
+        out[1] = m[1];
+        break;
+    case 1:
+        out[0] = (int16_t)-m[1];
+        out[1] = m[0];
+        break;
+    case 2:
+        out[0] = (int16_t)-m[0];
+        out[1] = (int16_t)-m[1];
+        break;
+    default:
+        out[0] = m[1];
+        out[1] = (int16_t)-m[0];
+        break;
+    }
+    out[2] = m[2];
+}
+
+static int16_t le16(const uint8_t *b)
+{
+    return (int16_t)((uint16_t)b[0] | ((uint16_t)b[1] << 8));
 }
 
 esp_err_t hy_board_imu_read_raw(int16_t mg[3])
@@ -168,8 +317,7 @@ esp_err_t hy_board_imu_read_raw(int16_t mg[3])
         return err;
     }
     for (int i = 0; i < 3; i++) {
-        int16_t raw = (int16_t)((uint16_t)b[2 * i] | ((uint16_t)b[2 * i + 1] << 8));
-        mg[i] = (int16_t)((int32_t)raw * 1000 / QMI_LSB_PER_G);
+        mg[i] = (int16_t)((int32_t)le16(&b[2 * i]) * 1000 / QMI_LSB_PER_G);
     }
     return ESP_OK;
 }
@@ -181,29 +329,27 @@ esp_err_t hy_board_imu_read(int16_t mg[3])
     if (err != ESP_OK) {
         return err;
     }
-    int16_t m[3];
+    apply_map(r, mg);
+    return ESP_OK;
+}
+
+esp_err_t hy_board_imu_read6(int16_t a_mg[3], int16_t g_ddps[3])
+{
+    if (s_state != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t b[12];
+    esp_err_t err = reg_read(QMI_REG_AX_L, b, sizeof b);
+    if (err != ESP_OK) {
+        return err;
+    }
+    int16_t a[3], g[3];
     for (int i = 0; i < 3; i++) {
-        m[i] = (int16_t)(HY_IMU_MAP[i].sign * r[HY_IMU_MAP[i].src]);
+        a[i] = (int16_t)((int32_t)le16(&b[2 * i]) * 1000 / QMI_LSB_PER_G);
+        g[i] = (int16_t)((int32_t)le16(&b[6 + 2 * i]) * 10 / QMI_LSB_PER_DPS);
     }
-    switch (HY_IMU_MOUNT_QUARTER_TURNS & 3) {
-    case 0:
-        mg[0] = m[0];
-        mg[1] = m[1];
-        break;
-    case 1:
-        mg[0] = (int16_t)-m[1];
-        mg[1] = m[0];
-        break;
-    case 2:
-        mg[0] = (int16_t)-m[0];
-        mg[1] = (int16_t)-m[1];
-        break;
-    default:
-        mg[0] = m[1];
-        mg[1] = (int16_t)-m[0];
-        break;
-    }
-    mg[2] = m[2];
+    apply_map(a, a_mg);
+    apply_map(g, g_ddps);
     return ESP_OK;
 }
 
@@ -274,19 +420,114 @@ esp_err_t hy_board_imu_sample_once(int16_t mg[3])
     return err;
 }
 
-#if CONFIG_HY_DEBUG_CONSOLE
-esp_err_t hy_board_imu_regs(uint8_t out[3])
+/* Datasheet figure 25: sensors off, accel ODR and range, threshold and routing, the WoM command, accel on */
+esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3])
+{
+    if (s_state != ESP_OK || s_int_gpio < 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (thr_mg == 0 || thr_mg > QMI_WOM_THR_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = hy_board_imu_power(true);
+    if (err != ESP_OK) {
+        return err;
+    }
+    int16_t r[3];
+    err = hy_board_imu_wait_settled(QMI_WOM_SETTLE_MS, r);
+    uint8_t cal1h = (uint8_t)((s_int_chip == 2 ? QMI_CAL1H_INT2 : 0) | QMI_WOM_BLANK);   /* initial level 0 */
+    uint8_t ctrl1 = QMI_CTRL1_AI_LE | (s_int_chip == 2 ? QMI_CTRL1_INT2_EN : QMI_CTRL1_INT1_EN);
+    if (err == ESP_OK && (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_LP21)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CAL1_L, (uint8_t)thr_mg)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CAL1_H, cal1h)) == ESP_OK && (err = ctrl9(QMI_CMD_WOM)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL1, ctrl1)) == ESP_OK) {
+        s_mode = M_WOM;   /* from here a failure needs the WoM exit */
+        err = reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACCEL);
+    }
+    int level = 0;
+    if (err == ESP_OK) {
+        err = board_imu_int_attach(s_int_gpio, &level);   /* after the output is enabled: the level is driven */
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "wom arm: %s", esp_err_to_name(err));
+        hy_board_imu_power(false);
+        return err;
+    }
+    for (int i = 0; i < 3; i++) {
+        rest[i] = r[i];
+    }
+    ESP_LOGD(TAG, "wom: armed %u mg, INT%u gpio %d level %d", (unsigned)thr_mg, (unsigned)s_int_chip, s_int_gpio,
+             level);
+    return ESP_OK;
+}
+
+esp_err_t hy_board_imu_wom_disarm(void)
+{
+    return hy_board_imu_power(false);
+}
+
+esp_err_t hy_board_imu_capture_on(void)
 {
     if (s_state != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    esp_err_t err = reg_read(QMI_REG_CTRL1, &out[0], 1);
-    if (err == ESP_OK) {
-        err = reg_read(QMI_REG_CTRL2, &out[1], 1);
+    esp_err_t err = mode_exit();
+    if (err == ESP_OK && (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_125)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL3, QMI_CTRL3_1024_112)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL5, QMI_CTRL5_LPF_15HZ)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL7, QMI_CTRL7_ACC_GYR)) == ESP_OK) {
+        s_mode = M_CAPTURE;
+        return ESP_OK;
     }
-    if (err == ESP_OK) {
-        err = reg_read(QMI_REG_CTRL7, &out[2], 1);
+    power_down_best_effort();
+    s_mode = M_OFF;
+    return err;
+}
+
+#if CONFIG_HY_DEBUG_CONSOLE
+esp_err_t hy_board_imu_regs(uint8_t out[HY_IMU_REGS_N])
+{
+    if (s_state != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    static const uint8_t regs[HY_IMU_REGS_N] = {
+        QMI_REG_CTRL1, QMI_REG_CTRL2, QMI_REG_CTRL3, QMI_REG_CTRL5,
+        QMI_REG_CTRL7, QMI_REG_CTRL8, QMI_REG_CTRL9, QMI_REG_STATUSINT,
+    };
+    esp_err_t err = ESP_OK;
+    for (int i = 0; i < HY_IMU_REGS_N && err == ESP_OK; i++) {
+        err = reg_read(regs[i], &out[i], 1);
     }
     return err;
+}
+
+esp_err_t hy_board_imu_reg(uint8_t reg, uint8_t *v)
+{
+    if (s_state != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return reg_read(reg, v, 1);
+}
+
+esp_err_t hy_board_imu_int_select(uint8_t chip_pin, int gpio)
+{
+    if ((chip_pin != 1 && chip_pin != 2) || (gpio != 17 && gpio != 21)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_mode == M_WOM) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_int_chip = chip_pin;
+    s_int_gpio = gpio;
+    return ESP_OK;
+}
+
+void hy_board_imu_int_route(uint8_t *chip_pin, int *gpio)
+{
+    *chip_pin = s_int_chip;
+    *gpio = s_int_gpio;
 }
 #endif

@@ -170,18 +170,24 @@ static void cmd_shake(const char *args) { (void)args; hy_ui_debug_shake(); }
 static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
 static void cmd_imu(const char *args)
 {
-    /* The motion task owns the IMU: it prints the samples from its own reads. `imu regs` is a direct register read. */
+    /* The motion task owns the IMU: it prints the samples from its own reads. `imu regs` is a direct register read;
+       wom, cap and pin hold the motion task off the IMU while they run. */
+    if (strncmp(args, "wom", 3) == 0 || strncmp(args, "cap", 3) == 0 || strncmp(args, "pin", 3) == 0) {
+        hy_ui_debug_imu(args);
+        return;
+    }
     bool raw = strncmp(args, "raw", 3) == 0;
     int secs = 0;
     bool rec = sscanf(args, "rec %d", &secs) == 1;
     if (strncmp(args, "regs", 4) == 0) {
-        uint8_t r[3];
+        uint8_t r[HY_IMU_REGS_N];
         esp_err_t rerr = hy_board_imu_regs(r);
         if (rerr != ESP_OK) {
             ESP_LOGE(TAG, "imu regs: %s", esp_err_to_name(rerr));
             return;
         }
-        printf("imu regs: CTRL1=0x%02x CTRL2=0x%02x CTRL7=0x%02x\n", r[0], r[1], r[2]);
+        printf("imu regs: CTRL1=0x%02x CTRL2=0x%02x CTRL3=0x%02x CTRL5=0x%02x CTRL7=0x%02x CTRL8=0x%02x CTRL9=0x%02x "
+               "STATUSINT=0x%02x\n", r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
         return;
     }
     if (strncmp(args, "rec", 3) == 0 && (!rec || secs < 1 || secs > 120)) {

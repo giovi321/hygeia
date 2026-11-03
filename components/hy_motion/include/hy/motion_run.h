@@ -35,6 +35,9 @@ void hy_motion_debug(const char *args);
 /* Console task. Prints samples from the motion task's own reads: samples 10 for `imu` and `imu raw` (raw: sensor
    frame), rec: raw lines `imu,<ms>,x,y,z`. Prints "imu: screen off" and touches nothing while motion is disabled. */
 void hy_motion_imu(bool raw, bool rec, int samples);
+/* Console task. on: the task powers the IMU down and keeps it off, so a bring-up command can drive the IMU itself;
+   returns false when it was still powered after 500 ms. off: back to hy_motion_enable's state. */
+bool hy_motion_debug_hold(bool on);
 #endif
 
 #ifdef __cplusplus

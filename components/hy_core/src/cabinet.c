@@ -43,10 +43,39 @@ uint16_t hy_cab_wom_mg(uint8_t sens)
     return mg[sens - 1];
 }
 
-bool hy_cab_wom_hit(hy_accel_t rest, hy_accel_t a, uint16_t thr_mg)
+bool hy_cab_wom_hit(hy_accel_t prev, hy_accel_t a, uint16_t thr_mg)
 {
-    return iabs32((int32_t)a.x - rest.x) > thr_mg || iabs32((int32_t)a.y - rest.y) > thr_mg ||
-           iabs32((int32_t)a.z - rest.z) > thr_mg;
+    return iabs32((int32_t)a.x - prev.x) > thr_mg || iabs32((int32_t)a.y - prev.y) > thr_mg ||
+           iabs32((int32_t)a.z - prev.z) > thr_mg;
+}
+
+#if HY_CAB_WOM_PERIOD_MS < 2 * STEP_MS || HY_CAB_WOM_PERIOD_MS > 3 * STEP_MS
+#error "hy_cab_wom_prev interpolates between the samples 2 and 3 steps back"
+#endif
+
+/* b2 + (b3 - b2) * (period - 2 steps) / 1 step, rounded to the nearest mg */
+static int16_t wom_lerp(int16_t b2, int16_t b3)
+{
+    int32_t num = ((int32_t)b3 - b2) * (HY_CAB_WOM_PERIOD_MS - 2 * STEP_MS);
+    int32_t q = (num >= 0 ? num + STEP_MS / 2 : num - STEP_MS / 2) / STEP_MS;
+    return (int16_t)(b2 + q);
+}
+
+hy_accel_t hy_cab_wom_prev(hy_accel_t back2, hy_accel_t back3)
+{
+    return (hy_accel_t){ wom_lerp(back2.x, back3.x), wom_lerp(back2.y, back3.y), wom_lerp(back2.z, back3.z) };
+}
+
+static hy_accel_t seq_accel(const hy_cab_seq_t *q, int32_t i)
+{
+    if (i < 0) return q->rest;
+    return (hy_accel_t){ q->s[i].a[0], q->s[i].a[1], q->s[i].a[2] };
+}
+
+bool hy_cab_wom_hit_at(const hy_cab_seq_t *q, uint16_t i, uint16_t thr_mg)
+{
+    hy_accel_t prev = hy_cab_wom_prev(seq_accel(q, (int32_t)i - 2), seq_accel(q, (int32_t)i - 3));
+    return hy_cab_wom_hit(prev, seq_accel(q, i), thr_mg);
 }
 
 void hy_cab_cap_start(hy_cab_cap_t *c, hy_accel_t rest, bool has_gyro, uint32_t t_ms)

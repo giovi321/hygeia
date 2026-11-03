@@ -45,6 +45,7 @@ static hy_rot_t s_applied;     /* the rotation the UI last confirmed through hy_
 static uint32_t s_gen;         /* bumped at every disable: drops callbacks queued before it */
 #if CONFIG_HY_DEBUG_CONSOLE
 static int64_t s_dbg_arm_until_ms;
+static bool s_dbg_hold;         /* hy_motion_debug_hold: the task keeps the IMU off whatever s_want says */
 static struct { int remaining; bool raw, rec; } s_ireq;
 static SemaphoreHandle_t s_idone;
 #endif
@@ -188,6 +189,9 @@ static void motion_task(void *arg)
 #endif
         portENTER_CRITICAL(&s_mux);
         want = s_want;
+#if CONFIG_HY_DEBUG_CONSOLE
+        want = want && !s_dbg_hold;
+#endif
         lock = s_lock;
         arm = s_arm;
         arm_seq = s_arm_seq;
@@ -443,6 +447,21 @@ void hy_motion_debug(const char *args)
     portEXIT_CRITICAL(&s_mux);
     ESP_LOGI(TAG, "state: enabled %d imu on %d lock %d arm %d orient %u deg, stack free min %u bytes", want,
              s_powered, lock, arm, (unsigned)s_orient_cur * 90, (unsigned)uxTaskGetStackHighWaterMark(s_task));
+}
+
+bool hy_motion_debug_hold(bool on)
+{
+    portENTER_CRITICAL(&s_mux);
+    s_dbg_hold = on;
+    portEXIT_CRITICAL(&s_mux);
+    wake_task();
+    if (!on) {
+        return true;
+    }
+    for (int i = 0; i < 50 && s_powered; i++) {   /* the task powers the IMU down on its next pass */
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return !s_powered;
 }
 
 void hy_motion_imu(bool raw, bool rec, int samples)

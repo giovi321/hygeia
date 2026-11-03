@@ -7,14 +7,19 @@
 #include <string.h>
 #include <time.h>
 
+#include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "hy/actions.h"
 #include "hy/board.h"
 #include "hy/clock.h"
 #include "hy/gap.h"
+#include "hy/motion_run.h"
 #include "hy/occ.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
@@ -1062,5 +1067,173 @@ void hy_ui_debug_net(const char *arg) { post(J_NET, arg); }
 void hy_ui_debug_pair(const char *arg) { post(J_PAIR, arg); }
 void hy_ui_debug_hit(const char *arg) { post(J_HIT, arg); }
 void hy_ui_debug_upd(const char *arg) { post(J_UPD, arg); }
+
+/* ---- IMU bring-up: runs in the console task, with the motion task held off the IMU ---- */
+
+#define IMU_DBG_MAX_S     30
+#define IMU_REG_STATUSINT 0x2D   /* bit 1 follows the chip's INT1 level, bit 0 INT2 (SyncSample off) */
+#define IMU_REG_STATUS1   0x2F   /* bit 2 WoM; reading it resets the pin to its initial level */
+
+static volatile uint32_t s_imu_edges;
+
+static void IRAM_ATTR imu_dbg_hook(void)
+{
+    s_imu_edges = s_imu_edges + 1;
+}
+
+static void imu_dbg_print_regs(const char *what)
+{
+    uint8_t r[HY_IMU_REGS_N];
+    esp_err_t err = hy_board_imu_regs(r);
+    if (err != ESP_OK) {
+        printf("imu %s: regs %s\n", what, esp_err_to_name(err));
+        return;
+    }
+    printf("imu %s: CTRL1=0x%02x CTRL2=0x%02x CTRL3=0x%02x CTRL5=0x%02x CTRL7=0x%02x CTRL8=0x%02x CTRL9=0x%02x "
+           "STATUSINT=0x%02x\n", what, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
+}
+
+static void imu_wom(int mg)
+{
+    uint8_t chip;
+    int gpio;
+    hy_board_imu_int_route(&chip, &gpio);
+    int other = gpio == 17 ? 21 : 17;
+    /* The pin not routed: input with a pull-down, so a level change there means the chip drives it */
+    gpio_config_t gc = {
+        .pin_bit_mask = 1ULL << other,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&gc);
+    s_imu_edges = 0;
+    hy_board_imu_int_hook(imu_dbg_hook);
+    int16_t rest[3];
+    esp_err_t err = hy_board_imu_wom_arm((uint16_t)mg, rest);
+    if (err != ESP_OK) {
+        printf("imu wom: arm %s\n", esp_err_to_name(err));
+        imu_dbg_print_regs("wom");
+        hy_board_imu_int_hook(NULL);
+        gpio_reset_pin((gpio_num_t)other);
+        return;
+    }
+    printf("imu wom: armed %d mg on INT%u gpio %d, rest %d %d %d mg, armed %d, %d s\n", mg, (unsigned)chip, gpio,
+           rest[0], rest[1], rest[2], hy_board_imu_int_armed(), IMU_DBG_MAX_S);
+    imu_dbg_print_regs("wom");
+    int64_t t0 = esp_timer_get_time();
+    int l17 = -1, l21 = -1, c1 = -1, c2 = -1;
+    uint32_t seen = 0, changes = 0;
+    for (;;) {
+        int64_t t_ms = (esp_timer_get_time() - t0) / 1000;
+        uint8_t si = 0;
+        esp_err_t serr = hy_board_imu_reg(IMU_REG_STATUSINT, &si);
+        int n17 = gpio_get_level(GPIO_NUM_17), n21 = gpio_get_level(GPIO_NUM_21);
+        int n1 = serr == ESP_OK ? (si >> 1) & 1 : -1, n2 = serr == ESP_OK ? si & 1 : -1;
+        uint32_t e = s_imu_edges;
+        if (n17 != l17 || n21 != l21 || n1 != c1 || n2 != c2 || e != seen) {
+            if (l17 >= 0 && (n17 != l17 || n21 != l21)) {
+                changes++;
+            }
+            printf("imu wom: t=%lld ms gpio17=%d gpio21=%d chip INT1=%d INT2=%d edges=%u\n", (long long)t_ms, n17,
+                   n21, n1, n2, (unsigned)e);
+            l17 = n17;
+            l21 = n21;
+            c1 = n1;
+            c2 = n2;
+            seen = e;
+        }
+        if (t_ms >= IMU_DBG_MAX_S * 1000) {
+            break;
+        }
+        vTaskDelay(1);
+    }
+    uint8_t s1 = 0;
+    err = hy_board_imu_reg(IMU_REG_STATUS1, &s1);
+    printf("imu wom: STATUS1=0x%02x (%s) WoM %d; after the read gpio17=%d gpio21=%d\n", s1, esp_err_to_name(err),
+           (s1 >> 2) & 1, gpio_get_level(GPIO_NUM_17), gpio_get_level(GPIO_NUM_21));
+    hy_board_imu_int_hook(NULL);
+    err = hy_board_imu_wom_disarm();
+    gpio_reset_pin((gpio_num_t)other);
+    printf("imu wom: done, %u level changes seen by polling (10 ms), %u edges seen by the interrupt, disarm %s\n",
+           (unsigned)changes, (unsigned)s_imu_edges, esp_err_to_name(err));
+}
+
+static void imu_cap(int secs)
+{
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t err = hy_board_imu_capture_on();
+    if (err != ESP_OK) {
+        printf("imu cap: %s\n", esp_err_to_name(err));
+        return;
+    }
+    int64_t first_gyro_ms = -1;
+    int n = 0, fails = 0;
+    TickType_t last = xTaskGetTickCount();
+    for (int i = 0; i < secs * 50; i++) {
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(20));
+        int16_t a[3], g[3];
+        if (hy_board_imu_read6(a, g) != ESP_OK) {
+            fails++;
+            continue;
+        }
+        int64_t t_ms = (esp_timer_get_time() - t0) / 1000;
+        if (first_gyro_ms < 0 && (g[0] || g[1] || g[2])) {
+            first_gyro_ms = t_ms;
+        }
+        printf("imu6,%lld,%d,%d,%d,%d,%d,%d\n", (long long)t_ms, a[0], a[1], a[2], g[0], g[1], g[2]);
+        n++;
+    }
+    err = hy_board_imu_power(false);
+    printf("imu cap: %d samples, %d read failures, first gyro value off zero at %lld ms, power down %s\n", n, fails,
+           (long long)first_gyro_ms, esp_err_to_name(err));
+}
+
+static void imu_pin(const char *arg)
+{
+    unsigned chip = 0;
+    int gpio = -1;
+    int got = sscanf(arg, "%u %d", &chip, &gpio);
+    if (got >= 1) {
+        if (got == 1) {
+            gpio = chip == 2 ? 21 : 17;
+        }
+        esp_err_t err = hy_board_imu_int_select((uint8_t)chip, gpio);
+        if (err != ESP_OK) {
+            printf("imu pin: %s (usage: imu pin [1|2 [17|21]], not while armed)\n", esp_err_to_name(err));
+            return;
+        }
+    }
+    uint8_t c;
+    hy_board_imu_int_route(&c, &gpio);
+    printf("imu pin: wake on motion on INT%u, gpio %d\n", (unsigned)c, gpio);
+}
+
+void hy_ui_debug_imu(const char *arg)
+{
+    int v = 0;
+    bool wom = sscanf(arg, "wom %d", &v) == 1 && v >= 1 && v <= 255;
+    bool cap = sscanf(arg, "cap %d", &v) == 1 && v >= 1 && v <= IMU_DBG_MAX_S;
+    if (strncmp(arg, "pin", 3) == 0) {
+        imu_pin(arg + 3);
+        return;
+    }
+    if (!wom && !cap) {
+        printf("usage: imu wom <1..255 mg> | imu cap <1..%d s> | imu pin [1|2 [17|21]]\n", IMU_DBG_MAX_S);
+        return;
+    }
+    if (!hy_motion_debug_hold(true)) {
+        printf("imu: the motion task still has the IMU powered\n");
+        hy_motion_debug_hold(false);
+        return;
+    }
+    if (wom) {
+        imu_wom(v);
+    } else {
+        imu_cap(v);
+    }
+    hy_motion_debug_hold(false);
+}
 
 #endif /* CONFIG_HY_DEBUG_CONSOLE */

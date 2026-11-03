@@ -31,9 +31,18 @@ typedef struct { float gv, gh, av, ah; } hy_cab_feat_t;      /* dps, dps, mg, mg
    !has_gyro are 0. A rest vector shorter than 1 mg gives all zero rows. out has q->n rows. */
 void     hy_cab_features(const hy_cab_seq_t *q, hy_cab_feat_t *out);
 uint16_t hy_cab_wom_mg(uint8_t sens);                        /* 250, 160, 100, 64, 40; out of range: 100 */
-/* Emulates the sensor's wake-on-motion decision for one accel sample, per the rule recorded from the datasheet
-   (initially: any axis differs from rest by more than thr_mg). */
-bool     hy_cab_wom_hit(hy_accel_t rest, hy_accel_t a, uint16_t thr_mg);
+/* The sensor's sample period in wake on motion: low-power accel at 21 Hz (47.6 ms) */
+#define HY_CAB_WOM_PERIOD_MS    48
+/* The sensor's wake-on-motion decision for one sample: true when any axis of a differs from prev, the sensor's
+   previous sample (HY_CAB_WOM_PERIOD_MS earlier), by more than thr_mg. The QMI8658A compares the absolute slope
+   between successive samples with the threshold, not the deviation from a reference, so a slow drift never fires. */
+bool       hy_cab_wom_hit(hy_accel_t prev, hy_accel_t a, uint16_t thr_mg);
+/* The sensor's previous sample seen from a HY_CAB_RATE_HZ stream: the value HY_CAB_WOM_PERIOD_MS before the
+   current sample, interpolated linearly between back2 and back3 (the stream samples 2 and 3 steps earlier). */
+hy_accel_t hy_cab_wom_prev(hy_accel_t back2, hy_accel_t back3);
+/* hy_cab_wom_hit for sample i of q against hy_cab_wom_prev of its samples i - 2 and i - 3; before sample 0 the
+   stream is at q->rest. */
+bool       hy_cab_wom_hit_at(const hy_cab_seq_t *q, uint16_t i, uint16_t thr_mg);
 
 typedef enum { HY_CAP_MORE = 0, HY_CAP_DONE, HY_CAP_TOO_SHORT, HY_CAP_TOO_LONG } hy_cap_res_t;
 typedef struct { hy_cab_seq_t seq; uint32_t t0_ms, last_move_ms; } hy_cab_cap_t;
@@ -70,8 +79,8 @@ typedef struct { hy_cab_seq_t take[HY_CAB_TAKES]; float d_self; uint16_t trig_mg
    scaled energy over its first min(n, L) samples outside 1/3 to 3 times the template's. Uses static scratch:
    single caller at a time. */
 float    hy_cab_dist(const hy_cab_seq_t *tmpl, const hy_cab_seq_t *cap);
-/* Copies the takes into m and trims each to the first sample at which the live trigger fires (hy_cab_wom_hit at
-   trig_mg; trig_mg = half the smallest peak deviation from rest over the takes, clamped to HY_CAB_TRIG_MIN_MG to
+/* Copies the takes into m and trims each to the first sample at which the live trigger fires (hy_cab_wom_hit_at
+   at trig_mg; trig_mg = half the smallest peak the trigger sees over the takes, clamped to HY_CAB_TRIG_MIN_MG to
    HY_CAB_TRIG_MAX_MG). For each take, s = its smallest distance as a capture to the other two as templates;
    d_self = the largest s. A take whose s is above HY_CAB_ODD_RATIO times the mean of the other two s and above
    HY_CAB_THR_MIN is the outlier (the largest such s if several). HY_E_INVALID with *odd set to the outlier, or to

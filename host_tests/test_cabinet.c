@@ -1,4 +1,5 @@
 #include <math.h>
+#include <string.h>
 #include "unity.h"
 #include "hy/cabinet.h"
 #include "cab_synth.h"
@@ -161,14 +162,63 @@ static void test_wom_mapping(void)
 
 static void test_wom_hit_table_knock_default(void)
 {
-    hy_accel_t rest = { 0, -1000, 0 }, knock = { 60, -1088, 30 };
-    TEST_ASSERT_FALSE(hy_cab_wom_hit(rest, knock, 100));
-    TEST_ASSERT_TRUE(hy_cab_wom_hit(rest, knock, 64));
+    /* A knock peaking at 88 mg one sensor sample after a still one: under the default, over 64 mg. */
+    hy_accel_t still = { 0, -1000, 0 }, knock = { 60, -1088, 30 };
+    TEST_ASSERT_FALSE(hy_cab_wom_hit(still, knock, 100));
+    TEST_ASSERT_TRUE(hy_cab_wom_hit(still, knock, 64));
     /* Strictly more than the threshold, on any axis, either sign. */
-    TEST_ASSERT_FALSE(hy_cab_wom_hit(rest, (hy_accel_t){ 100, -1000, 0 }, 100));
-    TEST_ASSERT_TRUE(hy_cab_wom_hit(rest, (hy_accel_t){ -101, -1000, 0 }, 100));
-    TEST_ASSERT_TRUE(hy_cab_wom_hit(rest, (hy_accel_t){ 0, -1000, 101 }, 100));
-    TEST_ASSERT_FALSE(hy_cab_wom_hit(rest, rest, 40));
+    TEST_ASSERT_FALSE(hy_cab_wom_hit(still, (hy_accel_t){ 100, -1000, 0 }, 100));
+    TEST_ASSERT_TRUE(hy_cab_wom_hit(still, (hy_accel_t){ -101, -1000, 0 }, 100));
+    TEST_ASSERT_TRUE(hy_cab_wom_hit(still, (hy_accel_t){ 0, -1000, 101 }, 100));
+    TEST_ASSERT_FALSE(hy_cab_wom_hit(still, still, 40));
+    /* The same knock in a 50 Hz stream from rest fires at its peak sample. */
+    static hy_cab_seq_t q;
+    memset(&q, 0, sizeof q);
+    q.rest = still;
+    q.n = 6;
+    for (uint16_t i = 0; i < q.n; i++) {
+        hy_accel_t a = i == 3 ? knock : still;
+        q.s[i] = (hy_imu6_t){ { a.x, a.y, a.z }, { 0, 0, 0 } };
+    }
+    for (uint16_t i = 0; i < q.n; i++) {
+        TEST_ASSERT_EQUAL(i == 3, hy_cab_wom_hit_at(&q, i, 64));
+        TEST_ASSERT_FALSE(hy_cab_wom_hit_at(&q, i, 100));
+    }
+}
+
+static void test_wom_prev_interpolates(void)
+{
+    /* 48 ms back from a 50 Hz sample: 0.6 of the sample 40 ms back plus 0.4 of the one 60 ms back. */
+    hy_accel_t p = hy_cab_wom_prev((hy_accel_t){ 0, 100, -1000 }, (hy_accel_t){ 100, 0, -1100 });
+    TEST_ASSERT_EQUAL_INT16(40, p.x);
+    TEST_ASSERT_EQUAL_INT16(60, p.y);
+    TEST_ASSERT_EQUAL_INT16(-1040, p.z);
+    p = hy_cab_wom_prev((hy_accel_t){ 0, 0, 0 }, (hy_accel_t){ 1, -1, -3 });   /* rounded to the nearest mg */
+    TEST_ASSERT_EQUAL_INT16(0, p.x);
+    TEST_ASSERT_EQUAL_INT16(0, p.y);
+    TEST_ASSERT_EQUAL_INT16(-1, p.z);
+}
+
+static void test_wom_hit_slope_not_drift(void)
+{
+    /* A slow tilt: y moves 5 mg per 20 ms sample, 12 mg per sensor sample, 495 mg from rest at the end. The sensor
+       compares successive samples, so it never fires at 40 mg; a step of 150 mg fires at once. */
+    static hy_cab_seq_t q;
+    memset(&q, 0, sizeof q);
+    q.rest = (hy_accel_t){ 0, -1000, 0 };
+    q.n = 100;
+    for (uint16_t i = 0; i < q.n; i++) q.s[i] = (hy_imu6_t){ { 0, (int16_t)(-1000 + 5 * (i + 1)), 0 }, { 0, 0, 0 } };
+    for (uint16_t i = 0; i < q.n; i++) TEST_ASSERT_FALSE(hy_cab_wom_hit_at(&q, i, 40));
+    TEST_ASSERT_TRUE(hy_cab_wom_hit_at(&q, 50, 11));   /* 12 mg per sensor sample */
+    TEST_ASSERT_FALSE(hy_cab_wom_hit_at(&q, 50, 12));
+    q.s[0].a[0] = 150;   /* the first sample against the rest before it */
+    TEST_ASSERT_TRUE(hy_cab_wom_hit_at(&q, 0, 100));
+    /* Back to 0 at sample 1: the previous sensor sample seen from sample 2 is 0.6 x 150 = 90 mg, from sample 3
+       0.4 x 150 = 60 mg, so the step back fires at 89 and 59 mg but not at 90 and 60. */
+    TEST_ASSERT_TRUE(hy_cab_wom_hit_at(&q, 2, 89));
+    TEST_ASSERT_FALSE(hy_cab_wom_hit_at(&q, 2, 90));
+    TEST_ASSERT_TRUE(hy_cab_wom_hit_at(&q, 3, 59));
+    TEST_ASSERT_FALSE(hy_cab_wom_hit_at(&q, 3, 60));
 }
 
 static void test_cap_door_done(void)
@@ -273,6 +323,8 @@ int main(void)
     RUN_TEST(test_feat_gyro_mask);
     RUN_TEST(test_wom_mapping);
     RUN_TEST(test_wom_hit_table_knock_default);
+    RUN_TEST(test_wom_prev_interpolates);
+    RUN_TEST(test_wom_hit_slope_not_drift);
     RUN_TEST(test_cap_door_done);
     RUN_TEST(test_cap_door_done_with_lead);
     RUN_TEST(test_cap_too_short);
