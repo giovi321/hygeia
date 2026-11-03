@@ -6,7 +6,7 @@
 #define GYRO_MASK_N  ((HY_CAB_GYRO_START_MS + STEP_MS - 1) / STEP_MS)   /* rows whose gyro is masked */
 #define GYRO_SCALE   (1.0f / 50.0f)                                       /* per dps */
 #define ACC_SCALE    (1.0f / 100.0f)                                      /* per mg */
-#define LEN_RATIO    2u
+#define LEN_MIN_DIV  2u   /* capture at least L / 2 long; no upper bound: open end absorbs later motion */
 #define ENERGY_RATIO 3.0f
 #define BAND_MIN     10
 
@@ -49,7 +49,7 @@ float hy_cab_dist(const hy_cab_seq_t *tmpl, const hy_cab_seq_t *cap)
 {
     const int L = tmpl->n, N = cap->n;
     if (L == 0 || N == 0 || L > HY_CAB_MAX_N || N > HY_CAB_MAX_N) return INFINITY;
-    if (LEN_RATIO * (unsigned)N < (unsigned)L || (unsigned)N > LEN_RATIO * (unsigned)L) return INFINITY;
+    if (LEN_MIN_DIV * (unsigned)N < (unsigned)L) return INFINITY;
     const bool gyro = tmpl->has_gyro && cap->has_gyro;
     scaled_features(tmpl, s_ft);
     scaled_features(cap, s_fc);
@@ -88,7 +88,8 @@ float hy_cab_dist(const hy_cab_seq_t *tmpl, const hy_cab_seq_t *cap)
         phi = hi;
     }
     float d = INFINITY;
-    for (int j = (L / 2 > plo ? L / 2 : plo); j <= phi; j++) d = fmin2(d, prev[j]);   /* open end */
+    int jend = L / 2 < N ? L / 2 : N - 1;   /* open end, from L / 2 or the last capture sample if earlier */
+    for (int j = (jend > plo ? jend : plo); j <= phi; j++) d = fmin2(d, prev[j]);
     return d / (float)L;
 }
 
@@ -166,11 +167,11 @@ hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_T
         if (s[k] > HY_CAB_ODD_RATIO * med && s[k] > HY_CAB_THR_MIN && (outlier < 0 || s[k] > s[outlier]))
             outlier = k;
     }
+    m->d_self = s[worst];   /* filled on HY_E_INVALID too, so the takes can be accepted as they are */
     if (outlier >= 0 || !isfinite(s[worst])) {
         *odd = outlier >= 0 ? outlier : worst;
         return HY_E_INVALID;
     }
-    m->d_self = s[worst];
     m->valid = true;
     return HY_OK;
 }

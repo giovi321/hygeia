@@ -153,8 +153,8 @@ static void test_dist_time_warp(void)
 static void test_dist_open_end(void)
 {
     static hy_cab_seq_t tmpl, alone, longer;
-    cab_syn_t pt = mv(CAB_SYN_DOOR_OPEN, 1.0f, 1.3f, 3);
-    cab_syn_t pc = mv(CAB_SYN_DOOR_OPEN, 1.0f, 1.3f, 4);
+    cab_syn_t pt = mv(CAB_SYN_DOOR_OPEN, 1.0f, 1.0f, 3);
+    cab_syn_t pc = mv(CAB_SYN_DOOR_OPEN, 1.0f, 1.0f, 4);
     capture(&pt, HY_CAB_TEACH_TRIG_MG, 0, &tmpl);
     capture(&pc, HY_CAB_TEACH_TRIG_MG, 0, &alone);
     /* The swing, then 1 s of another movement (a tilt, as when reaching into the cabinet). */
@@ -162,7 +162,6 @@ static void test_dist_open_end(void)
     cab_syn_t tilt = mv(CAB_SYN_TILT, 1.0f, 1.0f, 6);
     tilt.start_ms = 0;
     for (uint32_t i = 0; i < HY_CAB_RATE_HZ; i++) longer.s[longer.n++] = cab_syn_sample(&tilt, i);
-    TEST_ASSERT_TRUE(longer.n <= 2 * tmpl.n);
     float d_alone = hy_cab_dist(&tmpl, &alone), d_longer = hy_cab_dist(&tmpl, &longer);
     TEST_ASSERT_TRUE(isfinite(d_alone));
     TEST_ASSERT_FLOAT_WITHIN(0.1f * d_alone, d_alone, d_longer);
@@ -216,6 +215,12 @@ static void test_match_lift_model(void)
     expect_all(&m, CAB_SYN_LIFT, false);
     expect_none(&m, CAB_SYN_TILT);
     expect_none(&m, CAB_SYN_DOOR_OPEN);
+    /* Some doors stay under this model's trigger level; captured at the teach level they still do not match. */
+    static hy_cab_seq_t q;
+    for (uint32_t n = 0; n < N_POS; n++) {
+        TEST_ASSERT_TRUE(variant(CAB_SYN_DOOR_OPEN, n, HY_CAB_TEACH_TRIG_MG, &q));
+        TEST_ASSERT_FALSE(hy_cab_match(&m, 5, &q, NULL));
+    }
 }
 
 static void test_match_rotated_device(void)
@@ -262,6 +267,45 @@ static void test_model_odd_take(void)
     TEST_ASSERT_EQUAL(2, odd);
     TEST_ASSERT_FALSE(m.valid);
     TEST_ASSERT_FALSE(hy_cab_match(&m, 3, &takes[0], NULL));
+    /* The model is still filled: accepted as is, the lift never fits, so d_self is infinite and the threshold
+       is the upper bound. */
+    TEST_ASSERT_TRUE(isinf(m.d_self));
+    TEST_ASSERT_EQUAL_FLOAT(HY_CAB_THR_MAX, hy_cab_threshold(&m, 3));
+    for (int k = 0; k < HY_CAB_TAKES; k++) TEST_ASSERT_TRUE(m.take[k].n > 0);
+    m.valid = true;
+    TEST_ASSERT_TRUE(hy_cab_match(&m, 3, &takes[0], NULL));
+}
+
+/* Three doors, one much smaller: the outlier is reported, and the model is filled so the teach flow can accept
+   the takes as they are. */
+static void test_model_odd_take_accept(void)
+{
+    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_model_t m;
+    static const float amp[HY_CAB_TAKES] = { 1.0f, 1.05f, 0.55f };
+    for (int k = 0; k < HY_CAB_TAKES; k++) {
+        cab_syn_t p = mv(CAB_SYN_DOOR_OPEN, amp[k], 1.0f, 31u + (uint32_t)k);
+        capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[k]);
+    }
+    int odd = -1;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(2, odd);
+    TEST_ASSERT_FALSE(m.valid);
+    TEST_ASSERT_TRUE(m.trig_mg >= HY_CAB_TRIG_MIN_MG && m.trig_mg <= HY_CAB_TRIG_MAX_MG);
+    /* d_self is the worst-take rule over all three trimmed takes. */
+    float worst = 0.0f;
+    for (int k = 0; k < HY_CAB_TAKES; k++) {
+        TEST_ASSERT_TRUE(m.take[k].n > 0 && m.take[k].n <= takes[k].n);
+        TEST_ASSERT_TRUE(hy_cab_wom_hit(m.take[k].rest, accel_of(&m.take[k].s[0]), m.trig_mg));
+        float best = INFINITY;
+        for (int j = 0; j < HY_CAB_TAKES; j++)
+            if (j != k) best = fminf(best, hy_cab_dist(&m.take[j], &m.take[k]));
+        if (best > worst) worst = best;
+    }
+    TEST_ASSERT_TRUE(isfinite(m.d_self) && m.d_self > 0.0f);
+    TEST_ASSERT_EQUAL_FLOAT(worst, m.d_self);
+    m.valid = true;
+    for (int k = 0; k < HY_CAB_TAKES; k++) TEST_ASSERT_TRUE(hy_cab_match(&m, 3, &m.take[k], NULL));
 }
 
 static void test_threshold_clamp(void)
@@ -356,6 +400,7 @@ int main(void)
     RUN_TEST(test_match_rotated_device);
     RUN_TEST(test_sensitivity_monotone);
     RUN_TEST(test_model_odd_take);
+    RUN_TEST(test_model_odd_take_accept);
     RUN_TEST(test_threshold_clamp);
     RUN_TEST(test_model_trim_trigger);
     RUN_TEST(test_match_timing);
