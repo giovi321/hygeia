@@ -56,6 +56,14 @@ char *hy_api_settings_json(const hy_settings_t *s)
         }
     }
     ok = ok && cJSON_AddBoolToObject(o, "wifi_keep_batt", s->wifi_keep_batt);
+    if (ok) {
+        cJSON *c = cJSON_AddObjectToObject(o, "cabinet");
+        ok = c && cJSON_AddBoolToObject(c, "on", s->cab_on) &&
+             cJSON_AddStringToObject(c, "mode", s->cab_mode == HY_CAB_TAUGHT ? "taught" : "any") &&
+             cJSON_AddBoolToObject(c, "chime", s->cab_chime) && cJSON_AddBoolToObject(c, "light", s->cab_light) &&
+             cJSON_AddNumberToObject(c, "sensitivity", s->cab_sens) &&
+             cJSON_AddNumberToObject(c, "window_min", s->cab_window_min);
+    }
     char *js = ok ? cJSON_PrintUnformatted(o) : NULL;
     cJSON_Delete(o);
     return js;
@@ -81,6 +89,47 @@ static hy_err_t get_bool(const cJSON *o, const char *key, bool *out, hy_api_err_
     if (!cJSON_IsBool(it)) return hy_api_fail(err, HY_E_INVALID, key);
     *out = cJSON_IsTrue(it);
     return HY_OK;
+}
+
+static hy_err_t cab_bool(const cJSON *c, const char *key, const char *field, bool *out, hy_api_err_t *err)
+{
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(c, key);
+    if (!it || cJSON_IsNull(it)) return HY_OK;
+    if (!cJSON_IsBool(it)) return hy_api_fail(err, HY_E_INVALID, field);
+    *out = cJSON_IsTrue(it);
+    return HY_OK;
+}
+
+/* Whole number in lo..hi and a multiple of step; anything else is invalid, never clamped. */
+static hy_err_t cab_num(const cJSON *c, const char *key, const char *field, unsigned lo, unsigned hi, unsigned step,
+                        uint8_t *out, hy_api_err_t *err)
+{
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(c, key);
+    if (!it || cJSON_IsNull(it)) return HY_OK;
+    if (!cJSON_IsNumber(it) || !(it->valuedouble >= lo) || !(it->valuedouble <= hi) ||
+        it->valuedouble != floor(it->valuedouble) || ((unsigned)it->valuedouble % step) != 0)
+        return hy_api_fail(err, HY_E_INVALID, field);
+    *out = (uint8_t)it->valuedouble;
+    return HY_OK;
+}
+
+static hy_err_t cab_from_json(const cJSON *c, hy_settings_t *s, hy_api_err_t *err)
+{
+    if (!cJSON_IsObject(c) || hy_api_reject_dups(c, NULL) != HY_OK) return hy_api_fail(err, HY_E_INVALID, "cabinet");
+    hy_err_t r = cab_bool(c, "on", "cabinet.on", &s->cab_on, err);
+    if (r == HY_OK) r = cab_bool(c, "chime", "cabinet.chime", &s->cab_chime, err);
+    if (r == HY_OK) r = cab_bool(c, "light", "cabinet.light", &s->cab_light, err);
+    if (r == HY_OK) r = cab_num(c, "sensitivity", "cabinet.sensitivity", 1, 5, 1, &s->cab_sens, err);
+    if (r == HY_OK)
+        r = cab_num(c, "window_min", "cabinet.window_min", 0, HY_CAB_WINDOW_MAX_MIN, HY_CAB_WINDOW_STEP_MIN,
+                    &s->cab_window_min, err);
+    const cJSON *m = cJSON_GetObjectItemCaseSensitive(c, "mode");
+    if (r == HY_OK && m && !cJSON_IsNull(m)) {
+        if (cJSON_IsString(m) && m->valuestring && strcmp(m->valuestring, "any") == 0) s->cab_mode = HY_CAB_ANY;
+        else if (cJSON_IsString(m) && m->valuestring && strcmp(m->valuestring, "taught") == 0) s->cab_mode = HY_CAB_TAUGHT;
+        else r = hy_api_fail(err, HY_E_INVALID, "cabinet.mode");
+    }
+    return r;
 }
 
 hy_err_t hy_api_settings_from_json(const char *body, const hy_settings_t *cur, hy_settings_t *out, hy_api_err_t *err)
@@ -130,6 +179,10 @@ hy_err_t hy_api_settings_from_json(const char *body, const hy_settings_t *cur, h
                 s.quiet_to = to;
             }
         }
+    }
+    if (r == HY_OK) {
+        const cJSON *c = cJSON_GetObjectItemCaseSensitive(o, "cabinet");
+        if (c && !cJSON_IsNull(c)) r = cab_from_json(c, &s, err);
     }
     cJSON_Delete(o);
     if (r != HY_OK) return r;

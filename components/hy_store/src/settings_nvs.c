@@ -45,6 +45,12 @@ esp_err_t hy_settings_load(hy_settings_t *s)
         if (nvs_get_u16(h, "q_from", &u16) == ESP_OK) s->quiet_from = u16;
         if (nvs_get_u16(h, "q_to", &u16) == ESP_OK) s->quiet_to = u16;
         if (nvs_get_u8(h, "wifi_batt", &u8) == ESP_OK) s->wifi_keep_batt = u8 != 0;
+        if (nvs_get_u8(h, "cab_on", &u8) == ESP_OK) s->cab_on = u8 != 0;
+        if (nvs_get_u8(h, "cab_mode", &u8) == ESP_OK) s->cab_mode = u8;
+        if (nvs_get_u8(h, "cab_chime", &u8) == ESP_OK) s->cab_chime = u8 != 0;
+        if (nvs_get_u8(h, "cab_light", &u8) == ESP_OK) s->cab_light = u8 != 0;
+        if (nvs_get_u8(h, "cab_sens", &u8) == ESP_OK) s->cab_sens = u8;
+        if (nvs_get_u8(h, "cab_win", &u8) == ESP_OK) s->cab_window_min = u8;
         nvs_close(h);
     } else if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;   /* first boot: defaults */
@@ -77,6 +83,12 @@ esp_err_t hy_settings_save(const hy_settings_t *s)
     if (err == ESP_OK) err = nvs_set_u16(h, "q_from", s->quiet_from);
     if (err == ESP_OK) err = nvs_set_u16(h, "q_to", s->quiet_to);
     if (err == ESP_OK) err = nvs_set_u8(h, "wifi_batt", s->wifi_keep_batt);
+    if (err == ESP_OK) err = nvs_set_u8(h, "cab_on", s->cab_on);
+    if (err == ESP_OK) err = nvs_set_u8(h, "cab_mode", s->cab_mode);
+    if (err == ESP_OK) err = nvs_set_u8(h, "cab_chime", s->cab_chime);
+    if (err == ESP_OK) err = nvs_set_u8(h, "cab_light", s->cab_light);
+    if (err == ESP_OK) err = nvs_set_u8(h, "cab_sens", s->cab_sens);
+    if (err == ESP_OK) err = nvs_set_u8(h, "cab_win", s->cab_window_min);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;

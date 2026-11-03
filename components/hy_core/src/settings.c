@@ -15,6 +15,12 @@ void hy_settings_defaults(hy_settings_t *s)
     s->quiet_from = 0;
     s->quiet_to = 0;
     s->wifi_keep_batt = false;
+    s->cab_on = false;
+    s->cab_mode = HY_CAB_ANY;
+    s->cab_chime = true;
+    s->cab_light = true;
+    s->cab_sens = 3;
+    s->cab_window_min = 15;
 }
 
 void hy_settings_clamp(hy_settings_t *s)
@@ -36,4 +42,8 @@ void hy_settings_clamp(hy_settings_t *s)
     if (s->rot > 3) s->rot = 0;
     if (s->quiet_from > 1439) s->quiet_from = 0;
     if (s->quiet_to > 1439) s->quiet_to = 0;
+    if (s->cab_mode > HY_CAB_TAUGHT) s->cab_mode = HY_CAB_ANY;
+    if (s->cab_sens < 1 || s->cab_sens > 5) s->cab_sens = 3;
+    if (s->cab_window_min > HY_CAB_WINDOW_MAX_MIN) s->cab_window_min = HY_CAB_WINDOW_MAX_MIN;
+    s->cab_window_min = (uint8_t)(s->cab_window_min - s->cab_window_min % HY_CAB_WINDOW_STEP_MIN);
 }

@@ -1,4 +1,5 @@
 #include "unity.h"
+#include <string.h>
 #include "hy/settings.h"
 
 void setUp(void) {}
@@ -118,6 +119,49 @@ static void test_settings_rot_clamp(void)
     TEST_ASSERT_EQUAL_UINT8(3, s.rot);
 }
 
+static void test_settings_cab_defaults(void)
+{
+    hy_settings_t s;
+    memset(&s, 0xff, sizeof s);
+    hy_settings_defaults(&s);
+    TEST_ASSERT_FALSE(s.cab_on);
+    TEST_ASSERT_EQUAL_UINT8(HY_CAB_ANY, s.cab_mode);
+    TEST_ASSERT_TRUE(s.cab_chime);
+    TEST_ASSERT_TRUE(s.cab_light);
+    TEST_ASSERT_EQUAL_UINT8(3, s.cab_sens);
+    TEST_ASSERT_EQUAL_UINT8(15, s.cab_window_min);
+}
+
+static void test_settings_cab_clamp(void)
+{
+    hy_settings_t s;
+    hy_settings_defaults(&s);
+    s.cab_mode = 7;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(HY_CAB_ANY, s.cab_mode);
+    s.cab_mode = HY_CAB_TAUGHT;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(HY_CAB_TAUGHT, s.cab_mode);
+    s.cab_sens = 0;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(3, s.cab_sens);
+    s.cab_sens = 9;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(3, s.cab_sens);
+    s.cab_sens = 5;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(5, s.cab_sens);
+    s.cab_window_min = 200;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(120, s.cab_window_min);
+    s.cab_window_min = 17;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(15, s.cab_window_min);
+    s.cab_window_min = 0;
+    hy_settings_clamp(&s);
+    TEST_ASSERT_EQUAL_UINT8(0, s.cab_window_min);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -128,5 +172,7 @@ int main(void)
     RUN_TEST(test_power_clamp);
     RUN_TEST(test_settings_rot_defaults);
     RUN_TEST(test_settings_rot_clamp);
+    RUN_TEST(test_settings_cab_defaults);
+    RUN_TEST(test_settings_cab_clamp);
     return UNITY_END();
 }
