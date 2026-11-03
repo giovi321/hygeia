@@ -21,6 +21,7 @@ What makes it worth building instead of using a phone app: a dedicated object wi
 7. MQTT with optional Home Assistant discovery, and webhooks
 8. Battery level shown as a percentage, battery events published, power on/off with the onboard button
 9. A repository that can be made public at any time: no personal data, docs site ready for GitHub Pages, README in the style of Asclepius
+10. Cabinet open: mounted on a cabinet door, the device can chime and/or light the screen when the cabinet is opened and a dose is overdue or due soon
 
 ## Non-goals
 
@@ -162,6 +163,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - Medicines: one JSON file, written atomically (write temp, fsync, rename)
 - Log: append-only JSON Lines, one file per month. Edits and deletes rewrite the month file atomically. Each line about 150 bytes; 10 doses a day is about 0.5 MB a year, so the storage partition holds many years. Retention default: keep everything until the partition is 80% full, then drop the oldest month after warning on screen and in the web UI. Minimum guaranteed retention: 1 year
 - Settings: NVS
+- Cabinet open template (3 taught takes, about 7 KB): LittleFS
 - Secrets (Wi-Fi passwords, MQTT password, webhook secret, paired-browser session tokens): NVS, never included in export unless the user ticks "include secrets"
 - Export: CSV (log only) and JSON (medicines, log, settings). Import: JSON, with a preview of what changes and a choice of merge or replace
 - Backup/restore in the web UI uses the JSON export
@@ -190,8 +192,8 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 ## Power
 
 - On USB: screen dims to the idle clock after 30 s, never turns off unless the user sets it
-- On battery: dims after 30 s, screen off after 2 min, CPU in light sleep. Wake sources: touch interrupt, RTC alarm (next due occurrence), AXP2101 interrupt (PWR key, USB plugged), user key
-- The motion sensor (QMI8658) is read only while the screen is on or dimmed and powered down while the screen is off; it is not a wake source
+- On battery: dims after 30 s, screen off after 2 min, CPU in light sleep. Wake sources: touch interrupt, RTC alarm (next due occurrence), AXP2101 interrupt (PWR key, USB plugged), user key, motion sensor interrupt (Cabinet open only)
+- The motion sensor is read while the screen is on or dimmed. While the screen is off it is powered down, except when Cabinet open is on: then it watches for movement in its low-power wake-on-motion mode and its interrupt is a wake source
 - On battery the saved Wi-Fi mode does not start by itself. Turning on Wi-Fi or the access point from the screen or the web UI starts it; it stops after 10 minutes with no web request and no touch. Plugging in USB starts the saved mode. A setting keeps Wi-Fi on while on battery. While the radio is on the CPU does not enter light sleep. Events produced while offline go to the outbox
 - PWR key: short press toggles the screen; long press (about 2 s) opens a power-off confirmation slider that warns "Reminders will not fire while off" if any occurrence is due in the next 24 h; confirming powers off through the AXP2101. Pressing PWR while off turns the device on (AXP2101 hardware behaviour)
 - The device turns on only with the PWR key (maintainer requirement, 2026-10-28). Plugging in USB or connecting the battery must not leave it running. Early in boot, before the display is initialised, firmware reads the AXP2101 power-on source; if the source is USB insertion or battery insertion rather than the PWR key, it powers off through the AXP2101 at once. The battery still charges while off. A software restart (OTA, crash, watchdog) is not a power-on event and keeps running. The exact register and whether the cold-boot source is reported reliably are verified on the board
@@ -236,7 +238,7 @@ Gestures:
 
 Swipe directions and edges are those of the screen as the person sees it: they turn with the screen.
 
-Screens: Home (grid of rings, "+" tile opens the add-medicine form), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart, Edit and Archive at the bottom), Add or edit medicine (name, dose, code, colour, schedule), Archive confirm, Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display with rotation lock, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
+Screens: Home (grid of rings, "+" tile opens the add-medicine form), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart, Edit and Archive at the bottom), Add or edit medicine (name, dose, code, colour, schedule), Archive confirm, Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display with rotation lock, cabinet open, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
 
 Several due at once: the due card shows the first, with "+2 more"; a swipe up steps to the next entry and a swipe down to the previous, wrapping at either end. The card stays until the entry is taken, skipped or snoozed; stepping through only changes which entry is shown.
 
@@ -244,7 +246,7 @@ History: a dose taken late gets an amber dot, so it differs from today's partial
 
 Text entry: the on-screen keyboard is used for notes (log with note), medicine names and doses. Codes are picked from a grid of letters and digits. Nothing else on the device takes typed input. The keyboard has a one-shot shift key that capitalises the next letter only. The first letter of a medicine name is capitalised automatically; a dose is not.
 
-Do-not-disturb and quiet hours: the card still appears, the chime is silent. Quiet hours are a web UI setting; the device has only the do-not-disturb toggle.
+Do-not-disturb and quiet hours: the card still appears, the chime is silent. Quiet hours are a web UI setting; the device has only the do-not-disturb toggle. For Cabinet open they silence the chime only; its light still works.
 
 ## On-device medicine management
 
@@ -271,6 +273,7 @@ A time added or changed so that today's occurrence is already inside its dose wi
 - At an occurrence: wake the screen, show the due card, play the chime (default 3 short tones, repeated every 2 min, 5 plays in total per sequence, while unacknowledged, volume from settings), send `due` event
 - If the speaker path does not work on hardware, the fallback is a pulsing screen and a gentle brightness flash; the design does not depend on sound
 - At `late_after`: the tile shows "late" and the card stays; at `missed_after`: `missed` log and event, card dismissed, tile shows missed until the next occurrence
+- Cabinet open: when the device detects the cabinet opening (trigger: any movement, or a movement taught by doing it 3 times) and a dose is overdue or due within a set window (0 to 120 min, default 15; capped by the medicine's early window), it plays one chime and/or lights the screen, per two switches. The chime follows sound, do-not-disturb and quiet hours; the light does not. At most one reaction every 2 minutes. Otherwise nothing happens. An open dose counts even while it is snoozed. The light shows the due card when a dose is open; when the dose is only due soon it shows Home with a 5-second note "Next: <medicine> at <time>" (for example "Next: Vitamin D at 08:00"). The feature is off until turned on; its defaults are Any movement, chime on, light on, sensitivity 3 of 5, window 15 min. Every Cabinet open setting is available on the device and in the web UI. It never logs, skips or snoozes a dose
 
 ## Network
 
@@ -284,7 +287,7 @@ A time added or changed so that today's occurrence is already inside its dose wi
 
 Mockups: `design/mockups/webui.html`.
 
-- Pages: Dashboard, Medicines (list, add, edit, reorder, archive), History (30-day grid, log table with edit, delete, add, export CSV/JSON, import), Schedule (week view of all occurrences), Settings (Wi-Fi, MQTT, Home Assistant discovery, webhooks, clock, screen and sound, quiet hours, paired browsers, backup/restore, firmware update)
+- Pages: Dashboard, Medicines (list, add, edit, reorder, archive), History (30-day grid, log table with edit, delete, add, export CSV/JSON, import), Schedule (week view of all occurrences), Settings (Wi-Fi, MQTT, Home Assistant discovery, webhooks, clock, screen and sound, quiet hours, paired browsers, backup/restore, firmware update), Cabinet open (trigger, switches, sensitivity, window, teach status, test counter, sample download)
 - Responsive: sidebar on desktop, top menu on a phone
 - Live updates over WebSocket from the event bus
 - No open access. A browser is paired once with a 6-digit code shown on the device screen; the device then keeps a session token for that browser (at most 4 browsers, the oldest is forgotten). Paired browsers can be forgotten on the device and in the web UI. The web UI is plain HTTP on the local network by design (a design choice, not a missing feature), protected by pairing, the `X-Hygeia` header and the host allow-list; the docs say to keep it on a trusted LAN. The GitHub update download is outbound and uses HTTPS
@@ -313,7 +316,7 @@ REST API (JSON):
 | `GET /api/history?days=7\|30` | per-medicine daily grid for 7 or 30 days |
 | `GET /api/schedule?from&to` | all occurrences in a time range |
 | `GET /api/export.csv`, `GET /api/export.json`, `POST /api/import` | export and import |
-| `GET/PUT /api/settings` | settings (secrets write-only) |
+| `GET/PUT /api/settings` | settings (secrets write-only), including the Cabinet open fields |
 | `POST /api/time` | set time and zone from the browser |
 | `GET /api/wifi` | mode, status, saved networks, AP settings (no passwords) |
 | `POST /api/wifi/mode` | client, ap, off |
@@ -326,6 +329,10 @@ REST API (JSON):
 | `GET /api/update` | state of the GitHub update (check result, progress, last error) |
 | `POST /api/update/check` | ask GitHub for the latest stable release |
 | `POST /api/update/install` | download and install the checked release, body `{"version":"vX.Y.Z"}` |
+| `GET /api/cabinet` | Cabinet open state: teach status, test counter |
+| `POST /api/cabinet/test` | start or stop test mode, body `{"on":true}` or `{"on":false}` |
+| `GET /api/cabinet/samples.csv` | download the taught takes and the recent test and live captures as CSV |
+| `DELETE /api/cabinet/teach` | forget the taught movement |
 | `GET /ws` | WebSocket event stream |
 
 ## MQTT
@@ -379,7 +386,7 @@ Release artefacts:
 
 - Host unit tests (plain C, built with CMake on the host or the ESP-IDF linux target) for `scheduler`, `store`, `clock` time-zone handling, `outbox`, import/export round trip. The scheduler tests cover DST changes, time-zone changes, as-needed intervals, missed detection, multiple doses due at once
 - UI layout checks by rendering screens to PNG off-device; the community `lvgl-preview-skill` may be used after its code has been reviewed
-- Hardware checklist for each release: boot splash, touch in all corners, logging and undo, due card and chime, sleep and RTC wake on battery, PWR short/long press, power off and on, AP join by QR, web UI parity, MQTT and HA discovery, webhook with signature, OTA and rollback, clock invalid flow, add, edit and archive a medicine on the device, auto-rotate in all four orientations, rotation lock, shake to undo
+- Hardware checklist for each release: boot splash, touch in all corners, logging and undo, due card and chime, sleep and RTC wake on battery, PWR short/long press, power off and on, AP join by QR, web UI parity, MQTT and HA discovery, webhook with signature, OTA and rollback, clock invalid flow, add, edit and archive a medicine on the device, auto-rotate in all four orientations, rotation lock, shake to undo, cabinet open in both trigger modes, teach and test mode
 
 ## Left to the builder
 
