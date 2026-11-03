@@ -123,4 +123,15 @@ hy_err_t hy_cab_decode(const uint8_t *buf, size_t len, hy_cab_model_t *m, int64_
 size_t   hy_cab_csv_rows(const hy_cab_seq_t *q, const char *kind, int take, char *buf, size_t max);
 #define  HY_CAB_CSV_HEADER "kind,take,t_ms,ax,ay,az,gx,gy,gz\n"
 
+
+/* The runner's state as the web UI and the screens read it (hy_cab_run_status), and one recent Taught capture
+   (hy_cab_run_snapshot). Plain data, so the JSON encoder in hy_core and its host tests can use them. */
+typedef struct { bool taught; int64_t taught_at; uint8_t mode; bool live, testing, teaching; float d_self, thr;
+                 uint16_t trig_mg; uint32_t wom_irq, captures, matches, others, reactions, capture_ms;
+                 uint32_t test_matches, test_others; } hy_cab_status_t;
+
+typedef enum { HY_CAB_REC_LIVE = 0, HY_CAB_REC_TEST } hy_cab_rec_kind_t;
+/* One recent Taught capture. at: epoch s (0 when the clock was not valid); dist INFINITY when a gate rejected it. */
+typedef struct { uint8_t kind; int64_t at; float dist, thr; bool match; hy_cab_seq_t seq; } hy_cab_recent_t;
+
 #endif

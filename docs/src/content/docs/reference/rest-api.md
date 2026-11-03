@@ -258,4 +258,8 @@ Every action on the screen has a route. The table lists each route, the web UI p
 | `GET /api/update` | Firmware | Settings > About > Check for update |
 | `POST /api/update/check` | Firmware | Settings > About > Check for update |
 | `POST /api/update/install` | Firmware | Settings > About > Check for update |
+| `GET /api/cabinet` | Cabinet open | Settings > Cabinet open |
+| `POST /api/cabinet/test` | Cabinet open | Settings > Cabinet open > Test |
+| `GET /api/cabinet/samples.csv` | Cabinet open | web only |
+| `DELETE /api/cabinet/teach` | Cabinet open | Settings > Cabinet open > Forget the movement |
 <!-- parity:end -->

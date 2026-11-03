@@ -3,7 +3,7 @@
 
     python tools/webmock.py [--port 8484] [--unpaired] [--slow] [--stale] [--clock-invalid] [--skew SECONDS] [--zone NAME] [--busy]
                             [--low-battery] [--ota-pending]
-                            [--update uptodate|available|dev|offline|checksum]
+                            [--update uptodate|available|dev|offline|checksum] [--cabinet taught|not-taught]
 
 Serves the bundle made by tools/web_bundle.py from web/ (rebuilt on every request, so edits show on reload) and
 answers /api/* from the sample files in tools/webmock/samples/ plus in-memory changes. Routes the firmware does not
@@ -26,6 +26,9 @@ uploaded image's version in /api/info.
                    offline = a check answers 409 no_network; checksum = an install ends FAILED checksum.
                    A check answers 202 and finishes 1 s later; an install downloads in 10 % steps every 300 ms,
                    then restarts like an upload. State changes go out as live events
+  --cabinet MODE   Cabinet open (default taught): taught = a movement is stored, with three recent captures;
+                   not-taught = nothing stored, Taught movement is refused with 409 not_taught. A test sends a
+                   result as a live event every 1.5 s until stopped
 """
 
 import argparse
@@ -111,6 +114,9 @@ class Device:
         self.blocked_until = 0
         self.clients = []
         self.upd_mode = args.update
+        taught = args.cabinet == "taught"
+        self.cab = {"taught": taught, "taught_at": SAMPLE_NOW - 86400 * 2 if taught else None, "testing": False,
+                    "tm": 0, "to": 0, "seq": 0, "cap": 3 if taught else 0}
         self.fw = {"uptodate": "v0.5.0", "dev": "dev-a88c56d"}.get(args.update, "v0.4.0")
         self.upd = {"state": "idle", "err": None, "latest": "", "pct": 0, "checked": 0}
         self.restart_at = 0.0   # an upload finished: unreachable from restart_at for OTA_BOOT_S
@@ -170,6 +176,64 @@ class Device:
                 t["kind"], t["next_due"] = "no_dose", None
             out.append(t)
         return out
+
+    def cab_status(self):
+        c = self.cab
+        cfg = self.settings["cabinet"]
+        recent = []
+        if c["taught"]:
+            recent = [{"kind": "test", "at": SAMPLE_NOW - 3600, "dist": 0.41, "thr": 0.72, "match": True},
+                      {"kind": "live", "at": SAMPLE_NOW - 1800, "dist": 1.94, "thr": 0.72, "match": False},
+                      {"kind": "live", "at": SAMPLE_NOW - 900, "dist": 0.55, "thr": 0.72, "match": True}]
+        return {"taught": c["taught"], "taught_at": c["taught_at"], "mode": cfg["mode"],
+                "live": bool(cfg["on"] and (cfg["chime"] or cfg["light"]) and (cfg["mode"] == "any" or c["taught"])),
+                "testing": c["testing"], "teaching": False, "threshold": 0.72 if c["taught"] else None,
+                "trigger_mg": 90 if c["taught"] else 0,
+                "counts": {"wom": 11, "captures": c["cap"], "matches": 2 if c["taught"] else 0,
+                           "others": 1 if c["taught"] else 0, "reactions": 1 if c["taught"] else 0},
+                "test": {"matches": c["tm"], "others": c["to"]}, "recent": recent}
+
+    def cab_csv(self):
+        def seq(kind, take, phase):
+            rest = (0, -1000, 0)
+            rows = ["rest_%s,%d,0,%d,%d,%d,0,0,0" % (kind, take, rest[0], rest[1], rest[2])]
+            for i in range(60):
+                s = (i - 30) / 30.0
+                bump = int(300 * (1 - s * s)) if abs(s) < 1 else 0
+                rows.append("%s,%d,%d,%d,%d,%d,%d,%d,%d" % (kind, take, i * 20, rest[0] + bump + phase, rest[1],
+                                                           rest[2] - bump // 2, bump * 2, 0, -bump))
+            return rows
+        out = ["kind,take,t_ms,ax,ay,az,gx,gy,gz"]
+        if self.cab["taught"]:
+            for t in range(3):
+                out += seq("teach", t, t * 5)
+            out += seq("test", 0, 4)
+            out += seq("live", 1, 12)
+            out += seq("live", 2, 2)
+        return ("\n".join(out) + "\n").encode()
+
+    def cab_event(self, match):
+        c = self.cab
+        frame = ws_frame(json.dumps({"type": "cabinet", "test": {"matches": c["tm"], "others": c["to"]},
+                                     "last": {"dist": 0.41 if match else 1.94, "thr": 0.72, "match": match}}))
+        for cl in list(self.clients):
+            try:
+                cl.sendall(frame)
+            except OSError:
+                self.clients.remove(cl)
+
+    def cab_run(self, seq):
+        n = 0
+        while True:
+            time.sleep(1.5)
+            with self.lock:
+                c = self.cab
+                if not c["testing"] or c["seq"] != seq:
+                    return
+                n += 1
+                match = n % 3 != 0
+                c["tm" if match else "to"] += 1
+                self.cab_event(match)
 
     def upd_status(self):
         u = self.upd
@@ -462,6 +526,28 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/update" and m == "GET":
             return 200, dev.upd_status()
 
+        if path == "/api/cabinet" and m == "GET":
+            return 200, dev.cab_status()
+        if path == "/api/cabinet/samples.csv" and m == "GET":
+            return 200, Raw(dev.cab_csv(), "text/csv; charset=utf-8"), {
+                "Content-Disposition": 'attachment; filename="cabinet-samples.csv"'}
+        if path == "/api/cabinet/teach" and m == "DELETE":
+            dev.cab.update(taught=False, taught_at=None, testing=False, seq=dev.cab["seq"] + 1)
+            return 204, None
+        if path == "/api/cabinet/test" and m == "POST":
+            on = body.get("on")
+            if not isinstance(on, bool):
+                return 400, err(400, "invalid", "on", 'Send {"on":true} or {"on":false}')[1]
+            c = dev.cab
+            if on:
+                if dev.settings["cabinet"]["mode"] == "taught" and not c["taught"]:
+                    return 409, err(409, "not_taught", None, "Teach the movement on the device first")[1]
+                c.update(testing=True, tm=0, to=0, seq=c["seq"] + 1)
+                threading.Thread(target=dev.cab_run, args=(c["seq"],), daemon=True).start()
+            else:
+                c.update(testing=False, seq=c["seq"] + 1)
+            return 200, {"testing": c["testing"], "test": {"matches": c["tm"], "others": c["to"]}}
+
         if path == "/api/update/check" and m == "POST":
             if dev.upd["state"] in ("checking", "downloading", "verifying", "restarting"):
                 return 409, err(409, "busy", None, UPD_ERR["busy"])[1]
@@ -653,6 +739,30 @@ class Handler(BaseHTTPRequestHandler):
                         if not ok:
                             return 400, err(400, "invalid", "quiet", "Wrong type")[1]
                         new["quiet"] = v
+                    elif k == "cabinet":
+                        if not isinstance(v, dict):
+                            return 400, err(400, "invalid", "cabinet", "Wrong type")[1]
+                        cab = dict(new["cabinet"])
+                        for ck, cv in v.items():
+                            if ck in ("on", "chime", "light"):
+                                if not isinstance(cv, bool):
+                                    return 400, err(400, "invalid", "cabinet." + ck, "Wrong type")[1]
+                            elif ck == "sensitivity":
+                                if isinstance(cv, bool) or not isinstance(cv, int) or not 1 <= cv <= 5:
+                                    return 400, err(400, "invalid", "cabinet.sensitivity", "Use 1 to 5")[1]
+                            elif ck == "window_min":
+                                if isinstance(cv, bool) or not isinstance(cv, int) or not 0 <= cv <= 120 or cv % 5:
+                                    return 400, err(400, "invalid", "cabinet.window_min", "Use 0 to 120 in steps of 5")[1]
+                            elif ck == "mode":
+                                if cv not in ("any", "taught"):
+                                    return 400, err(400, "invalid", "cabinet.mode", "Use any or taught")[1]
+                                if cv == "taught" and cab["mode"] != "taught" and not dev.cab["taught"]:
+                                    return 409, err(409, "not_taught", "cabinet.mode",
+                                                    "Teach the movement on the device first")[1]
+                            else:
+                                return 400, err(400, "invalid", "cabinet." + ck, "Unknown field")[1]
+                            cab[ck] = cv
+                        new["cabinet"] = cab
                 dev.settings = new   # "rot" is the applied rotation: never written here
                 return 200, new
 
@@ -1134,6 +1244,7 @@ def main(argv=None):
     ap.add_argument("--low-battery", action="store_true")
     ap.add_argument("--ota-pending", action="store_true")
     ap.add_argument("--update", choices=["uptodate", "available", "dev", "offline", "checksum"], default="available")
+    ap.add_argument("--cabinet", choices=["taught", "not-taught"], default="taught")
     args = ap.parse_args(argv)
     Handler.dev = Device(args)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)

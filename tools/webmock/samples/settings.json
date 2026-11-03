@@ -1,1 +1,1 @@
-{"sound":true,"dnd":false,"volume":60,"brightness":50,"snooze_min":15,"dim_s":30,"off_bat_s":120,"off_usb_s":0,"rot_lock":false,"rot":0,"quiet":{"from":"22:00","to":"07:00"},"wifi_keep_batt":false}
+{"sound":true,"dnd":false,"volume":60,"brightness":50,"snooze_min":15,"dim_s":30,"off_bat_s":120,"off_usb_s":0,"rot_lock":false,"rot":0,"quiet":{"from":"22:00","to":"07:00"},"wifi_keep_batt":false,"cabinet":{"on":false,"mode":"any","chime":true,"light":true,"sensitivity":3,"window_min":15}}

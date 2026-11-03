@@ -2,6 +2,7 @@
 // Other pages add their entry to HY.settingsLinks and it is listed at the top.
 HY.settingsLinks = HY.settingsLinks || [];
 HY.settingsLinks.push({ href: "#/settings/wifi", text: "Wi-Fi", note: "Mode, saved networks, access point, host name" });
+HY.settingsLinks.push({ href: "#/settings/cabinet", text: "Cabinet open", note: "Remind when the cabinet is opened and a dose is due" });
 
 (function () {
   function section(title, kids) {

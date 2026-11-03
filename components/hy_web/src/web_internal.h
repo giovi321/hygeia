@@ -69,6 +69,7 @@ web_handler_t web_settings_route(hy_route_id_t id);   /* settings, time, chime, 
 web_handler_t web_wifi_route(hy_route_id_t id);       /* Wi-Fi */
 web_handler_t web_data_route(hy_route_id_t id);       /* export, import, firmware update */
 web_handler_t web_update_route(hy_route_id_t id);     /* firmware update from GitHub (h_update.c) */
+web_handler_t web_cabinet_route(hy_route_id_t id);    /* cabinet open (h_cabinet.c) */
 /* Subscribes once to the update status; each change goes out as a live event (h_update.c, at server start) */
 void web_update_start(void);
 

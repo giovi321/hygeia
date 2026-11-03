@@ -39,14 +39,6 @@ typedef struct { hy_cabev_kind_t kind; uint8_t take; float dist, thr; } hy_cabev
 /* event (may be NULL) is called in the LVGL task through lv_async_call. It must re-check the reaction condition
    before acting on HY_CABEV_REACT. */
 typedef struct { void (*event)(const hy_cabev_t *e); } hy_cab_ui_t;
-typedef struct { bool taught; int64_t taught_at; uint8_t mode; bool live, testing, teaching; float d_self, thr;
-                 uint16_t trig_mg; uint32_t wom_irq, captures, matches, others, reactions, capture_ms;
-                 uint32_t test_matches, test_others; } hy_cab_status_t;
-
-typedef enum { HY_CAB_REC_LIVE = 0, HY_CAB_REC_TEST } hy_cab_rec_kind_t;
-/* One recent Taught capture. at: epoch s (0 when the clock was not valid); dist INFINITY when a gate rejected it. */
-typedef struct { uint8_t kind; int64_t at; float dist, thr; bool match; hy_cab_seq_t seq; } hy_cab_recent_t;
-
 /* Loads the template file (/data/cabinet.bin) and installs the IMU interrupt hook. After the store is open and
    before hy_motion_init. A file that cannot be read leaves the runner "not taught" and the file in place. */
 esp_err_t hy_cab_run_init(const hy_cab_ui_t *ui);

@@ -4,9 +4,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "hy/cabinet.h"
 #include "hy/events.h"
 #include "hy/settings.h"
 #include "hy/types.h"
+
+struct cJSON;   /* the encoders below return cJSON trees; cJSON stays private to hy_core and hy_web */
 
 #define HY_API_VERSION 1
 
@@ -160,5 +163,18 @@ char *hy_api_state_json(const hy_api_state_t *s);
  * undone log_edited meds_changed untracked battery_low battery_critical clock_invalid. Length, or -1 when it
  * does not fit or the type is unknown. */
 int hy_api_event_json(const hy_event_t *ev, char *buf, size_t len);
+
+/* ---- cabinet open ---- */
+
+/* GET /api/cabinet from a status copy and the n recent results (oldest first).
+ * {"taught":bool,"taught_at":epoch|null,"mode":"any"|"taught","live":bool,"testing":bool,"teaching":bool,
+ *  "threshold":num|null,"trigger_mg":int,"counts":{"wom":n,"captures":n,"matches":n,"others":n,"reactions":n},
+ *  "test":{"matches":n,"others":n},"recent":[{"kind":"test"|"live","at":epoch|null,"dist":num|null,"thr":num|null,
+ *  "match":bool}]}. The threshold is null when not taught; at is null for 0, dist and thr when not finite.
+ * NULL on failure. The caller deletes the object. */
+struct cJSON *hy_api_cabinet_json(const hy_cab_status_t *st, const hy_cab_recent_t *recent, size_t n);
+/* {"type":"cabinet","test":{"matches":n,"others":n},"last":{"dist":d|null,"thr":t|null,"match":b}} into buf.
+ * Length, or -1 when it does not fit. */
+int hy_api_cabinet_event_json(const hy_cab_status_t *st, float dist, float thr, bool match, char *buf, size_t len);
 
 #endif /* HY_API_H */

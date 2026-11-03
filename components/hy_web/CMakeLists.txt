@@ -13,6 +13,7 @@ idf_component_register(
         "src/h_backup.c"
         "src/h_ota.c"
         "src/h_update.c"
+        "src/h_cabinet.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -32,6 +33,7 @@ idf_component_register(
         hy_audio
         hy_board
         hy_clock
+        hy_motion
         hy_net
         hy_power
         hy_sched

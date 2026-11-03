@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -903,6 +904,167 @@ static void test_api_settings_cab_bad(void)
 
 /* ---- state and events ---- */
 
+/* ---- cabinet open ---- */
+
+/* Unity here has no double support */
+#define ASSERT_NUM(want, got) TEST_ASSERT_TRUE_MESSAGE(fabs((double)(want) - (double)(got)) < 1e-4, #got)
+
+static void test_route_cabinet(void)
+{
+    uint32_t id = 0;
+    const hy_route_t *r = hy_route_match(HY_M_GET, "/api/cabinet", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_CABINET, r->id);
+    TEST_ASSERT_EQUAL_UINT8(0, r->flags);   /* paired session */
+    r = hy_route_match(HY_M_POST, "/api/cabinet/test", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_CABINET_TEST, r->id);
+    TEST_ASSERT_EQUAL_UINT8(0, r->flags);
+    r = hy_route_match(HY_M_GET, "/api/cabinet/samples.csv", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_CABINET_SAMPLES, r->id);
+    TEST_ASSERT_EQUAL_UINT8(0, r->flags);
+    r = hy_route_match(HY_M_DELETE, "/api/cabinet/teach", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_CABINET_DEL, r->id);
+    TEST_ASSERT_EQUAL_UINT8(0, r->flags);
+    /* methods are exact */
+    TEST_ASSERT_NULL(hy_route_match(HY_M_PUT, "/api/cabinet", &id));
+    TEST_ASSERT_NULL(hy_route_match(HY_M_GET, "/api/cabinet/test", &id));
+    TEST_ASSERT_NULL(hy_route_match(HY_M_POST, "/api/cabinet/samples.csv", &id));
+    TEST_ASSERT_NULL(hy_route_match(HY_M_GET, "/api/cabinet/teach", &id));
+    /* a query is ignored */
+    TEST_ASSERT_NOT_NULL(hy_route_match(HY_M_GET, "/api/cabinet?x=1", &id));
+}
+
+static hy_cab_status_t cab_status_taught(void)
+{
+    hy_cab_status_t st;
+    memset(&st, 0, sizeof st);
+    st.taught = true; st.taught_at = 1782000000; st.mode = HY_CAB_TAUGHT; st.live = true; st.testing = true;
+    st.thr = 0.75f; st.trig_mg = 90;
+    st.wom_irq = 11; st.captures = 7; st.matches = 5; st.others = 2; st.reactions = 3;
+    st.test_matches = 4; st.test_others = 1;
+    return st;
+}
+
+static void test_api_cabinet_json_not_taught(void)
+{
+    hy_cab_status_t st;
+    memset(&st, 0, sizeof st);
+    st.mode = HY_CAB_ANY;
+    cJSON *o = hy_api_cabinet_json(&st, NULL, 0);
+    TEST_ASSERT_NOT_NULL(o);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "taught")));
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(o, "taught_at")));
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(o, "threshold")));
+    TEST_ASSERT_EQUAL_STRING("any", cJSON_GetObjectItemCaseSensitive(o, "mode")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "live")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "testing")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "teaching")));
+    TEST_ASSERT_EQUAL_INT(0, (int)cJSON_GetObjectItemCaseSensitive(o, "trigger_mg")->valuedouble);
+    const cJSON *c = cJSON_GetObjectItemCaseSensitive(o, "counts");
+    TEST_ASSERT_TRUE(cJSON_IsObject(c));
+    const char *keys[] = {"wom", "captures", "matches", "others", "reactions"};
+    for (size_t i = 0; i < 5; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(c, keys[i]);
+        TEST_ASSERT_TRUE_MESSAGE(cJSON_IsNumber(v), keys[i]);
+        TEST_ASSERT_EQUAL_INT(0, (int)v->valuedouble);
+    }
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(o, "test");
+    TEST_ASSERT_EQUAL_INT(0, (int)cJSON_GetObjectItemCaseSensitive(t, "matches")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(0, (int)cJSON_GetObjectItemCaseSensitive(t, "others")->valuedouble);
+    const cJSON *rec = cJSON_GetObjectItemCaseSensitive(o, "recent");
+    TEST_ASSERT_TRUE(cJSON_IsArray(rec));
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(rec));
+    cJSON_Delete(o);
+}
+
+static void test_api_cabinet_json_taught(void)
+{
+    hy_cab_status_t st = cab_status_taught();
+    static hy_cab_recent_t rec[3];
+    memset(rec, 0, sizeof rec);
+    rec[0] = (hy_cab_recent_t){.kind = HY_CAB_REC_TEST, .at = 1782000100, .dist = 0.5f, .thr = 0.75f, .match = true};
+    rec[1] = (hy_cab_recent_t){.kind = HY_CAB_REC_LIVE, .at = 0, .dist = INFINITY, .thr = 0.75f, .match = false};
+    rec[2] = (hy_cab_recent_t){.kind = HY_CAB_REC_LIVE, .at = 1782000300, .dist = 1.25f, .thr = 0.75f, .match = false};
+    cJSON *o = hy_api_cabinet_json(&st, rec, 3);
+    TEST_ASSERT_NOT_NULL(o);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "taught")));
+    ASSERT_NUM(1782000000.0, cJSON_GetObjectItemCaseSensitive(o, "taught_at")->valuedouble);
+    TEST_ASSERT_EQUAL_STRING("taught", cJSON_GetObjectItemCaseSensitive(o, "mode")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "live")));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "testing")));
+    ASSERT_NUM(0.75, cJSON_GetObjectItemCaseSensitive(o, "threshold")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(90, (int)cJSON_GetObjectItemCaseSensitive(o, "trigger_mg")->valuedouble);
+    const cJSON *c = cJSON_GetObjectItemCaseSensitive(o, "counts");
+    TEST_ASSERT_EQUAL_INT(11, (int)cJSON_GetObjectItemCaseSensitive(c, "wom")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(7, (int)cJSON_GetObjectItemCaseSensitive(c, "captures")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(5, (int)cJSON_GetObjectItemCaseSensitive(c, "matches")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(2, (int)cJSON_GetObjectItemCaseSensitive(c, "others")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(3, (int)cJSON_GetObjectItemCaseSensitive(c, "reactions")->valuedouble);
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(o, "test");
+    TEST_ASSERT_EQUAL_INT(4, (int)cJSON_GetObjectItemCaseSensitive(t, "matches")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(1, (int)cJSON_GetObjectItemCaseSensitive(t, "others")->valuedouble);
+    const cJSON *a = cJSON_GetObjectItemCaseSensitive(o, "recent");
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(a));
+    const cJSON *r0 = cJSON_GetArrayItem(a, 0), *r1 = cJSON_GetArrayItem(a, 1), *r2 = cJSON_GetArrayItem(a, 2);
+    TEST_ASSERT_EQUAL_STRING("test", cJSON_GetObjectItemCaseSensitive(r0, "kind")->valuestring);
+    ASSERT_NUM(1782000100.0, cJSON_GetObjectItemCaseSensitive(r0, "at")->valuedouble);
+    ASSERT_NUM(0.5, cJSON_GetObjectItemCaseSensitive(r0, "dist")->valuedouble);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r0, "match")));
+    /* a clock that was not valid and a capture a gate rejected give nulls, never 0 or inf */
+    TEST_ASSERT_EQUAL_STRING("live", cJSON_GetObjectItemCaseSensitive(r1, "kind")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(r1, "at")));
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(r1, "dist")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(r1, "match")));
+    ASSERT_NUM(1.25, cJSON_GetObjectItemCaseSensitive(r2, "dist")->valuedouble);
+    /* the whole answer prints (no inf or nan in the text) */
+    char *txt = cJSON_PrintUnformatted(o);
+    TEST_ASSERT_NOT_NULL(txt);
+    TEST_ASSERT_NULL(strstr(txt, "inf"));
+    TEST_ASSERT_NULL(strstr(txt, "nan"));
+    free(txt);
+    cJSON_Delete(o);
+    /* taught with a non-finite threshold: null */
+    st.thr = NAN;
+    o = hy_api_cabinet_json(&st, NULL, 0);
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(o, "threshold")));
+    cJSON_Delete(o);
+    TEST_ASSERT_NULL(hy_api_cabinet_json(NULL, NULL, 0));
+}
+
+static void test_api_cabinet_event_json(void)
+{
+    hy_cab_status_t st = cab_status_taught();
+    char buf[192];
+    int n = hy_api_cabinet_event_json(&st, 0.5f, 0.75f, true, buf, sizeof buf);
+    TEST_ASSERT_GREATER_THAN(0, n);
+    TEST_ASSERT_EQUAL_INT((int)strlen(buf), n);
+    cJSON *o = cJSON_Parse(buf);
+    TEST_ASSERT_NOT_NULL(o);
+    TEST_ASSERT_EQUAL_STRING("cabinet", cJSON_GetObjectItemCaseSensitive(o, "type")->valuestring);
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(o, "test");
+    TEST_ASSERT_EQUAL_INT(4, (int)cJSON_GetObjectItemCaseSensitive(t, "matches")->valuedouble);
+    TEST_ASSERT_EQUAL_INT(1, (int)cJSON_GetObjectItemCaseSensitive(t, "others")->valuedouble);
+    const cJSON *l = cJSON_GetObjectItemCaseSensitive(o, "last");
+    ASSERT_NUM(0.5, cJSON_GetObjectItemCaseSensitive(l, "dist")->valuedouble);
+    ASSERT_NUM(0.75, cJSON_GetObjectItemCaseSensitive(l, "thr")->valuedouble);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(l, "match")));
+    cJSON_Delete(o);
+    /* a rejected capture and the Any movement trigger (no distance) give nulls */
+    n = hy_api_cabinet_event_json(&st, INFINITY, 0.0f, false, buf, sizeof buf);
+    TEST_ASSERT_GREATER_THAN(0, n);
+    o = cJSON_Parse(buf);
+    TEST_ASSERT_NOT_NULL(o);
+    l = cJSON_GetObjectItemCaseSensitive(o, "last");
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(l, "dist")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(l, "match")));
+    cJSON_Delete(o);
+    TEST_ASSERT_EQUAL_INT(-1, hy_api_cabinet_event_json(&st, 0.5f, 0.75f, true, buf, 20));
+    TEST_ASSERT_EQUAL_INT(-1, hy_api_cabinet_event_json(NULL, 0.5f, 0.75f, true, buf, sizeof buf));
+}
+
 static void test_state_json_nulls(void)
 {
     hy_api_state_t st;
@@ -1166,6 +1328,10 @@ int main(void)
     RUN_TEST(test_settings_clamped);
     RUN_TEST(test_api_settings_cab_roundtrip);
     RUN_TEST(test_api_settings_cab_bad);
+    RUN_TEST(test_route_cabinet);
+    RUN_TEST(test_api_cabinet_json_not_taught);
+    RUN_TEST(test_api_cabinet_json_taught);
+    RUN_TEST(test_api_cabinet_event_json);
     RUN_TEST(test_state_json_nulls);
     RUN_TEST(test_event_json_names);
     RUN_TEST(test_api_samples);

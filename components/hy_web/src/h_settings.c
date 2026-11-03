@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "hy/audio.h"
+#include "hy/cabinet_run.h"
 #include "hy/clock.h"
 #include "hy/actions.h"
 #include "hy/net.h"
@@ -33,6 +34,7 @@ typedef struct {
     const char *body;
     hy_settings_t now;
     bool failed;
+    bool not_taught;   /* the mode was set to Taught movement and no movement is taught: nothing was saved */
     hy_api_err_t aerr;
     esp_err_t save;
 } sctx_t;
@@ -79,6 +81,14 @@ static void job_settings_put(void *arg)
         return;
     }
     next.rot = old.rot;
+    if (next.cab_mode == HY_CAB_TAUGHT && old.cab_mode != HY_CAB_TAUGHT) {
+        hy_cab_status_t cs;
+        hy_cab_run_status(&cs);
+        if (!cs.taught) {
+            c->not_taught = true;
+            return;
+        }
+    }
     c->save = hy_settings_update(&next);   /* the RAM copy is updated even when the save fails */
     c->now = *hy_settings();
     if (c->now.cab_window_min != old.cab_window_min) {
@@ -106,6 +116,8 @@ static esp_err_t h_settings_put(web_req_t *r)
     esp_err_t e;
     if (c->failed) {
         e = web_fail_api(r, &c->aerr);
+    } else if (c->not_taught) {
+        e = web_send_err(r, 409, "not_taught", "cabinet.mode", "Teach the movement on the device first");
     } else if (c->save != ESP_OK) {
         e = web_fail(r, HY_E_IO);
     } else {

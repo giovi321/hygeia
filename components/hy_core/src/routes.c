@@ -45,6 +45,10 @@ static const hy_route_t TABLE[] = {
     { HY_M_GET,    "/api/update",                     HY_R_UPDATE,        0, "Settings > About > Check for update" },
     { HY_M_POST,   "/api/update/check",               HY_R_UPDATE_CHECK,  0, "Settings > About > Check for update" },
     { HY_M_POST,   "/api/update/install",             HY_R_UPDATE_INSTALL, 0, "Settings > About > Check for update" },
+    { HY_M_GET,    "/api/cabinet",                    HY_R_CABINET,       0, "Settings > Cabinet open" },
+    { HY_M_POST,   "/api/cabinet/test",               HY_R_CABINET_TEST,  0, "Settings > Cabinet open > Test" },
+    { HY_M_GET,    "/api/cabinet/samples.csv",        HY_R_CABINET_SAMPLES, 0, "" },
+    { HY_M_DELETE, "/api/cabinet/teach",              HY_R_CABINET_DEL,   0, "Settings > Cabinet open > Forget the movement" },
 };
 
 _Static_assert(sizeof TABLE / sizeof TABLE[0] == HY_R_COUNT, "one row per route id");

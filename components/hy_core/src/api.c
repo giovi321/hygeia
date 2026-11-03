@@ -194,3 +194,69 @@ bool hy_api_time_should_set(const hy_api_time_t *t, int64_t device_utc_ms, bool 
     if (d < 0) d = -d;
     return d > 2000;
 }
+
+/* ---- cabinet open ---- */
+
+/* A number rounded to 4 decimals (distances are floats; the digits past that are noise), null when not finite */
+static bool add_num_or_null(cJSON *o, const char *key, float v, bool valid)
+{
+    if (!valid || !isfinite(v)) return cJSON_AddNullToObject(o, key) != NULL;
+    return cJSON_AddNumberToObject(o, key, round((double)v * 10000.0) / 10000.0) != NULL;
+}
+
+cJSON *hy_api_cabinet_json(const hy_cab_status_t *st, const hy_cab_recent_t *recent, size_t n)
+{
+    if (!st || (n && !recent)) return NULL;
+    cJSON *o = cJSON_CreateObject();
+    if (!o) return NULL;
+    bool ok = cJSON_AddBoolToObject(o, "taught", st->taught) != NULL;
+    if (ok) {
+        if (st->taught && st->taught_at > 0) ok = cJSON_AddNumberToObject(o, "taught_at", (double)st->taught_at) != NULL;
+        else ok = cJSON_AddNullToObject(o, "taught_at") != NULL;
+    }
+    ok = ok && cJSON_AddStringToObject(o, "mode", st->mode == HY_CAB_TAUGHT ? "taught" : "any") &&
+         cJSON_AddBoolToObject(o, "live", st->live) && cJSON_AddBoolToObject(o, "testing", st->testing) &&
+         cJSON_AddBoolToObject(o, "teaching", st->teaching) && add_num_or_null(o, "threshold", st->thr, st->taught) &&
+         cJSON_AddNumberToObject(o, "trigger_mg", st->trig_mg);
+    cJSON *c = ok ? cJSON_AddObjectToObject(o, "counts") : NULL;
+    ok = c && cJSON_AddNumberToObject(c, "wom", st->wom_irq) && cJSON_AddNumberToObject(c, "captures", st->captures) &&
+         cJSON_AddNumberToObject(c, "matches", st->matches) && cJSON_AddNumberToObject(c, "others", st->others) &&
+         cJSON_AddNumberToObject(c, "reactions", st->reactions);
+    cJSON *t = ok ? cJSON_AddObjectToObject(o, "test") : NULL;
+    ok = t && cJSON_AddNumberToObject(t, "matches", st->test_matches) &&
+         cJSON_AddNumberToObject(t, "others", st->test_others);
+    cJSON *arr = ok ? cJSON_AddArrayToObject(o, "recent") : NULL;
+    ok = arr != NULL;
+    for (size_t i = 0; ok && i < n; i++) {
+        cJSON *e = cJSON_CreateObject();
+        if (!e) { ok = false; break; }
+        cJSON_AddItemToArray(arr, e);
+        if (recent[i].at > 0) ok = cJSON_AddNumberToObject(e, "at", (double)recent[i].at) != NULL;
+        else ok = cJSON_AddNullToObject(e, "at") != NULL;
+        ok = ok && cJSON_AddStringToObject(e, "kind", recent[i].kind == HY_CAB_REC_TEST ? "test" : "live") &&
+             add_num_or_null(e, "dist", recent[i].dist, true) && add_num_or_null(e, "thr", recent[i].thr, true) &&
+             cJSON_AddBoolToObject(e, "match", recent[i].match);
+    }
+    if (!ok) {
+        cJSON_Delete(o);
+        return NULL;
+    }
+    return o;
+}
+
+int hy_api_cabinet_event_json(const hy_cab_status_t *st, float dist, float thr, bool match, char *buf, size_t len)
+{
+    if (!st || !buf || len == 0) return -1;
+    cJSON *o = cJSON_CreateObject();
+    if (!o) return -1;
+    bool ok = cJSON_AddStringToObject(o, "type", "cabinet") != NULL;
+    cJSON *t = ok ? cJSON_AddObjectToObject(o, "test") : NULL;
+    ok = t && cJSON_AddNumberToObject(t, "matches", st->test_matches) &&
+         cJSON_AddNumberToObject(t, "others", st->test_others);
+    cJSON *l = ok ? cJSON_AddObjectToObject(o, "last") : NULL;
+    ok = l && add_num_or_null(l, "dist", dist, true) && add_num_or_null(l, "thr", thr, thr > 0.0f) &&
+         cJSON_AddBoolToObject(l, "match", match);
+    int n = ok ? hy_api_print(o, buf, len) : -1;
+    cJSON_Delete(o);
+    return n;
+}

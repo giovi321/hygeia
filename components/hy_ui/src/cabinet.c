@@ -6,6 +6,7 @@
 #include "hy/clock.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
+#include "hy/web.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_cab";
@@ -74,6 +75,11 @@ void cabinet_ui_event(const hy_cabev_t *e)
         break;
     case HY_CABEV_FAULT:
         ESP_LOGW(TAG, "cabinet: sensor fault, the feature is off until a settings change");
+        break;
+    case HY_CABEV_MATCH:
+    case HY_CABEV_OTHER:
+        hy_web_cabinet_event(e->dist, e->thr, e->kind == HY_CABEV_MATCH);
+        cab_event(e);
         break;
     default:
         cab_event(e);
