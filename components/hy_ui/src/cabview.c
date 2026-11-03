@@ -344,7 +344,6 @@ static void t_start_tap(void *ud)
     esp_err_t err = hy_cab_run_teach(true);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "teach did not start: %s", esp_err_to_name(err));
-        toast_show_info(HY_S_CAB_T_STOPPED);
         return;
     }
     memset(s_t_done, 0, sizeof s_t_done);

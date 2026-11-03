@@ -81,10 +81,10 @@ static void audio_task(void *arg)
             err = cerr;
         }
         if (err == ESP_CODEC_DEV_OK) {
-            ESP_LOGI(TAG, "chime played in %lld ms", (long long)((esp_timer_get_time() - t0) / 1000));
+            ESP_LOGI(TAG, "sound played in %lld ms", (long long)((esp_timer_get_time() - t0) / 1000));
             atomic_store(&s_ok, true);
         } else {
-            ESP_LOGE(TAG, "chime failed: %d", err);
+            ESP_LOGE(TAG, "sound failed: %d", err);
             atomic_store(&s_ok, false);
         }
         atomic_store(&s_busy, false);
@@ -267,6 +267,10 @@ fail:
         err = ESP_ERR_NO_MEM;
     }
 fail_free:
+    for (int t = 0; t < HY_TONE_N; t++) {
+        heap_caps_free(s_tone[t]);
+        s_tone[t] = NULL;
+    }
     heap_caps_free(s_buf);
     s_buf = NULL;
     s_samples = s_total = 0;
