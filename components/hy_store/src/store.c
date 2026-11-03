@@ -378,6 +378,13 @@ hy_err_t hy_store_open(const char *base_dir)
     return HY_OK;
 }
 
+hy_err_t hy_store_path(char *out, size_t n, const char *rel)
+{
+    if (!s_open || !out || !rel) return HY_E_IO;
+    int r = snprintf(out, n, "%s/%s", s_base, rel);
+    return r > 0 && (size_t)r < n ? HY_OK : HY_E_IO;
+}
+
 size_t hy_store_skipped_lines(void) { return s_skipped; }
 
 /* ---- medicines ---- */

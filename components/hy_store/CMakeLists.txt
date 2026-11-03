@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "src/store.c"
         "src/store_mount.c"
+        "src/cabinet_file.c"
         "src/settings_nvs.c"
     INCLUDE_DIRS
         "include"

@@ -22,7 +22,7 @@ INCLUDES += -I$(ROOT)/components/hy_clock/include
 endif
 
 CORE_SRCS  := $(wildcard $(ROOT)/components/hy_core/src/*.c)
-STORE_SRCS := $(wildcard $(ROOT)/components/hy_store/src/store.c)
+STORE_SRCS := $(wildcard $(ROOT)/components/hy_store/src/store.c $(ROOT)/components/hy_store/src/cabinet_file.c)
 CLOCK_SRCS := $(wildcard $(ROOT)/components/hy_clock/src/clock_valid.c $(ROOT)/components/hy_clock/src/rtc_codec.c)
 PROJ_SRCS  := $(CORE_SRCS) $(STORE_SRCS) $(CLOCK_SRCS)
 PROJ_OBJS  := $(patsubst $(ROOT)/%.c,$(BUILD)/obj/%.o,$(PROJ_SRCS))

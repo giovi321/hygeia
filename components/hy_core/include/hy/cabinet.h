@@ -87,4 +87,19 @@ float    hy_cab_threshold(const hy_cab_model_t *m, uint8_t sens);
    be NULL) gets that distance. False with INFINITY for a model that is not valid. */
 bool     hy_cab_match(const hy_cab_model_t *m, uint8_t sens, const hy_cab_seq_t *cap, float *best);
 
+/* Template file and CSV. Little-endian file: 32-byte header (magic "HYCB", version 1, rate, takes, flags bit 0
+   has_gyro, trigger mg u16, gyro start ms u16, d_self f32, created i64, 8 reserved bytes), then per take n u16,
+   the rest vector 3 x i16 and n x 6 x i16 (ax, ay, az mg; gx, gy, gz deci-dps), then the CRC-32 (IEEE) of
+   everything before it. */
+#define HY_CAB_FILE_MAX 7260   /* 32 + 3 x (8 + 200 x 12) + 4 */
+/* Bytes written, or 0 when max is too small, the model is not valid or a take has no samples or too many. */
+size_t   hy_cab_encode(const hy_cab_model_t *m, int64_t created, uint8_t *buf, size_t max);
+/* HY_E_CORRUPT on bad magic, length or CRC; HY_E_VERSION on another version. On success m is valid, each take's
+   has_gyro comes from the file's flag, and *created (may be NULL) is set. On failure m->valid is false. */
+hy_err_t hy_cab_decode(const uint8_t *buf, size_t len, hy_cab_model_t *m, int64_t *created);
+/* One CSV block for a sequence: rows "kind,take,t_ms,ax,ay,az,gx,gy,gz\n" (no header), t_ms from the first
+   sample. Returns the bytes written (the text is also NUL-terminated), 0 if max is too short. */
+size_t   hy_cab_csv_rows(const hy_cab_seq_t *q, const char *kind, int take, char *buf, size_t max);
+#define  HY_CAB_CSV_HEADER "kind,take,t_ms,ax,ay,az,gx,gy,gz\n"
+
 #endif

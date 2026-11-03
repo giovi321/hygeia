@@ -17,6 +17,8 @@ const char *hy_err_str(hy_err_t e)
     case HY_W_TOO_SOON:     return "HY_W_TOO_SOON";
     case HY_E_INTERVAL:     return "HY_E_INTERVAL";
     case HY_E_DOSE:         return "HY_E_DOSE";
+    case HY_E_CORRUPT:      return "HY_E_CORRUPT";
+    case HY_E_VERSION:      return "HY_E_VERSION";
     }
     return "HY_E_?";
 }

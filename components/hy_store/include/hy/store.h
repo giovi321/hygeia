@@ -71,6 +71,9 @@ hy_err_t hy_store_import_log(const hy_log_t *e, size_t n);
 hy_err_t hy_store_import_gap(const hy_gap_t *g, hy_gap_reason_t r);
 hy_err_t hy_store_import_commit(void);
 void     hy_store_import_abort(void);
+/* Path of a file directly under base_dir, for modules that keep their own file there. HY_E_IO when the store is
+   not open or the path does not fit. */
+hy_err_t hy_store_path(char *out, size_t n, const char *rel);
 /* Free bytes of the file system holding base_dir. NULL (the default) skips the space check. */
 void     hy_store_set_free_fn(size_t (*fn)(void));
 
