@@ -13,6 +13,7 @@ void hy_wake_gate_reset(hy_wake_gate_t *g)
     g->tb = 0;
     g->begun = false;
     g->fdown = false;
+    g->fails = 0;
     g->lx = g->ly = 0;
 }
 
@@ -114,6 +115,7 @@ hy_wg_act_t hy_wake_gate_sample(hy_wake_gate_t *g, uint32_t t, bool ok, bool dow
         return HY_WG_SLEEP;
     }
     if (ok) {
+        g->fails = 0;
         if (down && !g->fdown) {
             g->fdown = true;
             act = hy_wake_gate_down(g, false, t, x, y);
@@ -130,7 +132,7 @@ hy_wg_act_t hy_wake_gate_sample(hy_wake_gate_t *g, uint32_t t, bool ok, bool dow
             g->lx = x;
             g->ly = y;
         }
-    } else if (g->st == ST_IDLE) {
+    } else if (g->st == ST_IDLE && ++g->fails >= 2) {
         hy_wake_gate_reset(g);
         return HY_WG_SLEEP;   /* the controller does not answer and nothing was seen: give up */
     }

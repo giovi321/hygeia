@@ -43,6 +43,7 @@ static bool s_nousb;                   /* debug `scr nousb`: the state machine r
 static uint32_t s_chime_gen;           /* scheduler generation whose chime was counted */
 static bool s_guard;
 static uint32_t s_guard_t0;
+static bool s_guard_multi;   /* every stroke that starts within GUARD_MS of s_guard_t0 only wakes, not just one */
 
 static void bri_exec(void *v, int32_t b)
 {
@@ -431,17 +432,23 @@ void screen_double_tap_wake(void)
     event(HY_SE_TOUCH, "double tap");
 }
 
-/* A touch was being judged when another cause ended the sleep mode: the stroke right after only wakes */
+/* A double-tap attempt was being judged when another cause ended the sleep mode: its taps (the finger under the glass,
+ * the second tap up to about 0.8 s later) must not reach the screen the wake shows. Every stroke that starts within
+ * GUARD_MS only wakes. */
 void screen_wake_guard_set(void)
 {
-    s_guard = true;
+    s_guard_multi = true;
     s_guard_t0 = lv_tick_get();
 }
 
 bool screen_wake_guard_take(void)
 {
-    bool g = s_guard && lv_tick_elaps(s_guard_t0) < GUARD_MS;
+    bool within = lv_tick_elaps(s_guard_t0) < GUARD_MS;
+    bool g = (s_guard || s_guard_multi) && within;
     s_guard = false;
+    if (!within) {
+        s_guard_multi = false;
+    }
     return g;
 }
 

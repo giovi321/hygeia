@@ -141,9 +141,15 @@ static void test_sample_noise_and_failures(void)
     /* an interrupt with no finger: noise */
     hy_wake_gate_begin(&g, 1000);
     TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1005, true, false, 0, 0));
-    /* a controller that never answers: the first failed poll before any touch ends it */
+    /* a controller that never answers: the second failed poll before any touch ends it, the first is retried */
     hy_wake_gate_begin(&g, 1000);
-    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1005, false, false, 0, 0));
+    TEST_ASSERT_EQUAL(HY_WG_NONE, hy_wake_gate_sample(&g, 1005, false, false, 0, 0));
+    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1020, false, false, 0, 0));
+    /* the first read after standby fails, the retry sees the finger */
+    hy_wake_gate_begin(&g, 1000);
+    TEST_ASSERT_EQUAL(HY_WG_NONE, hy_wake_gate_sample(&g, 1005, false, false, 0, 0));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1020, true, true, 60, 60));
+
     /* it answers once, then fails while the finger is down: the long press rule still ends it */
     hy_wake_gate_begin(&g, 1000);
     TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1005, true, true, 50, 50));
@@ -154,12 +160,22 @@ static void test_sample_noise_and_failures(void)
 static void test_sample_cap(void)
 {
     hy_wake_gate_t g;
-    /* a first tap whose gap polls keep failing: capped at HY_WG_MAX_MS even without a tick result */
+    /* Taps that alternate between two places 150 px apart, every 150 ms: each one is a new first tap, so neither the
+     * gap tick nor the long-press tick ever ends the judgment. Only the cap does. */
     hy_wake_gate_begin(&g, 1000);
-    hy_wake_gate_sample(&g, 1005, true, true, 50, 50);
-    hy_wake_gate_sample(&g, 1050, true, false, 0, 0);
-    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1000 + HY_WG_MAX_MS, false, false, 0, 0));
-    TEST_ASSERT_EQUAL(HY_WG_NONE, hy_wake_gate_tick(&g, 1000 + HY_WG_MAX_MS + 1));
+    for (int i = 0; i < 20; i++) {
+        uint32_t t = 1000 + 150u * (uint32_t)i;
+        int16_t x = (i % 2) ? 250 : 100;
+        hy_wg_act_t want = (t - 1000 >= HY_WG_MAX_MS) ? HY_WG_SLEEP : HY_WG_WAIT;
+        hy_wg_act_t a1 = hy_wake_gate_sample(&g, t, true, true, x, 100);
+        TEST_ASSERT_EQUAL_MESSAGE(want, a1, "down");
+        if (want == HY_WG_SLEEP) {
+            TEST_ASSERT_EQUAL(HY_WG_NONE, hy_wake_gate_tick(&g, t + 1));
+            return;
+        }
+        TEST_ASSERT_EQUAL_MESSAGE(HY_WG_WAIT, hy_wake_gate_sample(&g, t + 40, true, false, 0, 0), "up");
+    }
+    TEST_FAIL_MESSAGE("the cap never ended the judgment");
 }
 
 int main(void)

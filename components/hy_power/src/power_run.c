@@ -87,6 +87,7 @@ static bool (*volatile s_wake_single_fn)(void);
  * is up and the pin reads high. */
 static hy_wake_gate_t s_wg;
 static volatile bool s_wg_active, s_wg_rearm;
+static uint8_t s_exit_pending;   /* exit_sleep calls in progress; s_mux */
 static int64_t s_wg_rearm_t0_ms;
 static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
 static StaticSemaphore_t s_sleep_mu_buf;
@@ -434,8 +435,16 @@ static bool wake_single(void)
  * it. */
 static void wg_begin(void)
 {
+    portENTER_CRITICAL(&s_mux);
+    bool ok = s_exit_pending == 0;   /* another task is ending the sleep mode: no judgment starts */
+    if (ok) {
+        s_wg_active = true;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (!ok) {
+        return;
+    }
     hy_wake_gate_begin(&s_wg, (uint32_t)mono_ms());
-    s_wg_active = true;
     s_wg_rearm = false;
     ESP_LOGI(TAG, "touch wake: judging (double tap needed)");
 }
@@ -612,16 +621,10 @@ static void enter_sleep(void)
  * The state and the request are cleared before the resume: a re-request in LVGL's first pass then stands.
  * Work for the LVGL task (lv_async_call) is queued before this call, not after: once LVGL runs, a tick can pause it
  * again, and a call queued after that waits for the next wake. */
-static void exit_sleep(wake_cause_t cause)
+static void exit_sleep_locked(wake_cause_t cause)
 {
     if (cause == W_DEBUG && hy_board_in_lvgl_task()) {
         cause = W_UI;
-    }
-    /* A touch is being judged (or its finger may still be down) and another cause ends the sleep mode: the stroke
-     * under the finger must not reach whatever the wake shows. The guard is queued here, not under s_sleep_mu (the
-     * LVGL task may hold the LVGL lock and wait for it), and not from the LVGL task itself. */
-    if (s_asleep && (s_wg_active || s_wg_rearm) && !hy_board_in_lvgl_task()) {
-        post(async_wake, (void *)(uintptr_t)HY_PWAKE_GUARD);
     }
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
     if (!s_asleep) {
@@ -652,6 +655,26 @@ static void exit_sleep(wake_cause_t cause)
     xSemaphoreGive(s_sleep_mu);
     ESP_LOGI(TAG, "power: wake (%s) at %lld ms, asleep %lld ms", k_cause[cause], (long long)now,
              (long long)asleep_ms);
+}
+
+/* A touch is being judged and another cause ends the sleep mode: the strokes of the double-tap attempt must not reach
+ * whatever the wake shows (HY_PWAKE_GUARD swallows every stroke that starts soon after). s_exit_pending is raised before
+ * the judgment flag is read, and wg_begin looks at it under the same spinlock: either the judgment began first and
+ * is seen here, or it never begins. The guard is queued here, not under s_sleep_mu (the LVGL task may hold the LVGL
+ * lock and wait for it), and not from the LVGL task itself. */
+static void exit_sleep(wake_cause_t cause)
+{
+    portENTER_CRITICAL(&s_mux);
+    s_exit_pending++;
+    bool judging = s_asleep && s_wg_active;
+    portEXIT_CRITICAL(&s_mux);
+    if (judging && !hy_board_in_lvgl_task()) {
+        post(async_wake, (void *)(uintptr_t)HY_PWAKE_GUARD);
+    }
+    exit_sleep_locked(cause);
+    portENTER_CRITICAL(&s_mux);
+    s_exit_pending--;
+    portEXIT_CRITICAL(&s_mux);
 }
 
 void hy_power_screen_off(bool off)

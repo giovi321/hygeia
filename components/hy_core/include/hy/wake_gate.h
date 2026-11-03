@@ -27,6 +27,7 @@ typedef struct {
     uint32_t tb;                 /* when the judgment began (hy_wake_gate_begin) */
     bool     begun;
     bool     fdown;              /* hy_wake_gate_sample saw a finger on the glass */
+    uint8_t  fails;              /* failed polls in a row */
     int16_t  lx, ly;             /* its last position */
 } hy_wake_gate_t;
 
@@ -38,7 +39,7 @@ void        hy_wake_gate_reset(hy_wake_gate_t *g);
 void        hy_wake_gate_begin(hy_wake_gate_t *g, uint32_t t_ms);
 /* One poll of the touch controller (the caller polls every few ms after the begin): ok false = the read failed;
  * down/x/y = the finger. Turns the samples into down, move and up events and ticks the clock. A poll that shows no
- * finger before any touch was seen, a failed poll before any touch, and a judgment older than HY_WG_MAX_MS give
+ * finger before any touch was seen, two failed polls in a row before any touch (the first read after standby may fail), and a judgment older than HY_WG_MAX_MS give
  * SLEEP (noise, or a controller that does not answer). Otherwise as the three functions below. */
 hy_wg_act_t hy_wake_gate_sample(hy_wake_gate_t *g, uint32_t t_ms, bool ok, bool down, int16_t x, int16_t y);
 /* Finger down. single_tap_wakes: WAKE at once. Otherwise WAIT. */
