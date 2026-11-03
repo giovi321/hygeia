@@ -488,6 +488,7 @@ static void test_counts(void)
 static void test_start(void)
 {
     s_x_last = 0;
+    lv_label_set_text(s_x_hint, HY_S_CAB_X_HINT);   /* clears a Paused note from an earlier fault */
     esp_err_t err = hy_cab_run_test(true);
     s_x_on = err == ESP_OK;
     if (!s_x_on) {

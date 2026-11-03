@@ -56,7 +56,7 @@ void      hy_web_pair_cancel(void);
 esp_err_t hy_web_forget_all(void);
 /* Number of paired browsers (0..4). Any task. */
 size_t    hy_web_paired_count(void);
-/* LVGL task, after each cabinet test result: pushes {"type":"cabinet","test":{..},"last":{..}} to the open browsers
+/* LVGL task, after each cabinet test result: pushes {"ev":"cabinet","test":{..},"last":{..}} to the open browsers
  * while a test runs. dist is INFINITY (or 0 with thr 0 for Any movement) when there is no distance. */
 void      hy_web_cabinet_event(float dist, float thr, bool match);
 /* Any task. Restarts the device from the LVGL task, the only task that writes the store, so no write is cut halfway.

@@ -173,7 +173,7 @@ int hy_api_event_json(const hy_event_t *ev, char *buf, size_t len);
  *  "match":bool}]}. The threshold is null when not taught; at is null for 0, dist and thr when not finite.
  * NULL on failure. The caller deletes the object. */
 struct cJSON *hy_api_cabinet_json(const hy_cab_status_t *st, const hy_cab_recent_t *recent, size_t n);
-/* {"type":"cabinet","test":{"matches":n,"others":n},"last":{"dist":d|null,"thr":t|null,"match":b}} into buf.
+/* {"ev":"cabinet","test":{"matches":n,"others":n},"last":{"dist":d|null,"thr":t|null,"match":b}} into buf.
  * Length, or -1 when it does not fit. */
 int hy_api_cabinet_event_json(const hy_cab_status_t *st, float dist, float thr, bool match, char *buf, size_t len);
 
