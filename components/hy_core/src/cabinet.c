@@ -36,10 +36,19 @@ void hy_cab_features(const hy_cab_seq_t *q, hy_cab_feat_t *out)
     }
 }
 
+/* The trigger sees the change over one sensor sample (48 ms). Bounds from the replay of the recordings and the
+   synthetic door (test_cab_rec.c). At rest the change stays at 31 mg at most (3 samples over 28 mg in 88 s of
+   still parts). A door pulled by hand to 120 dps in 0.4 s, 0.15 m from the hinge, changes by 48 mg at most (its
+   tangential acceleration rises smoothly to 126 mg); a knock on the table the device lies on by 90 mg.
+   - 100: above the knock (0 triggers); still a lift (putdown_pickup 8) and a firm door (2.1 times nominal)
+   - 64: a door 1.33 times nominal; the knock fires once
+   - 40 (default): the nominal door down to 0.83 of it; equal to the teach trigger
+   - 37: a door 0.77 of nominal
+   - 34: a door 0.71 of nominal; 3 mg above the largest change at rest */
 uint16_t hy_cab_wom_mg(uint8_t sens)
 {
-    static const uint16_t mg[5] = { 250, 160, 100, 64, 40 };
-    if (sens < 1 || sens > 5) return 100;
+    static const uint16_t mg[5] = { 100, 64, 40, 37, 34 };
+    if (sens < 1 || sens > 5) return 40;
     return mg[sens - 1];
 }
 

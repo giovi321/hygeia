@@ -154,18 +154,21 @@ static void test_feat_gyro_mask(void)
 
 static void test_wom_mapping(void)
 {
-    const uint16_t want[] = { 250, 160, 100, 64, 40 };
+    const uint16_t want[] = { 100, 64, 40, 37, 34 };
     for (uint8_t s = 1; s <= 5; s++) TEST_ASSERT_EQUAL_UINT16(want[s - 1], hy_cab_wom_mg(s));
-    TEST_ASSERT_EQUAL_UINT16(100, hy_cab_wom_mg(0));
-    TEST_ASSERT_EQUAL_UINT16(100, hy_cab_wom_mg(6));
+    TEST_ASSERT_EQUAL_UINT16(40, hy_cab_wom_mg(0));
+    TEST_ASSERT_EQUAL_UINT16(40, hy_cab_wom_mg(6));
 }
 
 static void test_wom_hit_table_knock_default(void)
 {
-    /* A knock peaking at 88 mg one sensor sample after a still one: under the default, over 64 mg. */
+    /* A knock peaking at 88 mg one sensor sample after a still one: under the least sensitive step, over 64 mg
+       and the default (the default favours catching a door pulled by hand; see hy_cab_wom_mg). */
     hy_accel_t still = { 0, -1000, 0 }, knock = { 60, -1088, 30 };
     TEST_ASSERT_FALSE(hy_cab_wom_hit(still, knock, 100));
     TEST_ASSERT_TRUE(hy_cab_wom_hit(still, knock, 64));
+    TEST_ASSERT_FALSE(hy_cab_wom_hit(still, knock, hy_cab_wom_mg(1)));
+    TEST_ASSERT_TRUE(hy_cab_wom_hit(still, knock, hy_cab_wom_mg(3)));
     /* Strictly more than the threshold, on any axis, either sign. */
     TEST_ASSERT_FALSE(hy_cab_wom_hit(still, (hy_accel_t){ 100, -1000, 0 }, 100));
     TEST_ASSERT_TRUE(hy_cab_wom_hit(still, (hy_accel_t){ -101, -1000, 0 }, 100));

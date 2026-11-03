@@ -31,7 +31,7 @@ typedef struct { float gv, gh, av, ah; } hy_cab_feat_t;      /* dps, dps, mg, mg
    device about the vertical leaves them unchanged. Gyro rows before HY_CAB_GYRO_START_MS and all gyro rows when
    !has_gyro are 0. A rest vector shorter than 1 mg gives all zero rows. out has q->n rows. */
 void     hy_cab_features(const hy_cab_seq_t *q, hy_cab_feat_t *out);
-uint16_t hy_cab_wom_mg(uint8_t sens);                        /* 250, 160, 100, 64, 40; out of range: 100 */
+uint16_t hy_cab_wom_mg(uint8_t sens);                        /* 100, 64, 40, 37, 34; out of range: 40 */
 /* The sensor's sample period in wake on motion: low-power accel at 21 Hz (47.6 ms) */
 #define HY_CAB_WOM_PERIOD_MS    48
 /* The sensor's wake-on-motion decision for one sample: true when any axis of a differs from prev, the sensor's
@@ -67,8 +67,13 @@ bool hy_cab_still_feed(hy_cab_still_t *st, uint32_t t_ms, hy_accel_t a, hy_accel
 
 #define HY_CAB_TAKES          3
 #define HY_CAB_OPEN_BEGIN_N  10      /* 200 ms */
-#define HY_CAB_THR_MIN     0.25f     /* provisional; set from the recordings */
-#define HY_CAB_THR_MAX     2.0f
+/* Threshold bounds from the replays (test_cabmatch.c, test_cab_rec.c). THR_MIN: the tightest model's variants
+   need up to 0.200 (synthetic lift; door 0.289, tilt 0.629), so a model of near identical takes still accepts its
+   own movement. THR_MAX: putdown_pickup (accel only) has takes 1.898 from each other, its nearest negative window
+   in the other recordings is 3.072; 2.4 is about their geometric middle. A model reaches it only with d_self of
+   1.5 or more; the synthetic door models have 0.35 and their nearest negative, a door closing, is 1.880. */
+#define HY_CAB_THR_MIN     0.25f
+#define HY_CAB_THR_MAX     2.4f
 #define HY_CAB_ODD_RATIO   3.0f
 typedef struct { hy_cab_seq_t take[HY_CAB_TAKES]; float d_self; uint16_t trig_mg; bool valid; } hy_cab_model_t;
 

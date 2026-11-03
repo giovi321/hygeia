@@ -20,7 +20,12 @@
    amp scales the size (rate, angle, acceleration), dur scales the duration, start_ms is the still lead before the
    movement. noise adds a seeded uniform noise of +-10 mg on the accel and +-1 dps on the gyro on every sample,
    also outside the movement; the same seed gives the same noise. Samples before and after the movement read the
-   rest vector. */
+   rest vector.
+
+   ramp (door kinds only) replaces the half-sine rate with a sin^2 rate of the same peak and duration, so the
+   tangential acceleration starts and ends at 0 instead of jumping to its peak on the first sample (126 mg at the
+   nominal size). The wake-on-motion trigger compares successive samples, so the step overstates how early and how
+   surely a door fires it; ramp gives the smooth start of a door pulled by hand. */
 
 #include <math.h>
 #include <string.h>
@@ -36,6 +41,7 @@ typedef struct {
     uint32_t seed;
     hy_accel_t rest;
     bool has_gyro;
+    bool ramp;
 } cab_syn_t;
 
 #define CAB_SYN_STEP_MS (1000 / HY_CAB_RATE_HZ)
@@ -121,6 +127,10 @@ static inline hy_imu6_t cab_syn_sample(const cab_syn_t *p, uint32_t i)
             double peak = 120.0 * p->amp * pi / 180.0;               /* rad/s */
             double om = sign * peak * sin(pi * t / span);
             double al = sign * peak * (pi / span) * cos(pi * t / span);
+            if (p->ramp) {
+                om = sign * peak * sin(pi * t / span) * sin(pi * t / span);
+                al = sign * peak * (pi / span) * sin(2.0 * pi * t / span);
+            }
             cab_v3_t e_t = cab_v3_cross(u, e1);
             a = cab_v3_add(rest, cab_v3_mul(cab_v3_add(cab_v3_mul(e1, -om * om * radius), cab_v3_mul(e_t, al * radius)),
                                             mg_per_ms2));
