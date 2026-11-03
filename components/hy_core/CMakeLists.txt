@@ -22,6 +22,7 @@ idf_component_register(
         "src/orient.c"
         "src/shake.c"
         "src/cabinet.c"
+        "src/cabmatch.c"
         "src/netcfg.c"
         "src/dns.c"
         "src/auth.c"

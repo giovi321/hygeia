@@ -50,4 +50,37 @@ typedef struct { hy_accel_t last, sum_buf[10]; uint8_t idx, cnt; uint32_t still_
 void hy_cab_still_reset(hy_cab_still_t *st);
 bool hy_cab_still_feed(hy_cab_still_t *st, uint32_t t_ms, hy_accel_t a, hy_accel_t *rest);
 
+/* Taught movement matcher. */
+#include "hy/types.h"
+
+#define HY_CAB_TAKES          3
+#define HY_CAB_OPEN_BEGIN_N  10      /* 200 ms */
+#define HY_CAB_THR_MIN     0.25f     /* provisional; set from the recordings */
+#define HY_CAB_THR_MAX     2.0f
+#define HY_CAB_ODD_RATIO   3.0f
+typedef struct { hy_cab_seq_t take[HY_CAB_TAKES]; float d_self; uint16_t trig_mg; bool valid; } hy_cab_model_t;
+
+/* DTW distance between a template and a capture over the four features, scaled (gv, gh by 1/50 dps; av, ah by
+   1/100 mg), local cost the L1 sum, gyro channels left out where masked in either row or absent in either
+   sequence. Open begin: the template's first sample may align with capture samples 0 to HY_CAB_OPEN_BEGIN_N.
+   Open end: its last sample may align with any capture sample from index L/2 on (L the template length). Band:
+   capture index j within i - r to i + HY_CAB_OPEN_BEGIN_N + r of template index i, r = max(10, L/4). Result:
+   total cost / L. INFINITY when a gate rejects: capture length outside 0.5 to 2 times L, or the capture's mean
+   scaled energy over its first min(n, L) samples outside 1/3 to 3 times the template's. Uses static scratch:
+   single caller at a time. */
+float    hy_cab_dist(const hy_cab_seq_t *tmpl, const hy_cab_seq_t *cap);
+/* Copies the takes into m and trims each to the first sample at which the live trigger fires (hy_cab_wom_hit at
+   trig_mg; trig_mg = half the smallest peak deviation from rest over the takes, clamped to HY_CAB_TRIG_MIN_MG to
+   HY_CAB_TRIG_MAX_MG). For each take, s = its smallest distance as a capture to the other two as templates;
+   d_self = the largest s. A take whose s is above HY_CAB_ODD_RATIO times the mean of the other two s and above
+   HY_CAB_THR_MIN is the outlier (the largest such s if several). HY_E_INVALID with *odd set to the outlier, or to
+   the take with the largest s when d_self is not finite, or to an empty take; else HY_OK, *odd = -1, m->valid. */
+hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_TAKES], int *odd);
+/* clamp(k[sens] * d_self, HY_CAB_THR_MIN, HY_CAB_THR_MAX), k = 1.0, 1.3, 1.6, 2.0, 2.5 for sensitivity 1 to 5;
+   out of range: 3. */
+float    hy_cab_threshold(const hy_cab_model_t *m, uint8_t sens);
+/* True when the smallest distance from the capture to the model's takes is at or under the threshold; *best (may
+   be NULL) gets that distance. False with INFINITY for a model that is not valid. */
+bool     hy_cab_match(const hy_cab_model_t *m, uint8_t sens, const hy_cab_seq_t *cap, float *best);
+
 #endif
