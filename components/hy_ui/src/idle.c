@@ -431,6 +431,13 @@ void screen_double_tap_wake(void)
     event(HY_SE_TOUCH, "double tap");
 }
 
+/* A touch was being judged when another cause ended the sleep mode: the stroke right after only wakes */
+void screen_wake_guard_set(void)
+{
+    s_guard = true;
+    s_guard_t0 = lv_tick_get();
+}
+
 bool screen_wake_guard_take(void)
 {
     bool g = s_guard && lv_tick_elaps(s_guard_t0) < GUARD_MS;

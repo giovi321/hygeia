@@ -24,9 +24,23 @@ typedef struct {
     uint16_t max_dev;            /* the largest |x - x0| or |y - y0| seen */
     int16_t  px, py;             /* the end of the first tap */
     uint32_t pt;                 /* its end time */
+    uint32_t tb;                 /* when the judgment began (hy_wake_gate_begin) */
+    bool     begun;
+    bool     fdown;              /* hy_wake_gate_sample saw a finger on the glass */
+    int16_t  lx, ly;             /* its last position */
 } hy_wake_gate_t;
 
+/* Longest a touch is judged from hy_wake_gate_begin: a double tap fits in about 1.1 s. */
+#define HY_WG_MAX_MS 2000
+
 void        hy_wake_gate_reset(hy_wake_gate_t *g);
+/* The CPU was woken by a touch interrupt at t_ms and the judgment starts (reset first). */
+void        hy_wake_gate_begin(hy_wake_gate_t *g, uint32_t t_ms);
+/* One poll of the touch controller (the caller polls every few ms after the begin): ok false = the read failed;
+ * down/x/y = the finger. Turns the samples into down, move and up events and ticks the clock. A poll that shows no
+ * finger before any touch was seen, a failed poll before any touch, and a judgment older than HY_WG_MAX_MS give
+ * SLEEP (noise, or a controller that does not answer). Otherwise as the three functions below. */
+hy_wg_act_t hy_wake_gate_sample(hy_wake_gate_t *g, uint32_t t_ms, bool ok, bool down, int16_t x, int16_t y);
 /* Finger down. single_tap_wakes: WAKE at once. Otherwise WAIT. */
 hy_wg_act_t hy_wake_gate_down(hy_wake_gate_t *g, bool single_tap_wakes, uint32_t t_ms, int16_t x, int16_t y);
 /* Finger moved while down (optional; the release position counts anyway). */

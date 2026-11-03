@@ -10,6 +10,17 @@ void hy_wake_gate_reset(hy_wake_gate_t *g)
     g->x0 = g->y0 = g->x = g->y = g->px = g->py = 0;
     g->t0 = g->pt = 0;
     g->max_dev = 0;
+    g->tb = 0;
+    g->begun = false;
+    g->fdown = false;
+    g->lx = g->ly = 0;
+}
+
+void hy_wake_gate_begin(hy_wake_gate_t *g, uint32_t t)
+{
+    hy_wake_gate_reset(g);
+    g->begun = true;
+    g->tb = t;
 }
 
 static void begin(hy_wake_gate_t *g, uint32_t t, int16_t x, int16_t y)
@@ -93,4 +104,37 @@ hy_wg_act_t hy_wake_gate_tick(hy_wake_gate_t *g, uint32_t t)
     default:
         return HY_WG_NONE;
     }
+}
+
+hy_wg_act_t hy_wake_gate_sample(hy_wake_gate_t *g, uint32_t t, bool ok, bool down, int16_t x, int16_t y)
+{
+    hy_wg_act_t act = HY_WG_NONE;
+    if (g->begun && (int32_t)(t - g->tb) >= HY_WG_MAX_MS) {
+        hy_wake_gate_reset(g);
+        return HY_WG_SLEEP;
+    }
+    if (ok) {
+        if (down && !g->fdown) {
+            g->fdown = true;
+            act = hy_wake_gate_down(g, false, t, x, y);
+        } else if (down) {
+            hy_wake_gate_move(g, x, y);
+        } else if (g->fdown) {
+            g->fdown = false;
+            act = hy_wake_gate_up(g, t, g->lx, g->ly);
+        } else if (g->st == ST_IDLE) {
+            hy_wake_gate_reset(g);
+            return HY_WG_SLEEP;   /* the interrupt came with no finger on the glass: noise */
+        }
+        if (down) {
+            g->lx = x;
+            g->ly = y;
+        }
+    } else if (g->st == ST_IDLE) {
+        hy_wake_gate_reset(g);
+        return HY_WG_SLEEP;   /* the controller does not answer and nothing was seen: give up */
+    }
+    if (act == HY_WG_WAKE || act == HY_WG_SLEEP) return act;
+    hy_wg_act_t tk = hy_wake_gate_tick(g, t);
+    return tk != HY_WG_NONE ? tk : act;
 }

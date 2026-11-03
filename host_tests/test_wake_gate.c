@@ -123,6 +123,45 @@ static void test_clock_wraps(void)
     TEST_ASSERT_EQUAL(HY_WG_WAKE, hy_wake_gate_up(&g, t + 250, 52, 50));
 }
 
+static void test_sample_double_tap(void)
+{
+    hy_wake_gate_t g;
+    hy_wake_gate_begin(&g, 1000);
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1005, true, true, 100, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1020, true, true, 101, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1065, true, false, 0, 0));   /* first tap up */
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1100, true, false, 0, 0));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1200, true, true, 105, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAKE, hy_wake_gate_sample(&g, 1260, true, false, 0, 0));
+}
+
+static void test_sample_noise_and_failures(void)
+{
+    hy_wake_gate_t g;
+    /* an interrupt with no finger: noise */
+    hy_wake_gate_begin(&g, 1000);
+    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1005, true, false, 0, 0));
+    /* a controller that never answers: the first failed poll before any touch ends it */
+    hy_wake_gate_begin(&g, 1000);
+    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1005, false, false, 0, 0));
+    /* it answers once, then fails while the finger is down: the long press rule still ends it */
+    hy_wake_gate_begin(&g, 1000);
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1005, true, true, 50, 50));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_wake_gate_sample(&g, 1100, false, false, 0, 0));
+    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1005 + HY_LONG_PRESS_MS, false, false, 0, 0));
+}
+
+static void test_sample_cap(void)
+{
+    hy_wake_gate_t g;
+    /* a first tap whose gap polls keep failing: capped at HY_WG_MAX_MS even without a tick result */
+    hy_wake_gate_begin(&g, 1000);
+    hy_wake_gate_sample(&g, 1005, true, true, 50, 50);
+    hy_wake_gate_sample(&g, 1050, true, false, 0, 0);
+    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_wake_gate_sample(&g, 1000 + HY_WG_MAX_MS, false, false, 0, 0));
+    TEST_ASSERT_EQUAL(HY_WG_NONE, hy_wake_gate_tick(&g, 1000 + HY_WG_MAX_MS + 1));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -133,5 +172,8 @@ int main(void)
     RUN_TEST(test_single_tap_on_wakes);
     RUN_TEST(test_first_touch_long_press_or_swipe);
     RUN_TEST(test_clock_wraps);
+    RUN_TEST(test_sample_double_tap);
+    RUN_TEST(test_sample_noise_and_failures);
+    RUN_TEST(test_sample_cap);
     return UNITY_END();
 }

@@ -140,6 +140,9 @@ static void power_wake(hy_power_wake_t cause)
     case HY_PWAKE_TOUCH:
         screen_touch_wake();
         break;
+    case HY_PWAKE_GUARD:
+        screen_wake_guard_set();
+        break;
     case HY_PWAKE_DOUBLE_TAP:
         screen_double_tap_wake();
         break;

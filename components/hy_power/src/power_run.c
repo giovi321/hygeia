@@ -86,8 +86,7 @@ static bool (*volatile s_wake_single_fn)(void);
  * except that exit_sleep clears the flags). s_wg_rearm: the touch INT wake is still disarmed, re-armed once the finger
  * is up and the pin reads high. */
 static hy_wake_gate_t s_wg;
-static volatile bool s_wg_active, s_wg_rearm, s_wg_down;
-static int16_t s_wg_x, s_wg_y;
+static volatile bool s_wg_active, s_wg_rearm;
 static int64_t s_wg_rearm_t0_ms;
 static SemaphoreHandle_t s_sleep_mu;       /* serialises entering and leaving the sleep mode */
 static StaticSemaphore_t s_sleep_mu_buf;
@@ -431,57 +430,50 @@ static bool wake_single(void)
     return !fn || fn();
 }
 
-/* Power task, asleep, a touch woke the CPU and a single tap does not wake the screen: starts judging it. */
+/* Power task under s_sleep_mu, asleep, a touch woke the CPU and a single tap does not wake the screen: starts judging
+ * it. */
 static void wg_begin(void)
 {
-    hy_wake_gate_reset(&s_wg);
+    hy_wake_gate_begin(&s_wg, (uint32_t)mono_ms());
     s_wg_active = true;
-    s_wg_down = false;
     s_wg_rearm = false;
     ESP_LOGI(TAG, "touch wake: judging (double tap needed)");
 }
 
+/* Power task under s_sleep_mu. Without light sleep (USB) the touch wake was never disarmed: nothing to re-arm. */
 static void wg_end(const char *why)
 {
     s_wg_active = false;
-    s_wg_down = false;
-    s_wg_rearm = true;   /* the touch INT wake fired and stays disarmed until the finger is up */
+    s_wg_rearm = s_light;   /* the touch INT wake fired and stays disarmed until the finger is up */
     s_wg_rearm_t0_ms = mono_ms();
     hy_wake_gate_reset(&s_wg);
     ESP_LOGI(TAG, "touch wake: %s, back to sleep", why);
 }
 
-/* One step of the judgment: polls the touch controller (LVGL is paused, nothing else reads it) and feeds the gate. */
+/* One step of the judgment under s_sleep_mu: LVGL is paused and no other task can end the sleep mode meanwhile, so
+ * nothing else reads the controller. */
 static hy_wg_act_t wg_step(void)
 {
-    uint32_t t = (uint32_t)mono_ms();
     bool down = false;
     int16_t x = 0, y = 0;
-    hy_wg_act_t act = HY_WG_NONE;
-    if (hy_board_touch_poll(&down, &x, &y)) {
-        if (down && !s_wg_down) {
-            s_wg_down = true;
-            act = hy_wake_gate_down(&s_wg, false, t, x, y);
-        } else if (down) {
-            hy_wake_gate_move(&s_wg, x, y);
-        } else if (s_wg_down) {
-            s_wg_down = false;
-            act = hy_wake_gate_up(&s_wg, t, s_wg_x, s_wg_y);
-        } else if (s_wg.st == 0) {
-            return HY_WG_SLEEP;   /* the INT edge came with no finger on the glass: noise */
-        }
-        if (down) {
-            s_wg_x = x;
-            s_wg_y = y;
-        }
+    bool ok = hy_board_touch_poll(&down, &x, &y);
+    return hy_wake_gate_sample(&s_wg, (uint32_t)mono_ms(), ok, down, x, y);
+}
+
+/* The wait of the sleep-mode loop: the touch is judged often, a disarmed touch wake is retried every 50 ms for 3 s
+ * and then once a second for as long as it takes (the finger may rest on the glass). */
+static uint32_t loop_ms(void)
+{
+    if (!s_asleep) {
+        return LOOP_MS;
     }
-    if (act == HY_WG_NONE || act == HY_WG_WAIT) {
-        hy_wg_act_t tk = hy_wake_gate_tick(&s_wg, t);
-        if (tk != HY_WG_NONE) {
-            act = tk;
-        }
+    if (s_wg_active) {
+        return WG_LOOP_MS;
     }
-    return act;
+    if (s_wg_rearm && mono_ms() - s_wg_rearm_t0_ms < 3000) {
+        return WG_REARM_MS;
+    }
+    return SLEEP_LOOP_MS;
 }
 
 static void pm_set(bool light)
@@ -625,6 +617,12 @@ static void exit_sleep(wake_cause_t cause)
     if (cause == W_DEBUG && hy_board_in_lvgl_task()) {
         cause = W_UI;
     }
+    /* A touch is being judged (or its finger may still be down) and another cause ends the sleep mode: the stroke
+     * under the finger must not reach whatever the wake shows. The guard is queued here, not under s_sleep_mu (the
+     * LVGL task may hold the LVGL lock and wait for it), and not from the LVGL task itself. */
+    if (s_asleep && (s_wg_active || s_wg_rearm) && !hy_board_in_lvgl_task()) {
+        post(async_wake, (void *)(uintptr_t)HY_PWAKE_GUARD);
+    }
     xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
     if (!s_asleep) {
         xSemaphoreGive(s_sleep_mu);
@@ -644,7 +642,7 @@ static void exit_sleep(wake_cause_t cause)
     portENTER_CRITICAL(&s_mux);
     s_asleep = false;
     s_sleep_req = false;
-    s_wg_active = s_wg_rearm = s_wg_down = false;
+    s_wg_active = s_wg_rearm = false;
     s_ctr.wake[cause]++;
     s_ctr.ms_asleep += asleep_ms;
     s_stretch_open = true;
@@ -846,7 +844,7 @@ static void power_task(void *arg)
     hy_power_state(&st);
     int32_t saved_rate = st.batt.rate_cph;
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(!s_asleep ? LOOP_MS : s_wg_active ? WG_LOOP_MS : s_wg_rearm ? WG_REARM_MS : SLEEP_LOOP_MS));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(loop_ms()));
         int64_t mono = mono_s();
         if (mono - last_up >= UPTIME_SAVE_S) {   /* RTC memory, no flash write */
             last_up = mono;
@@ -894,38 +892,44 @@ static void power_task(void *arg)
                 cause = W_NEXT;
             }
             bool judging = false;
-            if (cause == W_N && !single) {
-                /* a touch only wakes the CPU: LVGL stays paused and the screen OFF while it is judged */
-                if (touch && !s_wg_active && !s_wg_rearm) {
-                    wg_begin();
-                }
-                if (s_wg_active) {
-                    judging = true;
-                    hy_wg_act_t act = wg_step();
-                    if (act == HY_WG_WAKE) {
-                        cause = W_TOUCH;
-                        double_tap = true;
-                        judging = false;
-                    } else if (act == HY_WG_SLEEP) {
-                        wg_end("not a double tap");
-                        judging = false;
+            if (cause == W_N) {
+                /* A touch only wakes the CPU: LVGL stays paused and the screen OFF while it is judged. s_sleep_mu keeps
+                 * every other task's exit_sleep (net hold, cabinet reaction) out while the controller is read. */
+                xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
+                if (s_asleep) {
+                    if (s_wg_active && single) {
+                        wg_end("setting changed");
+                    } else if (!single && touch && !s_wg_active && !s_wg_rearm) {
+                        wg_begin();
                     }
-                } else if (s_wg_rearm) {
-                    bool down = false;
-                    int16_t x, y;
-                    if (hy_board_touch_poll(&down, &x, &y) && !down && hy_board_touch_wake_rearm()) {
-                        s_wg_rearm = false;
-                        portENTER_CRITICAL(&s_mux);
-                        s_touch_isr = false;   /* the edges of the touches just judged */
-                        portEXIT_CRITICAL(&s_mux);
-                    } else if (mono_ms() - s_wg_rearm_t0_ms > 3000) {
-                        s_wg_rearm = false;    /* give up waiting; the next sleep entry arms every pin again */
-                        ESP_LOGW(TAG, "touch wake: not re-armed after 3 s");
+                    if (s_wg_active) {
+                        judging = true;
+                        hy_wg_act_t act = wg_step();
+                        if (act == HY_WG_WAKE) {
+                            s_wg_active = false;   /* both taps are over: no guard for the next stroke */
+                            cause = W_TOUCH;
+                            double_tap = true;
+                            judging = false;
+                        } else if (act == HY_WG_SLEEP) {
+                            wg_end("not a double tap");
+                            judging = false;
+                        }
+                    } else if (s_wg_rearm) {
+                        /* the touch wake stays disarmed until the finger is up and the pin reads high; retried for as
+                         * long as it takes, never given up */
+                        bool down = false;
+                        int16_t x, y;
+                        bool ok = hy_board_touch_poll(&down, &x, &y);
+                        if ((!ok || !down) && hy_board_touch_wake_rearm()) {
+                            s_wg_rearm = false;
+                            portENTER_CRITICAL(&s_mux);
+                            s_touch_isr = false;   /* the edges of the touches just judged */
+                            portEXIT_CRITICAL(&s_mux);
+                        }
+                        judging = true;
                     }
-                    judging = true;
                 }
-            } else if (cause == W_N && single) {
-                s_wg_rearm = false;
+                xSemaphoreGive(s_sleep_mu);
             }
             if (cause == W_RTC) {
                 hy_clock_alarm_note_int();   /* the masked ISR missed the edge: the next tick takes and clears AF */
