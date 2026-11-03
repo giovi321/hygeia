@@ -116,7 +116,7 @@ class Device:
         self.upd_mode = args.update
         taught = args.cabinet == "taught"
         self.cab = {"taught": taught, "taught_at": SAMPLE_NOW - 86400 * 2 if taught else None, "testing": False,
-                    "tm": 0, "to": 0, "seq": 0, "cap": 3 if taught else 0}
+                    "tm": 0, "to": 0, "seq": 0, "cap": 3 if taught else 0, "recent": taught}
         self.fw = {"uptodate": "v0.5.0", "dev": "dev-a88c56d"}.get(args.update, "v0.4.0")
         self.upd = {"state": "idle", "err": None, "latest": "", "pct": 0, "checked": 0}
         self.restart_at = 0.0   # an upload finished: unreachable from restart_at for OTA_BOOT_S
@@ -181,7 +181,7 @@ class Device:
         c = self.cab
         cfg = self.settings["cabinet"]
         recent = []
-        if c["taught"]:
+        if c["recent"]:
             recent = [{"kind": "test", "at": SAMPLE_NOW - 3600, "dist": 0.41, "thr": 0.72, "match": True},
                       {"kind": "live", "at": SAMPLE_NOW - 1800, "dist": 1.94, "thr": 0.72, "match": False},
                       {"kind": "live", "at": SAMPLE_NOW - 900, "dist": 0.55, "thr": 0.72, "match": True}]
@@ -207,6 +207,7 @@ class Device:
         if self.cab["taught"]:
             for t in range(3):
                 out += seq("teach", t, t * 5)
+        if self.cab["recent"]:   # the recent captures outlive a forget, as on the device
             out += seq("test", 0, 4)
             out += seq("live", 1, 12)
             out += seq("live", 2, 2)

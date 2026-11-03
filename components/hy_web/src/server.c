@@ -604,6 +604,15 @@ static void a_power_off(void *arg)
     }
 }
 
+static void a_settings_refresh(void *arg)
+{
+    (void)arg;
+    if (s_ui && s_ui->settings_applied) {
+        const hy_settings_t *s = hy_settings();
+        s_ui->settings_applied(s, s);   /* nothing changed in the settings: the open views redraw their values */
+    }
+}
+
 static void a_restart(void *arg)
 {
     (void)arg;
@@ -615,6 +624,7 @@ bool web_ui_restart(void) { return ui_post(a_restart, NULL); }
 bool hy_web_restart(void) { return web_ui_restart(); }
 bool web_ui_power_off(void) { return ui_post(a_power_off, NULL); }
 void web_ui_pair_hide(int reason) { ui_post(a_pair_hide, (void *)(intptr_t)reason); }
+void web_ui_settings_refresh(void) { ui_post(a_settings_refresh, NULL); }
 void web_ui_toast_ok(const char *text) { ui_post(a_toast_ok, (void *)text); }
 void web_ui_toast_info(const char *text) { ui_post(a_toast_info, (void *)text); }
 

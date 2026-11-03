@@ -104,6 +104,8 @@ void web_net_now(web_net_t *out);
 /* Runs the registered callback in the LVGL task. Text arguments must be static. */
 void web_ui_pair_hide(int reason);
 void web_ui_toast_ok(const char *text);
+/* The open settings views redraw their values (a setting-like state changed behind the screen's back) */
+void web_ui_settings_refresh(void);
 void web_ui_toast_info(const char *text);
 /* Calls the registered power_off callback in the LVGL task (hy_power_off() when none is registered). false when it
  * could not be queued (LVGL busy): the caller retries. */

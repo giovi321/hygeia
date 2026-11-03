@@ -53,7 +53,7 @@ static esp_err_t h_cabinet_test(web_req_t *r)
         if (st.mode == HY_CAB_TAUGHT && !st.taught) {
             return web_send_err(r, 409, "not_taught", NULL, "Teach the movement on the device first");
         }
-        return web_send_err(r, 409, "screen_off", NULL, "Wake the screen on the device to run the test");
+        return web_send_err(r, 409, "screen_off", NULL, "The test could not start. The screen has to be on and the sensor working");
     }
     hy_cab_status_t st;
     hy_cab_run_status(&st);
@@ -71,7 +71,13 @@ static esp_err_t h_cabinet_test(web_req_t *r)
 
 static esp_err_t h_cabinet_forget(web_req_t *r)
 {
+    hy_cab_status_t st;
+    hy_cab_run_status(&st);
+    if (st.teaching) {
+        return web_send_err(r, 409, "teaching", NULL, "The movement is being taught on the device");
+    }
     esp_err_t e = hy_cab_run_forget();
+    web_ui_settings_refresh();   /* the device's Cabinet open page shows Not taught at once */
     if (e != ESP_OK) {
         return web_send_hy_err(r, HY_E_IO, "The taught movement could not be removed");
     }
