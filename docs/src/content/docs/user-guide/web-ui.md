@@ -35,7 +35,7 @@ The current week, Monday to Sunday: a column per day on a wide screen and a list
 
 ## Settings
 
-- Screen and sound: volume with Play chime, brightness, sound, do not disturb, snooze minutes, dim time and screen off time on battery and on USB
+- Screen and sound: volume with Play chime, brightness, sound, do not disturb, snooze minutes, dim time and screen off time on battery and on USB, and Wake on single tap (off: tap twice to wake the dimmed or dark screen)
 - Quiet hours: from, to, or off
 - Rotation lock
 - Clock: the device time and when it was last synced, a time zone picker with the zones of the browser, and Sync from this browser. The device refuses a zone name that is not in its own table and the page says so
@@ -43,7 +43,17 @@ The current week, Monday to Sunday: a column per day on a wide screen and a list
 - Integrations (MQTT, Home Assistant, webhooks): "Coming in a later version". The page has no controls for them
 - Power off: asks for confirmation and warns when a dose is due within 24 hours. The device stays off, and does not remind, until you press the power button
 
-Settings links to Wi-Fi, Backup and Firmware.
+Settings links to Wi-Fi, Backup, Firmware and Cabinet open.
+
+## Cabinet open
+
+The page sets [Cabinet open](../cabinet-open/) and shows its state. It has three parts:
+
+- Reminder: Cabinet open on or off, Trigger (Any movement or Taught movement), Sensitivity ("1 of 5" to "5 of 5"), "Remind if due within" ("Overdue only" or 5 to 120 min), Chime and Light the screen. Taught movement can be chosen only once a movement is taught
+- Movement: "Not taught" or when the movement was taught, the matching limit, counters since the start (motion interrupts, captures, matches, other movements, reminders), Download samples and Forget the movement. The movement itself is taught on the device
+- Test: Start and Stop. The counters follow the device live, with the distance and limit of the last Taught capture. The screen of the device has to be on
+
+The page uses `GET /api/cabinet`, `POST /api/cabinet/test`, `GET /api/cabinet/samples.csv` and `DELETE /api/cabinet/teach`, and the `cabinet` object of `GET /api/settings` and `PUT /api/settings` (see the [REST API](../../reference/rest-api/#routes)). Forget is refused while the movement is being taught on the device.
 
 ## Wi-Fi
 
@@ -90,4 +100,4 @@ Choose the file `hygeia.bin` from a build and tap Upload and restart. A bar show
 
 ## Screen and web
 
-Every action on the screen has a route in the [REST API](../../reference/rest-api/#screen-and-web-parity). The things only the web UI does are the full medicine form, editing and deleting log entries, adding networks, backups and firmware updates.
+Every action on the screen has a route in the [REST API](../../reference/rest-api/#screen-and-web-parity). The things only the web UI does are the full medicine form, editing and deleting log entries, adding networks, backups, firmware updates and the Cabinet open sample download. Teaching the movement is done only on the device.

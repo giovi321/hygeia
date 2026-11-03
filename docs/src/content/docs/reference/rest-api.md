@@ -106,6 +106,10 @@ During a firmware update from GitHub the device sends `{"ev":"update","state":"d
 | `POST /api/chime/test`, `POST /api/power/off` | play the chime, power off |
 | `POST /api/ota` | firmware update from an uploaded file |
 | `GET /api/update`, `POST /api/update/check`, `POST /api/update/install` | firmware update from GitHub |
+| `GET /api/cabinet` | Cabinet open state: `taught`, `taught_at`, `mode`, `live`, `testing`, `teaching`, `threshold`, `trigger_mg`, `counts`, `test` and the `recent` Taught captures |
+| `POST /api/cabinet/test` | start or stop the test: `{"on":true}` or `{"on":false}`; `409` with `teaching`, `not_taught` or `screen_off` when it cannot start |
+| `GET /api/cabinet/samples.csv` | the taught takes and the recent Taught captures as CSV |
+| `DELETE /api/cabinet/teach` | forget the taught movement; `409` while it is being taught |
 
 Passwords are write-only. No route returns a Wi-Fi password, except `GET /api/export.json?secrets=1`, which writes the saved passwords into the file.
 

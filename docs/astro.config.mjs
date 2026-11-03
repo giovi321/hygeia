@@ -46,6 +46,7 @@ export default defineConfig({
             { label: 'Web UI', link: '/user-guide/web-ui/' },
             { label: 'Idle clock and power', link: '/user-guide/idle-power/' },
             { label: 'Gestures', link: '/user-guide/gestures/' },
+            { label: 'Cabinet open', link: '/user-guide/cabinet-open/' },
           ],
         },
         {

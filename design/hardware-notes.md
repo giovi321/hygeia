@@ -127,6 +127,59 @@ Thresholds that worked on the panel (hands-on session 2026-10-29, build 5867131)
 - A stroke that leaves and returns to the start is not a tap: `max_dev` (maximum deviation from the start) must also be 16 px or less, not only the end-point distance
 - A stroke that starts in an edge zone is never consumed by a widget, except sliders, which take it with a forced consume
 
+## Motion sensor
+
+QMI8658A at 0x6b, driver `components/hy_board/src/qmi8658.c`. Sources: QMI8658A datasheet Rev A (QST, 2022), section and table numbers below, and the SensorLib QMI8658 driver (`SensorQMI8658.hpp`, master, read 2026-11-03). Nothing in this section was measured on the board yet, unless it says so.
+
+Modes:
+
+- Accel only (rotation, shake, Cabinet open stream path while the screen is on): CTRL2 0x26, +-8 g, 125 Hz; scale 4096 LSB/g
+- Capture (Taught movement, teach and test): CTRL2 0x26 (accel 112.1 Hz, synchronised to the gyro), CTRL3 0x66 (+-1024 dps, 112.1 Hz; scale 32 LSB/dps), CTRL5 0x77 (accel and gyro low-pass on, mode 3 = 13.37 % of ODR, about 15 Hz), CTRL7 0x03; polled at 50 Hz with one 12-byte burst 0x35..0x40. 6DOF current at 112.1 Hz: 752 to 753 uA typical (DS table 17)
+- Wake on motion (Cabinet open live, screen off): CTRL2 0x2D, +-8 g, low-power accel ODR code 13 = 21 Hz (47.6 ms), the lowest low-power rate with a period of at most 50 ms. Low-power accel current 42 uA typical at 21 Hz, VDD 1.8 V (DS table 15; 55, 35 and 30 uA at 128, 11 and 3 Hz)
+
+Wake-on-motion rule: the chip compares the absolute slope between successive samples, per axis, with the threshold, not the deviation from a reference (DS 12.2 table 39 "the threshold of absolute of slope", 12.1, 9.1 "Slope(n) = Acc(n) - Acc(n-1)"). That any one axis is enough is an inference: WoM has no axis or logic setting, and the Any-Motion default is OR. The host emulation is `hy_cab_wom_hit` with `hy_cab_wom_prev`, the sensor sample 48 ms back interpolated from the 50 Hz stream.
+
+Register sequence to arm (DS 12.5 figure 25): CTRL7 0; CTRL2 0x2D; CAL1_L 0x0B = threshold in mg (1 to 255; 0 disables WoM); CAL1_H 0x0C = pin select (bit 6: 0 INT1, 1 INT2), initial level 0 (bit 7), blanking 4 samples (bits 5..0; 190 ms at 21 Hz, past the 3 / ODR settling); CTRL9 command 0x08 with the STATUSINT 0x2D bit 7 handshake (CTRL8 bit 7 = 1, so a command never pulses INT1); CTRL1 output enable for the chosen INT pin (bit 3 INT1, bit 4 INT2, push-pull); CTRL7 0x01. Exit (DS 12.6): CTRL7 0, CAL1_L 0, command 0x08, outputs high-Z. Every mode change goes through that exit. Interrupt behaviour per DS 12.4: the line toggles on each event and stays; reading STATUS1 0x2F (bit 2) clears the WoM bit and returns the line to its initial level. The firmware arms the light-sleep GPIO wake on the level opposite the one read at arming.
+
+Interrupt pin: selectable at run time (`imu pin [1|2 [17|21]]` on the debug console). Default INT1 on GPIO 17, INT2 on GPIO 21 as the alternative. The wiring of the chip's INT pins to the ESP32-S3 is not in the BSP pin header or any other source found; unverified on the board.
+
+Gyro: range +-1024 dps, values in deci-dps (raw x 10 / 32). Turn-on per datasheet: t1 typical 150 ms plus 3 / ODR (27 ms at 112.1 Hz), about 177 ms (DS table 8, 7.3). The firmware masks the gyro for the first 180 ms of every sequence (`HY_CAB_GYRO_START_MS`), teach and live alike. The turn-on time on the board, the still noise and the sign of z for a clockwise turn are to be measured.
+
+Any movement trigger counts on the motion recordings (`host_tests/data/motion`, accel only, `test_cab_rec.c`), slope per 48 ms sensor sample, 2 s holdoff:
+
+| File | sens 1 (100 mg) | 2 (64) | 3 (40, default) | 4 (37) | 5 (34) | peak slope | still-part peak |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| carry_walk | 33 | 33 | 33 | 33 | 33 | 1984 | none |
+| flat_spin | 12 | 12 | 13 | 13 | 13 | 431 | none |
+| putdown_pickup | 8 | 8 | 8 | 8 | 8 | 1288 | 21 |
+| rotate_cycle | 7 | 8 | 11 | 12 | 12 | 723 | none |
+| shake_firm | 10 | 12 | 15 | 15 | 15 | 10901 | none |
+| shake_light | 6 | 8 | 11 | 12 | 12 | 4167 | 17 |
+| shake_live_arm | 0 | 0 | 0 | 0 | 1 | 35 | 26 |
+| shake_live_combo | 6 | 7 | 7 | 7 | 7 | 15307 | 30 |
+| table_knock | 0 | 1 | 1 | 1 | 2 | 90 | 7 |
+| tap_desk | 6 | 7 | 9 | 10 | 11 | 908 | 31 |
+| tap_double | 2 | 3 | 5 | 5 | 5 | 401 | 21 |
+| tap_held | 7 | 9 | 13 | 13 | 13 | 880 | none |
+| tilt_diagonal | 8 | 10 | 10 | 10 | 10 | 853 | none |
+
+- The largest slope in a still part of any recording is 31 mg (tap_desk), under the most sensitive step, 34 mg
+- A synthetic door swing peaks at 48 mg slope when it starts smoothly and at 126 mg when it starts with a jump. The default, 40 mg, catches the smooth swing down to 0.83 of its nominal speed. Catching that door and ignoring table_knock (peak 90) cannot both hold, so the default favours the door: at the default table_knock gives 1 trigger and flat_spin 13. The trigger only wakes the CPU; the device reacts only with a due dose and at most once every 2 minutes
+- Wake-on-motion noise in low-power mode and the slope of a real cabinet door are to be measured
+
+Taught movement matcher margins at sensitivity 3 (`test_cab_rec.c`, `test_cabmatch.c`):
+
+| Model | d_self | Threshold | Largest positive | Smallest negative |
+| --- | --- | --- | --- | --- |
+| putdown_pickup (recording, accel only) | 1.898 | 2.000 (clamped at the upper bound) | 1.053 (augmented variants) | 3.072 (carry_walk window at 60 s) |
+| synthetic door open | 0.345 | 0.552 | 0.289 | 1.880 (door close) |
+| synthetic tilt | 0.706 | 1.129 | 0.629 | 4.369 (door open) |
+| synthetic lift | 0.232 | 0.372 | 0.200 | 2.545 (door open) |
+
+- Threshold bounds 0.25 and 2.0; the upper bound sits a third below the nearest recording negative. The putdown_pickup model rests on 3 takes from one recording with rests padded in the replay; no held-out real positive exists yet
+- Capture: from the trigger until 400 ms of stillness (accel steps within 40 mg around the current pose, gyro under 10 dps), 220 ms minimum, 4 s maximum. The recorded taps capture as 20 to 60 ms, so a tap cannot be taught
+- rotate_cycle and tap_double give fewer than 3 captures and have no model
+
 ## Splash
 
 - Splash done in 1008 ms on both boots; maximum frame gap 74 ms inside the 900 ms animation (target about 50), measured on build 5867131 before the hidden views moved out of the splash

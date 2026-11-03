@@ -15,16 +15,18 @@ After 30 seconds without a touch, and with no due card showing, a black overlay 
 
 The whole group moves by a few pixels each minute to limit burn-in on the AMOLED panel.
 
-Any touch only wakes the screen; it is not passed to the screen underneath. A due card wakes the screen by itself.
+A double tap wakes the screen: two taps within 300 ms and 40 px. A lone tap does nothing, unless Wake on single tap is on (Settings, Display, and the web UI; off by default). The waking taps are not passed to the screen underneath. A due card wakes the screen by itself. See [Gestures](../gestures/#waking-the-screen).
 
 ## Motion sensor
 
-The motion sensor is read only while the screen is on or dimmed. The dimmed clock turns with the device too, so on USB power the clock follows the device. The sensor is powered down while the screen is off, so it costs nothing then. It does not wake the screen: turning or shaking a sleeping device does nothing.
+The motion sensor is read only while the screen is on or dimmed. The dimmed clock turns with the device too, so on USB power the clock follows the device. While the screen is off the sensor is powered down, so it costs nothing then, and turning or shaking a sleeping device does nothing.
+
+The one exception is [Cabinet open](../cabinet-open/) while it is live: on, with the chime or the light switched on, and, with Taught movement, once a movement is taught. Then the sensor stays in a low-power wake-on-motion mode while the screen is off, and a movement wakes the CPU from light sleep. The CPU checks the movement and whether a dose is due. The screen turns on only when the device reminds you; otherwise the CPU goes back to sleep.
 
 ## Screen off and sleep
 
 - On USB power the screen dims after 30 seconds and stays dimmed. A due card on USB keeps the screen on
-- On battery the screen turns off 2 minutes after the last activity and the CPU enters light sleep. A touch, the RTC alarm for the next dose, the PWR key, the user key or plugging in USB wakes it. A due card wakes the screen. A repeat chime on battery does not turn the screen on
+- On battery the screen turns off 2 minutes after the last activity and the CPU enters light sleep. A touch, the RTC alarm for the next dose, the PWR key, the user key, plugging in USB or, with Cabinet open live, the motion sensor wakes the CPU. A due card wakes the screen. A touch turns the screen on only as a double tap (or a single tap with Wake on single tap on); after a lone tap the CPU goes back to sleep with the screen off. A Cabinet open reminder turns the screen on when its light switch is on. A repeat chime on battery does not turn the screen on
 - Unplugging USB starts the 2 minute timer from the unplug
 
 ## PWR key

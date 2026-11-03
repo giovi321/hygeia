@@ -35,10 +35,11 @@ Settings has these entries:
 - Time zone: two rollers, region and city, from a table of time zones built into the firmware, so the zone can change with no network. Set stores the zone and its POSIX rule
 - Date and time: the same rollers as the "Set the time" screen
 - Sound: a volume slider and a Play chime button
-- Display: brightness, and Rotation lock under the brightness slider
+- Display: brightness, Rotation lock under the brightness slider, and Wake on single tap (off by default: a double tap wakes the dimmed or dark screen, see [Gestures](../gestures/#waking-the-screen))
 - Wi-Fi: the mode (Off, Wi-Fi, Access point), the saved networks (tap one to connect to it), the Access point row (it opens the join screen with the name and password), the web UI address, the number of paired browsers with Forget all, and Keep Wi-Fi on battery. Networks are added only in the web UI
 
 ![Design mockup of Settings, Wi-Fi](/hygeia/assets/mockups/10-settings-wi-fi.png)
+- Cabinet open: the reminder when the cabinet is opened, its trigger, teaching and test. See [Cabinet open](../cabinet-open/)
 - About: version, clock sync state, storage used and free, and the number of active and archived medicines, and Check for update. Check for update asks GitHub when tapped (a result under 60 seconds old is reused) and shows the result; Install asks for confirmation first. It needs Wi-Fi with internet access, and installing needs USB power or at least 30 % battery
 
 The Time zone page changes the zone for future occurrences. Scheduled times keep their wall-clock time in the new zone. See [Scheduling rules](../../reference/scheduling/).

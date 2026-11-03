@@ -1,0 +1,94 @@
+---
+title: Cabinet open
+description: Remind when the cabinet is opened and a dose is due, with any movement or a movement taught on the device.
+---
+
+Cabinet open reminds you of a dose when you open the cabinet where the medicines are kept. Mount the device on the inside of the cabinet door. When the door moves and a dose is overdue or due soon, the device chimes, lights the screen, or both. When no dose is due, nothing happens.
+
+Cabinet open is off by default. Turn it on in Settings › Cabinet open on the device, or on the Cabinet open page of the [web UI](../web-ui/#cabinet-open). Every option is on both.
+
+## Triggers
+
+Trigger has two choices:
+
+- Any movement: the motion sensor reacts to any movement stronger than the set sensitivity. Nothing to teach. This is the default
+- Taught movement: you teach the device one movement, and only a movement close to it counts. The movement can be anything, not only opening a door. Taught movement can be chosen only after a movement is taught; until then the device shows "Teach the movement first"
+
+Sensitivity goes from 1 to 5 and shows as "3 of 5" (the default). With Any movement it sets how small a movement wakes the device. With Taught movement it sets how close a movement must be to the taught one: 1 is the strictest, 5 the loosest.
+
+The default sensitivity, 3 of 5, is set to catch the door opening, even a slow one. A knock on the door or a bump on the cabinet can therefore wake the device as well. That costs a little battery and nothing else: without a due dose the device stays dark and silent. If knocks bother you, set a lower sensitivity or use Taught movement.
+
+## Mounting
+
+- Fix the device on the inside of the cabinet door, so it moves with the door. A device that can slide or lift on its own counts those movements too
+- The screen can face into the cabinet. Teaching and testing use tones, so you do not need to see the screen while you do the movement
+- The device can be mounted in any of the four orientations
+- After you move the device to another place on the door, or to another door, teach the movement again
+
+## Teaching the movement
+
+Teach the movement on the device: Settings › Cabinet open › Teach the movement. The page says "Do the movement 3 times. Start after the high tone. After the low tone, go back to where you started." Tap Start.
+
+For each of the 3 takes:
+
+1. The device shows "1 of 3" and "Hold still". Keep the device still for about a second
+2. "Now" and a high tone: do the movement, for example open the door
+3. Stop and hold still. "Got it" and a low tone end the take. Then go back to where you started, for example close the door, and wait for the next "Hold still"
+
+After the third take the device compares the three. If one of them looks different from the other two, it shows "That one looked different, do it again" and asks for that take once more. When all three agree it shows "Saved". The tones play at the set volume, also when the sound is off or do not disturb is on.
+
+A movement must:
+
+- Last at least about a quarter of a second. A tap or a knock is shorter and cannot be taught. The device shows "Too small, do it again"
+- Last less than 4 seconds. A longer one shows "Too long, keep it under 4 seconds"
+- Have no pause in it. A pause of 400 ms or more ends the take, so a movement with a stop in the middle is cut at the stop
+
+If the device sees no movement for a minute after "Now", it shows "No movement, teaching stopped". If the device does not stay still for a second within 10 seconds, or the takes give nothing usable, it shows "Teaching stopped": tap Start to begin again. Leaving the page also stops teaching, and the movement taught before stays as it was.
+
+The taught movement is kept across a restart. Settings › Cabinet open › Forget the movement removes it after the question "Forget the taught movement?". The web UI has the same button. Without a taught movement, Taught movement does nothing.
+
+## Test mode
+
+Settings › Cabinet open › Test, or Start under Test in the web UI, checks the trigger without reminding. The screen shows "Do the movement." and counts:
+
+- With Taught movement: "Matches" and "Other movements". On the device a match plays the low tone
+- With Any movement: "Movements"
+
+The device stays silent otherwise and does not remind during the test. The screen has to stay on: the test ends when the screen turns off, when you leave the page, or after 10 minutes. The web UI shows the same counters live, and for each Taught capture its distance from the taught movement and the limit.
+
+A good taught movement gives a match for nearly every opening and few matches for other things, such as closing the door, knocking or tapping the screen. If other movements match too often, lower the sensitivity or teach again.
+
+## When the device reminds you
+
+The device reacts when the trigger fires and a dose is:
+
+- Overdue or open, including a dose you snoozed
+- Due within the time set in "Remind if due within"
+
+"Remind if due within" goes from 0 to 120 minutes in steps of 5 minutes. The default is 15 minutes. 0 shows as "Overdue only": the device reacts only to a dose whose time has come. For each medicine the time is cut to the medicine's own early window, so the device never reminds you of a dose that cannot be logged yet.
+
+The reaction has two switches, both on by default:
+
+- Chime: one chime, as for a due dose. The Sound switch, do not disturb and quiet hours silence it
+- Light the screen: the screen turns on as for a touch. Do not disturb and quiet hours do not block it
+
+When the screen lights and a dose is open, the due card shows. When the dose is not due yet, the device shows Home with the note "Next: Vitamin D at 08:00" for 5 seconds, naming the medicine and its time. The due card itself appears at the dose time.
+
+The device reacts at most once every 2 minutes, however often the door opens. It does not react while the Undo toast shows, so closing the cabinet right after you log a dose changes nothing, and a shake still undoes it.
+
+When both switches are off, Cabinet open does nothing and the motion sensor is not used.
+
+## Battery
+
+While Cabinet open is on and a switch is on (and, with Taught movement, a movement is taught), the motion sensor stays powered in a low-power mode while the screen is off, and a movement wakes the CPU for a moment. The screen stays off unless the device reacts. Otherwise the motion sensor is powered down while the screen is off, as described in [Idle clock and power](../idle-power/#motion-sensor).
+
+If the motion sensor stops answering, Cabinet open turns itself off until a Cabinet open setting is changed.
+
+## Downloading samples
+
+The Cabinet open page of the web UI has Download samples. It downloads `cabinet-samples.csv` with:
+
+- The 3 takes of the taught movement
+- The last 8 movements captured with Taught movement, from the test and from use. These are kept in memory only and are gone after a restart
+
+Each row holds the time in milliseconds and the readings of the motion sensor at 50 per second: acceleration in mg and rotation rate in tenths of a degree per second. A `rest_` row before each movement gives the position the device was resting in. The file holds no medicine or log data. It is useful to check or tune the matching on a computer.
