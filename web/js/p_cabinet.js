@@ -69,11 +69,12 @@
 
     var taughtLine = HY.h("p", { id: "c-taught" });
     var thrLine = HY.h("p", { class: "mut", id: "c-thr" });
+    var pausedLine = HY.h("p", { class: "banner warn", id: "c-paused", hidden: true }, "Paused: the motion sensor did not answer. Change a setting to try again.");
     var countLine = HY.h("p", { class: "mut sm", id: "c-counts" });
     var forgetBtn = HY.h("button", { class: "btn danger", type: "button", onclick: forget }, "Forget the movement");
     var dl = HY.h("a", { class: "btn", id: "c-dl", href: "/api/cabinet/samples.csv", download: "cabinet-samples.csv" }, "Download samples");
     view.appendChild(HY.h("section", { class: "panel" }, HY.h("h2", null, "Movement"),
-      taughtLine, thrLine, countLine,
+      pausedLine, taughtLine, thrLine, countLine,
       HY.h("p", { class: "hint" }, "The movement is taught on the device: Settings, Cabinet open, Teach the movement."),
       HY.h("div", { class: "actions" }, dl, forgetBtn)));
 
@@ -125,6 +126,8 @@
       if (a !== win) { win.value = String(set.window_min); }
       chime.checked = !!set.chime;
       light.checked = !!set.light;
+      // switched on and set to act, but the device paused itself after a sensor fault
+      pausedLine.hidden = !(set.on && (set.chime || set.light) && !st.live && (set.mode !== "taught" || st.taught));
       taughtLine.textContent = taughtText(st);
       thrLine.textContent = st.taught && st.threshold !== null ? "Threshold " + st.threshold : "";
       thrLine.hidden = !thrLine.textContent;

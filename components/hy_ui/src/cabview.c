@@ -82,7 +82,12 @@ static void page_refresh(void)
 {
     const hy_settings_t *s = hy_settings();
     char b[32];
-    lv_label_set_text(s_val[P_ON], s->cab_on ? HY_S_ON : HY_S_OFF);
+    hy_cab_status_t st;
+    hy_cab_run_status(&st);
+    bool taught = st.taught;
+    /* switched on and set to act, but the runner paused itself after a sensor fault */
+    bool paused = s->cab_on && (s->cab_chime || s->cab_light) && (s->cab_mode != HY_CAB_TAUGHT || taught) && !st.live;
+    lv_label_set_text(s_val[P_ON], paused ? HY_S_CAB_PAUSED : s->cab_on ? HY_S_ON : HY_S_OFF);
     lv_label_set_text(s_val[P_TRIGGER], mode_text(s->cab_mode));
     snprintf(b, sizeof b, HY_S_CAB_SENS_VAL, (unsigned)s->cab_sens);
     lv_label_set_text(s_val[P_SENS], b);
@@ -90,7 +95,6 @@ static void page_refresh(void)
     lv_label_set_text(s_val[P_WINDOW], b);
     lv_label_set_text(s_val[P_CHIME], s->cab_chime ? HY_S_ON : HY_S_OFF);
     lv_label_set_text(s_val[P_LIGHT], s->cab_light ? HY_S_ON : HY_S_OFF);
-    bool taught = is_taught();
     lv_label_set_text(s_val[P_TEACH], taught ? HY_S_CAB_TAUGHT : HY_S_CAB_NOT_TAUGHT);
     lv_obj_set_hidden(s_row[P_FORGET], !taught);
 }
@@ -602,6 +606,15 @@ void cab_event(const hy_cabev_t *e)
     case HY_CABEV_OTHER:
     case HY_CABEV_TRIGGER:
         test_event(e);
+        break;
+    case HY_CABEV_FAULT:
+        if (s_x_on) {
+            s_x_on = false;   /* the runner ended the test */
+            lv_label_set_text(s_x_hint, HY_S_CAB_PAUSED);
+        }
+        if (ui_current_view() == HY_V_CAB) {
+            page_refresh();
+        }
         break;
     default:
         break;

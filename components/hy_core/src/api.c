@@ -249,7 +249,7 @@ int hy_api_cabinet_event_json(const hy_cab_status_t *st, float dist, float thr, 
     if (!st || !buf || len == 0) return -1;
     cJSON *o = cJSON_CreateObject();
     if (!o) return -1;
-    bool ok = cJSON_AddStringToObject(o, "type", "cabinet") != NULL;
+    bool ok = cJSON_AddStringToObject(o, "ev", "cabinet") != NULL;
     cJSON *t = ok ? cJSON_AddObjectToObject(o, "test") : NULL;
     ok = t && cJSON_AddNumberToObject(t, "matches", st->test_matches) &&
          cJSON_AddNumberToObject(t, "others", st->test_others);

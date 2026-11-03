@@ -215,7 +215,7 @@ class Device:
 
     def cab_event(self, match):
         c = self.cab
-        frame = ws_frame(json.dumps({"type": "cabinet", "test": {"matches": c["tm"], "others": c["to"]},
+        frame = ws_frame(json.dumps({"ev": "cabinet", "test": {"matches": c["tm"], "others": c["to"]},
                                      "last": {"dist": 0.41 if match else 1.94, "thr": 0.72, "match": match}}))
         for cl in list(self.clients):
             try:

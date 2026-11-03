@@ -1115,13 +1115,13 @@ static void imu_wom(int mg)
     };
     gpio_config(&gc);
     s_imu_edges = 0;
-    hy_board_imu_int_hook(imu_dbg_hook);
+    hy_imu_int_fn_t prev_hook = hy_board_imu_int_hook(imu_dbg_hook);   /* put back at every exit */
     int16_t rest[3];
     esp_err_t err = hy_board_imu_wom_arm((uint16_t)mg, rest);
     if (err != ESP_OK) {
         printf("imu wom: arm %s\n", esp_err_to_name(err));
         imu_dbg_print_regs("wom");
-        hy_board_imu_int_hook(NULL);
+        hy_board_imu_int_hook(prev_hook);
         gpio_reset_pin((gpio_num_t)other);
         return;
     }
@@ -1159,7 +1159,7 @@ static void imu_wom(int mg)
     err = hy_board_imu_reg(IMU_REG_STATUS1, &s1);
     printf("imu wom: STATUS1=0x%02x (%s) WoM %d; after the read gpio17=%d gpio21=%d\n", s1, esp_err_to_name(err),
            (s1 >> 2) & 1, gpio_get_level(GPIO_NUM_17), gpio_get_level(GPIO_NUM_21));
-    hy_board_imu_int_hook(NULL);
+    hy_board_imu_int_hook(prev_hook);
     err = hy_board_imu_wom_disarm();
     gpio_reset_pin((gpio_num_t)other);
     printf("imu wom: done, %u level changes seen by polling (10 ms), %u edges seen by the interrupt, disarm %s\n",

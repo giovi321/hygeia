@@ -293,6 +293,7 @@ static void motion_task(void *arg)
                     ESP_LOGE(TAG, "motion: imu power up failed: %s", esp_err_to_name(perr));
                     imu_bad_logged = true;
                 }
+                hy_cab_int_stream_error(perr);   /* a teach or test in progress must end, not wait */
                 /* No IMU at all cannot succeed later: block with no timeout. Transient bus errors retry. */
                 ulTaskNotifyTake(pdTRUE, perr == ESP_ERR_INVALID_STATE ? portMAX_DELAY : pdMS_TO_TICKS(RETRY_MS));
                 continue;

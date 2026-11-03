@@ -75,6 +75,7 @@ void cabinet_ui_event(const hy_cabev_t *e)
         break;
     case HY_CABEV_FAULT:
         ESP_LOGW(TAG, "cabinet: sensor fault, the feature is off until a settings change");
+        cab_event(e);
         break;
     case HY_CABEV_MATCH:
     case HY_CABEV_OTHER:

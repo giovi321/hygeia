@@ -225,11 +225,14 @@ static void fault(const char *what, esp_err_t err)
     bool was = s_fault;
     s_fault = true;
     bool testing = s_testing;
+    bool teaching = s_teaching;
     s_testing = false;
     s_teaching = false;
     portEXIT_CRITICAL(&s_cmux);
     if (s_st.tactive) {
         teach_fail(HY_CAB_FAIL_ABORT);
+    } else if (teaching) {
+        post_ev(HY_CABEV_TEACH_FAIL, (uint8_t)HY_CAB_FAIL_ABORT, 0, 0);   /* the first stream sample never came */
     }
     if (testing) {
         ESP_LOGI(TAG, "cabinet: test off");
@@ -464,7 +467,9 @@ void hy_cab_int_sleep_step(void)
     portEXIT_CRITICAL(&s_cmux);
     uint16_t thr = c.mode == HY_CAB_TAUGHT ? trig : hy_cab_wom_mg(c.sens);
     if (thr == 0) {
-        return;   /* forgotten since the live check: the motion task sees the feature off on its next pass */
+        /* forgotten since the live check: block until a setter wakes the task, which then sees the feature off */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        return;
     }
     if (!s_sl.armed || s_sl.thr != thr || s_sl.mode != c.mode) {
         irq_take();
@@ -500,7 +505,7 @@ void hy_cab_int_sleep_step(void)
     s_sl.armed = false;
     if (s_sl.mode == HY_CAB_ANY) {
         esp_err_t err = hy_board_imu_wom_disarm();
-        s_sl.imu_on = false;
+        s_sl.imu_on = err != ESP_OK;   /* a failed disarm is retried by sleep_end */
         io_result(err, "disarm");
         react_check(0, 0);
         s_sl.wait_until = mono_ms() + HY_CAB_ANY_HOLDOFF_MS;
@@ -604,7 +609,9 @@ void hy_cab_int_stream_error(esp_err_t err)
     portENTER_CRITICAL(&s_cmux);
     bool active = live || s_testing || s_teaching;
     portEXIT_CRITICAL(&s_cmux);
-    if (active) {
+    if (active && err == ESP_ERR_INVALID_STATE) {
+        fault("imu absent", err);   /* no IMU at all cannot recover: end a teach or test at once */
+    } else if (active) {
         io_result(err, s_st.capturing ? "read6" : "read");
     }
 }
@@ -768,19 +775,19 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
         capture_abort();
         ESP_LOGI(TAG, "cabinet: teach cancelled");
     }
-    if (!s_st.tactive && !testing && !live) {
-        capture_abort();
-        stream_reset();
-        return;
-    }
-    if (suspended) {
-        /* The Undo toast shows: no trigger; the still tracker starts again when it closes */
-        if (s_st.tactive) {
+    hy_cab_stream_plan_t plan = hy_cab_stream_plan(suspended, s_st.tactive, testing, live);
+    if (!plan.run) {
+        /* Suspended: the Undo toast shows, no trigger; the still tracker starts again when it closes */
+        if (plan.abort_teach) {
             capture_abort();
             teach_fail(HY_CAB_FAIL_ABORT);
         }
-        capture_abort();
-        stream_reset();
+        if (plan.abort_capture) {
+            capture_abort();
+        }
+        if (plan.reset) {
+            stream_reset();
+        }
         return;
     }
     if (s_st.capturing) {

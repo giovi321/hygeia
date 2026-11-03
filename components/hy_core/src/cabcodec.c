@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "hy/cabinet.h"
@@ -33,6 +34,7 @@ size_t hy_cab_encode(const hy_cab_model_t *m, int64_t created, uint8_t *buf, siz
     size_t need = HDR_LEN + CRC_LEN;
     for (int t = 0; t < HY_CAB_TAKES; t++) {
         if (m->take[t].n == 0 || m->take[t].n > HY_CAB_MAX_N) return 0;
+        if (m->take[t].has_gyro != m->take[0].has_gyro) return 0;   /* the file has one flag for all takes */
         need += TAKE_HDR + (size_t)m->take[t].n * SAMPLE_B;
     }
     if (need > max) return 0;
@@ -91,6 +93,11 @@ hy_err_t hy_cab_decode(const uint8_t *buf, size_t len, hy_cab_model_t *m, int64_
 
     bool gyro = (buf[7] & 1) != 0;
     uint32_t d = get32(buf + 12);
+    uint16_t trig = get16(buf + 8);
+    float d_self;
+    memcpy(&d_self, &d, sizeof d);
+    if (trig < HY_CAB_TRIG_MIN_MG || trig > HY_CAB_TRIG_MAX_MG || !isfinite(d_self) || !(d_self > 0.0f))
+        return HY_E_CORRUPT;
     memset(m, 0, sizeof *m);
     m->trig_mg = get16(buf + 8);
     memcpy(&m->d_self, &d, sizeof d);

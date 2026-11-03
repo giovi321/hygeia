@@ -72,7 +72,7 @@ void hy_ui_debug_pair(const char *arg);   /* "show|hide": the pairing overlay wi
    30 s, then STATUS1 and disarms. "cap <s>": capture mode, `imu6,<t_ms>,ax,ay,az,gx,gy,gz` at 50 Hz for at most
    30 s, t_ms from the start of hy_board_imu_capture_on, then the time of the first gyro value off zero. "pin
    [1|2 [gpio]]": the routing for wake on motion (chip INT1 or INT2 and its GPIO, 17 or 21). */
-void hy_ui_debug_imu(const char *arg);   /* "show|hide": the pairing overlay with an example code */
+void hy_ui_debug_imu(const char *arg);
 #endif
 
 #ifdef __cplusplus

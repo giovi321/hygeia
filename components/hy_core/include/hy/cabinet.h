@@ -99,8 +99,16 @@ float    hy_cab_dist(const hy_cab_seq_t *tmpl, const hy_cab_seq_t *cap);
    the take with the largest s when d_self is not finite, or to an empty take; else HY_OK, *odd = -1, m->valid.
    On HY_E_INVALID for an outlier or a non-finite d_self, m still holds the trimmed takes, trig_mg and d_self with
    m->valid false: a caller that accepts the takes as they are (after the last redo) sets m->valid. With a
-   non-finite d_self the threshold is HY_CAB_THR_MAX. */
+   non-finite d_self the threshold is HY_CAB_THR_MAX. Takes that disagree on has_gyro give HY_E_INVALID with
+   *odd = HY_CAB_ODD_GYRO_MIX and m left zeroed (never accepted as they are). */
+#define HY_CAB_ODD_GYRO_MIX    (-2)
 hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_TAKES], int *odd);
+/* What one accel stream sample may do. idle: nothing is on (no teach, no test, feature not live): drop any
+   capture and the still tracker. suspended (the Undo toast shows) while something is on: no trigger and no
+   capture; drop the capture and the still tracker, and abort an active teach. Otherwise run: the sample may
+   trigger, capture or advance the teach. */
+typedef struct { bool run; bool abort_capture; bool abort_teach; bool reset; } hy_cab_stream_plan_t;
+hy_cab_stream_plan_t hy_cab_stream_plan(bool suspended, bool teach_active, bool testing, bool live);
 /* clamp(k[sens] * d_self, HY_CAB_THR_MIN, HY_CAB_THR_MAX), k = 1.0, 1.3, 1.6, 2.0, 2.5 for sensitivity 1 to 5;
    out of range: 3. */
 float    hy_cab_threshold(const hy_cab_model_t *m, uint8_t sens);

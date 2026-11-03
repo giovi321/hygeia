@@ -30,7 +30,7 @@ HY.ws = (function () {
       tries = 0;
       var msg = null;
       try { msg = JSON.parse(e.data); } catch (x) { msg = null; }
-      if (msg && msg.type === "cabinet") {   // a test result: the Cabinet open page shows it, nothing refetches
+      if (msg && msg.ev === "cabinet") {   // a test result: the Cabinet open page shows it, nothing refetches
         if (typeof HY.onCabinet === "function") { HY.onCabinet(msg); }
         return;
       }

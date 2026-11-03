@@ -185,6 +185,46 @@ void test_cab_decode_bad_count(void)
     TEST_ASSERT_EQUAL(HY_E_CORRUPT, hy_cab_decode(s_buf, n, &s_d, NULL));
 }
 
+/* A file with a good CRC but a trigger or d_self no teach can produce is refused. */
+void test_cab_decode_bad_trigger_or_dself(void)
+{
+    static const uint16_t trig[] = { 0, HY_CAB_TRIG_MIN_MG - 1, HY_CAB_TRIG_MAX_MG + 1, 65535 };
+    for (unsigned i = 0; i < sizeof trig / sizeof trig[0]; i++) {
+        make_model(&s_m, 20, 20, 20, true);
+        s_m.trig_mg = trig[i];
+        size_t n = hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf);
+        TEST_ASSERT_TRUE(n > 0);
+        TEST_ASSERT_EQUAL(HY_E_CORRUPT, hy_cab_decode(s_buf, n, &s_d, NULL));
+        TEST_ASSERT_FALSE(s_d.valid);
+    }
+    static const float dself[] = { 0.0f, -1.0f, (float)(1.0 / 0.0), (float)(0.0 / 0.0) };
+    for (unsigned i = 0; i < sizeof dself / sizeof dself[0]; i++) {
+        make_model(&s_m, 20, 20, 20, true);
+        s_m.d_self = dself[i];
+        size_t n = hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf);
+        TEST_ASSERT_TRUE(n > 0);
+        TEST_ASSERT_EQUAL(HY_E_CORRUPT, hy_cab_decode(s_buf, n, &s_d, NULL));
+    }
+    make_model(&s_m, 20, 20, 20, true);
+    s_m.trig_mg = HY_CAB_TRIG_MIN_MG;
+    size_t n = hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf);
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_decode(s_buf, n, &s_d, NULL));
+    s_m.trig_mg = HY_CAB_TRIG_MAX_MG;
+    n = hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf);
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_decode(s_buf, n, &s_d, NULL));
+}
+
+/* The file has one gyro flag: takes that disagree are not encoded (take 0's flag is never used for all). */
+void test_cab_encode_refuses_mixed_gyro(void)
+{
+    make_model(&s_m, 20, 20, 20, true);
+    s_m.take[1].has_gyro = false;
+    TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
+    make_model(&s_m, 20, 20, 20, false);
+    s_m.take[2].has_gyro = true;
+    TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
+}
+
 void test_cab_csv_rows(void)
 {
     hy_cab_seq_t q;
@@ -284,6 +324,8 @@ int main(void)
     RUN_TEST(test_cab_decode_bad_version);
     RUN_TEST(test_cab_decode_truncated);
     RUN_TEST(test_cab_decode_bad_count);
+    RUN_TEST(test_cab_decode_bad_trigger_or_dself);
+    RUN_TEST(test_cab_encode_refuses_mixed_gyro);
     RUN_TEST(test_cab_csv_rows);
     RUN_TEST(test_cab_store_atomic);
     return UNITY_END();

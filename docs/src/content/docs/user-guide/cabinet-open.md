@@ -22,7 +22,7 @@ The default sensitivity, 3 of 5, is set to catch the door opening, even a slow o
 
 - Fix the device on the inside of the cabinet door, so it moves with the door. A device that can slide or lift on its own counts those movements too
 - The screen can face into the cabinet. Teaching and testing use tones, so you do not need to see the screen while you do the movement
-- The device can be mounted in any of the four orientations
+- The device can be mounted in any of the four orientations; teach the movement in the orientation you use
 - After you move the device to another place on the door, or to another door, teach the movement again
 
 ## Teaching the movement
@@ -35,7 +35,7 @@ For each of the 3 takes:
 2. "Now" and a high tone: do the movement, for example open the door
 3. Stop and hold still. "Got it" and a low tone end the take. Then go back to where you started, for example close the door, and wait for the next "Hold still"
 
-After the third take the device compares the three. If one of them looks different from the other two, it shows "That one looked different, do it again" and asks for that take once more. When all three agree it shows "Saved". The tones play at the set volume, also when the sound is off or do not disturb is on.
+After the third take the device compares the three. If one of them looks different from the other two, it shows "That one looked different, do it again" and asks for that take again (at most twice; after that the takes are kept as they are). When all three agree it shows "Saved". The tones play at the set volume, also when the sound is off or do not disturb is on.
 
 A movement must:
 
@@ -82,7 +82,7 @@ When both switches are off, Cabinet open does nothing and the motion sensor is n
 
 While Cabinet open is on and a switch is on (and, with Taught movement, a movement is taught), the motion sensor stays powered in a low-power mode while the screen is off, and a movement wakes the CPU for a moment. The screen stays off unless the device reacts. Otherwise the motion sensor is powered down while the screen is off, as described in [Idle clock and power](../idle-power/#motion-sensor).
 
-If the motion sensor stops answering, Cabinet open turns itself off until a Cabinet open setting is changed.
+If the motion sensor stops answering, Cabinet open pauses itself until it is switched off and on again, or its trigger, sensitivity or one of its switches is changed. The Cabinet open page on the device shows "Paused: sensor fault" and the web page shows "Paused: the motion sensor did not answer".
 
 ## Downloading samples
 

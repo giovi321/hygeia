@@ -622,13 +622,15 @@ static void test_taught_putdown_pickup(void)
 
 /* Positives when the file has at least 4 captures (model from 3, the rest match); otherwise only the negatives
    against a model from the captures found, if there are 3. */
-static void taught_from_file(const char *file, const char *const *neg, int n_neg)
+static void taught_from_file(const char *file, const char *cause, const char *const *neg, int n_neg)
 {
     model_t *md = model_of(file);
     bool ok = build_model(md);
     if (!ok) {
         printf("%s: %d captures, no model\n", file, md->n_caps);
-        TEST_IGNORE_MESSAGE("fewer than 3 captures");
+        static char why[160];
+        snprintf(why, sizeof why, "%s: %d captures, fewer than 3 (%s)", file, md->n_caps, cause);
+        TEST_IGNORE_MESSAGE(why);
     }
     if (md->n_caps >= HY_CAB_TAKES + 1)
         for (int k = HY_CAB_TAKES; k < md->n_caps; k++) expect_match_variants(md, k);
@@ -645,7 +647,7 @@ static void taught_from_file(const char *file, const char *const *neg, int n_neg
 static void test_taught_rotate_cycle(void)
 {
     NEED("rotate_cycle");
-    taught_from_file("rotate_cycle", NULL, 0);
+    taught_from_file("rotate_cycle", "hand-held holds end the capture", NULL, 0);
 }
 
 static void test_taught_tap_pattern(void)
@@ -653,7 +655,7 @@ static void test_taught_tap_pattern(void)
     NEED("tap_double");
     static const char *const neg[] = { "putdown_pickup", "shake_firm", "shake_light", "shake_live_arm",
                                        "shake_live_combo" };
-    taught_from_file("tap_double", neg, (int)(sizeof neg / sizeof neg[0]));
+    taught_from_file("tap_double", "taps capture 20 to 60 ms, under HY_CAB_MIN_MS", neg, (int)(sizeof neg / sizeof neg[0]));
 }
 
 /* ---- Shake to undo ---- */

@@ -1072,7 +1072,8 @@ static void test_api_cabinet_event_json(void)
     TEST_ASSERT_EQUAL_INT((int)strlen(buf), n);
     cJSON *o = cJSON_Parse(buf);
     TEST_ASSERT_NOT_NULL(o);
-    TEST_ASSERT_EQUAL_STRING("cabinet", cJSON_GetObjectItemCaseSensitive(o, "type")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("cabinet", cJSON_GetObjectItemCaseSensitive(o, "ev")->valuestring);
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(o, "type"));
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(o, "test");
     TEST_ASSERT_EQUAL_INT(4, (int)cJSON_GetObjectItemCaseSensitive(t, "matches")->valuedouble);
     TEST_ASSERT_EQUAL_INT(1, (int)cJSON_GetObjectItemCaseSensitive(t, "others")->valuedouble);

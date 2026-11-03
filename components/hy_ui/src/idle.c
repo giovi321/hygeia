@@ -414,6 +414,7 @@ void screen_usb(bool in)
 void screen_touch_wake(void)
 {
     s_guard = true;
+    s_guard_multi = false;   /* a stale double-tap guard must not swallow the taps after this wake */
     s_guard_t0 = lv_tick_get();
     event(HY_SE_TOUCH, "touch");
 }

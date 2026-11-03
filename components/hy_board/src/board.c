@@ -911,9 +911,11 @@ void board_imu_int_detach(void)
     gpio_reset_pin((gpio_num_t)pin);
 }
 
-void hy_board_imu_int_hook(void (*fn)(void))
+hy_imu_int_fn_t hy_board_imu_int_hook(hy_imu_int_fn_t fn)
 {
+    hy_imu_int_fn_t prev = s_imu_hook;
     s_imu_hook = fn;
+    return prev;
 }
 
 bool hy_board_imu_int_armed(void)

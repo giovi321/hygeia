@@ -134,6 +134,10 @@ hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_T
             *odd = k;
             return HY_E_INVALID;
         }
+        if (takes[k].has_gyro != takes[0].has_gyro) {
+            *odd = HY_CAB_ODD_GYRO_MIX;
+            return HY_E_INVALID;
+        }
         uint16_t p = peak_mg(&takes[k]);
         if (p < min_peak) min_peak = p;
     }
@@ -187,4 +191,22 @@ bool hy_cab_match(const hy_cab_model_t *m, uint8_t sens, const hy_cab_seq_t *cap
         for (int k = 0; k < HY_CAB_TAKES; k++) d = fmin2(d, hy_cab_dist(&m->take[k], cap));
     if (best) *best = d;
     return m->valid && d <= hy_cab_threshold(m, sens);
+}
+
+hy_cab_stream_plan_t hy_cab_stream_plan(bool suspended, bool teach_active, bool testing, bool live)
+{
+    hy_cab_stream_plan_t r = { false, false, false, false };
+    if (!teach_active && !testing && !live) {
+        r.abort_capture = true;
+        r.reset = true;
+        return r;
+    }
+    if (suspended) {
+        r.abort_capture = true;
+        r.abort_teach = teach_active;
+        r.reset = true;
+        return r;
+    }
+    r.run = true;
+    return r;
 }

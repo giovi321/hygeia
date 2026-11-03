@@ -330,6 +330,60 @@ static void test_model_odd_take_accept(void)
     for (int k = 0; k < HY_CAB_TAKES; k++) TEST_ASSERT_TRUE(hy_cab_match(&m, 3, &m.take[k], NULL));
 }
 
+/* Takes that disagree on has_gyro are refused outright: no model, no trimmed takes, a distinct odd value. */
+static void test_model_mixed_gyro_refused(void)
+{
+    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_model_t m;
+    for (int k = 0; k < HY_CAB_TAKES; k++) {
+        cab_syn_t p = mv(CAB_SYN_DOOR_OPEN, 1.0f, 1.0f, 61u + (uint32_t)k);
+        capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[k]);
+        takes[k].has_gyro = true;
+    }
+    int odd = -1;
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(&m, takes, &odd));
+    for (int bad = 0; bad < HY_CAB_TAKES; bad++) {
+        takes[bad].has_gyro = false;
+        odd = -1;
+        TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build(&m, takes, &odd));
+        TEST_ASSERT_EQUAL(HY_CAB_ODD_GYRO_MIX, odd);
+        TEST_ASSERT_FALSE(m.valid);
+        takes[bad].has_gyro = true;
+    }
+}
+
+/* While suspended (the Undo toast) a stream sample never triggers or captures; a capture and a teach end. */
+static void test_cab_suspended_while_armed(void)
+{
+    for (int teach = 0; teach < 2; teach++)
+        for (int test = 0; test < 2; test++) {
+            hy_cab_stream_plan_t p = hy_cab_stream_plan(true, teach, test, true);
+            TEST_ASSERT_FALSE(p.run);
+            TEST_ASSERT_TRUE(p.abort_capture);
+            TEST_ASSERT_TRUE(p.reset);
+            TEST_ASSERT_EQUAL(teach != 0, p.abort_teach);
+        }
+    /* feature not live but a test or teach on: still suspended */
+    hy_cab_stream_plan_t p = hy_cab_stream_plan(true, true, false, false);
+    TEST_ASSERT_FALSE(p.run);
+    TEST_ASSERT_TRUE(p.abort_teach);
+    p = hy_cab_stream_plan(true, false, true, false);
+    TEST_ASSERT_FALSE(p.run);
+    TEST_ASSERT_FALSE(p.abort_teach);
+    /* not suspended: runs when anything is on */
+    TEST_ASSERT_TRUE(hy_cab_stream_plan(false, false, false, true).run);
+    TEST_ASSERT_TRUE(hy_cab_stream_plan(false, true, false, false).run);
+    TEST_ASSERT_TRUE(hy_cab_stream_plan(false, false, true, false).run);
+    /* nothing on: idle, suspended or not, and no teach to abort */
+    for (int sus = 0; sus < 2; sus++) {
+        p = hy_cab_stream_plan(sus, false, false, false);
+        TEST_ASSERT_FALSE(p.run);
+        TEST_ASSERT_TRUE(p.abort_capture);
+        TEST_ASSERT_TRUE(p.reset);
+        TEST_ASSERT_FALSE(p.abort_teach);
+    }
+}
+
 static void test_threshold_clamp(void)
 {
     static hy_cab_seq_t takes[HY_CAB_TAKES];
@@ -423,6 +477,8 @@ int main(void)
     RUN_TEST(test_sensitivity_monotone);
     RUN_TEST(test_model_odd_take);
     RUN_TEST(test_model_odd_take_accept);
+    RUN_TEST(test_model_mixed_gyro_refused);
+    RUN_TEST(test_cab_suspended_while_armed);
     RUN_TEST(test_threshold_clamp);
     RUN_TEST(test_model_trim_trigger);
     RUN_TEST(test_match_timing);

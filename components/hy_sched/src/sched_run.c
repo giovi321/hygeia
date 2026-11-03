@@ -345,7 +345,11 @@ void hy_sched_chime_once(const char *why)
         if (!hy_audio_ok()) {
             /* not silenced, but the speaker failed: the UI flashes; the play is still attempted,
                so a speaker that recovers is heard again */
-            s_flash = true;
+            if (!s_flash) {
+                s_flash = true;
+                s_snap.flash = true;   /* published as the deferred chime does */
+                s_gen++;               /* the UI reads the flash request from a new generation */
+            }
             ESP_LOGW(TAG, "chime silent (audio unavailable)");
         }
         hy_audio_chime();

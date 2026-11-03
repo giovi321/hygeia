@@ -270,7 +270,7 @@ esp_err_t hy_board_imu_power(bool on)
     }
     esp_err_t e1 = reg_write(QMI_REG_CTRL7, 0x00);
     esp_err_t e2 = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE);
-    s_mode = M_OFF;
+    /* mode_exit left s_mode at M_OFF only when it succeeded; a failed exit stays recorded so the next call retries it */
     return err != ESP_OK ? err : e1 != ESP_OK ? e1 : e2;
 }
 
@@ -485,8 +485,7 @@ esp_err_t hy_board_imu_capture_on(void)
         s_mode = M_CAPTURE;
         return ESP_OK;
     }
-    power_down_best_effort();
-    s_mode = M_OFF;
+    power_down_best_effort();   /* s_mode stays as mode_exit left it: a failed exit is retried by the next power call */
     return err;
 }
 

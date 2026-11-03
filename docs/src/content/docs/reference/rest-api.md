@@ -73,9 +73,11 @@ The path has no version. `GET /api/info` and `GET /api/state` carry `"api": 1`. 
 
 ## Live events
 
-`/ws` is a WebSocket for paired browsers. It sends one JSON text frame per event, for example `{"ev":"taken","ts":1793181600,"med_id":1,"log_id":12,"slot":1793181000,"value":0}`. The events are `taken`, `skipped`, `missed`, `due`, `snoozed`, `undone`, `log_edited`, `meds_changed`, `untracked`, `battery_low`, `battery_critical` and `clock_invalid`. The frame `{"ev":"resync"}` means events were dropped: read the data again. The web UI refetches the page it shows on every frame, except the update frames below.
+`/ws` is a WebSocket for paired browsers. It sends one JSON text frame per event, for example `{"ev":"taken","ts":1793181600,"med_id":1,"log_id":12,"slot":1793181000,"value":0}`. The events are `taken`, `skipped`, `missed`, `due`, `snoozed`, `undone`, `log_edited`, `meds_changed`, `untracked`, `battery_low`, `battery_critical` and `clock_invalid`. The frame `{"ev":"resync"}` means events were dropped: read the data again. The web UI refetches the page it shows on every frame, except the update frames and the cabinet frame below.
 
 During a firmware update from GitHub the device sends `{"ev":"update","state":"downloading","pct":42}` on every state change and on each 5 percent of the download. `state` is one of `checking`, `up_to_date`, `available`, `downloading`, `verifying`, `restarting` and `failed`; a failed frame adds `"error":"<code>"`. Read `GET /api/update` for the rest.
+
+While the Cabinet open test runs, every counted movement sends `{"ev":"cabinet","test":{"matches":4,"others":1},"last":{"dist":0.41,"thr":0.72,"match":true}}`. `test.matches` and `test.others` are the counts of the test so far; `last` describes the movement just counted: `dist` the distance to the taught movement (`null` when the movement was rejected before the comparison), `thr` the threshold (`null` when there is none), `match` whether it counted as a match. The web UI does not refetch on this frame.
 
 ## Routes
 

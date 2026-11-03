@@ -133,8 +133,10 @@ esp_err_t hy_board_imu_capture_on(void);
 esp_err_t hy_board_imu_read6(int16_t a_mg[3], int16_t g_ddps[3]);
 /* ISR-context hook for the interrupt pin, called on every level change of the pin while wake on motion is armed;
    NULL removes it. fn must be ISR safe. While armed, the pin also joins the light-sleep wake set in
-   hy_board_sleep_wake_arm, on the level opposite the recorded one. */
-void      hy_board_imu_int_hook(void (*fn)(void));
+   hy_board_sleep_wake_arm, on the level opposite the recorded one. Returns the hook it replaces, so a temporary
+   user (the console) can put it back. */
+typedef void (*hy_imu_int_fn_t)(void);
+hy_imu_int_fn_t hy_board_imu_int_hook(hy_imu_int_fn_t fn);
 bool      hy_board_imu_int_armed(void);
 
 #if CONFIG_HY_DEBUG_CONSOLE
