@@ -170,6 +170,7 @@
 
 /* ---- idle clock ---- */
 #define HY_S_IDLE_NEXT     "Next: %s at %s"         /* code, HH:MM */
+#define HY_S_CAB_NEXT      "Next: %s at %s"         /* medicine name, HH:MM: the Cabinet open toast */
 #define HY_S_IDLE_DUE_ONE  "%s due"                 /* code of the open dose */
 #define HY_S_IDLE_DUE_MORE "%s and %u more due"      /* code of the first open dose, count of the others */
 #define HY_S_IDLE_NONE     "No doses scheduled"

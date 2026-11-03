@@ -32,6 +32,7 @@ idf_component_register(
         "src/apinfo.c"
         "src/webqr.c"
         "src/update.c"
+        "src/cabinet.c"
         "fonts/hy_inter_14.c"
         "fonts/hy_inter_17.c"
         "fonts/hy_inter_b17.c"

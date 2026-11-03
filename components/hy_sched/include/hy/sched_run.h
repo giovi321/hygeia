@@ -50,6 +50,9 @@ int64_t   hy_sched_run_next_wake(void);
    cab_window_min from the settings), 0 when none or not tracking. Spinlock copy: any task. A settings change
    of cab_window_min calls hy_sched_run_invalidate. */
 int64_t   hy_sched_run_attention_from(void);
+/* LVGL task. One chime with the scheduler's gating (sound, do-not-disturb, quiet hours, audio flash); logs
+   "chime silent (<reason>)" when it does not play. why names the caller, for the debug log only. */
+void      hy_sched_chime_once(const char *why);
 /* Debug: duration of the log query in the last evaluation (us). */
 uint32_t  hy_sched_run_query_us(void);
 

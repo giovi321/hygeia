@@ -473,6 +473,7 @@ void ui_log_hwm(const char *what)
 
 esp_err_t hy_ui_start(void)
 {
+    cabinet_ui_init();   /* before rotate_init starts the motion task: the template and the interrupt hook are in place */
     if (!hy_board_display()) {
         return ESP_ERR_INVALID_STATE;
     }

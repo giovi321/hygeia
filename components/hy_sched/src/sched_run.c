@@ -326,8 +326,9 @@ static int local_minute_now(void)
     return ok ? tm.tm_hour * 60 + tm.tm_min : -1;
 }
 
-static void play_chime(void)
+void hy_sched_chime_once(const char *why)
 {
+    ESP_LOGD(TAG, "chime requested (%s)", why ? why : "");
     const hy_settings_t *st = hy_settings();
     bool quiet = false;
     if (st->sound && !st->dnd && st->quiet_from != st->quiet_to) {
@@ -349,6 +350,11 @@ static void play_chime(void)
         }
         hy_audio_chime();
     }
+}
+
+static void play_chime(void)
+{
+    hy_sched_chime_once("due");
 }
 
 static void evaluate(int64_t now, bool pre_jump)

@@ -235,6 +235,11 @@ static void form_sync(void)
     }
 }
 
+bool ui_nav_form_dirty(void)
+{
+    return s_nav.form_dirty;
+}
+
 void ui_nav_set_form_dirty(bool dirty)
 {
     s_nav.form_dirty = dirty;

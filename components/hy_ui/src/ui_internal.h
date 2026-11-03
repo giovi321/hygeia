@@ -10,6 +10,7 @@
 #include "hy/power_run.h"
 #include "hy/screen.h"
 #include "hy/motion.h"
+#include "hy/cabinet_run.h"
 #include "esp_err.h"
 #include "hy/net.h"
 #include "strings.h"
@@ -122,6 +123,7 @@ void      ui_nav_reset(void);                    /* debug: back to the root what
 #endif
 void      ui_nav_pop(void);                      /* one level up, whatever overlay is showing */
 void      ui_nav_home(void);                     /* back to the root; a pager root becomes HOME */
+bool      ui_nav_form_dirty(void);               /* the medicine form has unsaved changes */
 void      ui_nav_set_form_dirty(bool dirty);     /* medform.c: the draft has unsaved changes (nav rule 4b) */
 lv_obj_t *ui_view_box(void);                     /* a hidden 480 x 424 view container in ui_content() */
 void      ui_register_view(hy_view_t v, lv_obj_t *obj); /* the view nav_host shows for v */
@@ -341,6 +343,7 @@ void idle_wake(void);                            /* a waking stroke (fx WAKE): T
 void idle_wake_due(void);                        /* a due entry shows: DUE, logged "wake (due)" */
 bool idle_active(void);                          /* the state is DIM or OFF */
 bool idle_next_text(char *out, size_t len);      /* "Next: A at 14:00"; false when nothing is scheduled or the clock is invalid */
+bool idle_next_dose(char *name, size_t name_len, char *hhmm, size_t hhmm_len); /* next upcoming dose: display name, HH:MM */
 void idle_brightness_stop(void);                 /* whoever sets the brightness itself stops a running idle fade first */
 #if CONFIG_HY_DEBUG_CONSOLE
 void screen_debug(const char *arg);              /* `scr [off|nousb|usb]` */
@@ -396,6 +399,14 @@ void poweroff_now(void);                         /* the power-off slider's path:
 void poweroff_usb(bool in);                      /* hy_power_ui_t.usb */
 #if CONFIG_HY_DEBUG_CONSOLE
 void poweroff_debug(const char *arg);            /* show | slide | cancel | crit */
+#endif
+
+/* cabinet.c: the Cabinet open reaction. cabinet_ui_init starts the runner (template load, interrupt hook, settings) with
+ * the event callback; it runs before the motion task starts. The events arrive in the LVGL task. */
+void cabinet_ui_init(void);                      /* hy_cab_run_init with the event callback, then hy_cab_run_config */
+void cabinet_ui_event(const hy_cabev_t *e);      /* the single dispatch point for the runner's events */
+#if CONFIG_HY_DEBUG_CONSOLE
+void cabinet_debug(const char *arg);             /* `cab react`: posts a REACT as the runner would */
 #endif
 
 /* toast.c */

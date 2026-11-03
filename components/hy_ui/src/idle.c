@@ -92,7 +92,7 @@ static bool slot_done(const hy_snapshot_t *sn, const hy_med_t *m, int64_t slot)
 }
 
 /* earliest upcoming slot of the active fixed medicines within 8 days that no logged dose satisfies; 0 when none */
-static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
+static int64_t next_slot_med(const hy_snapshot_t *sn, const hy_med_t **med)
 {
     int64_t best = 0;
     for (size_t i = 0; i < sn->in.n_meds; i++) {
@@ -108,12 +108,40 @@ static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
             }
             if (!slot_done(sn, m, occ[k])) {
                 best = occ[k];
-                *code = m->code;
+                *med = m;
                 break;
             }
         }
     }
     return best;
+}
+
+static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
+{
+    const hy_med_t *m = NULL;
+    int64_t best = next_slot_med(sn, &m);
+    *code = m ? m->code : "";
+    return best;
+}
+
+/* the next upcoming dose for the cabinet toast: display name and local time; false when the clock is invalid or
+   nothing is scheduled */
+bool idle_next_dose(char *name, size_t name_len, char *hhmm, size_t hhmm_len)
+{
+    if (!hy_clock_port()->valid(NULL)) {
+        return false;
+    }
+    const hy_snapshot_t *sn = hy_sched_snapshot();
+    const hy_med_t *m = NULL;
+    int64_t nx = sn->tracking && hy_sched_generation() ? next_slot_med(sn, &m) : 0;
+    if (!nx || !m) {
+        return false;
+    }
+    char tz[HY_TZ_LEN];
+    hy_clock_tz_copy(tz, sizeof tz);
+    ui_fmt_hhmm(nx, tz, hhmm, hhmm_len);
+    snprintf(name, name_len, "%s", m->name[0] ? m->name : m->code);
+    return true;
 }
 
 /* code of the first open, not snoozed dose (the order the due card lists them); "" when its medicine is unknown */
