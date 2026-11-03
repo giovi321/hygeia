@@ -198,6 +198,7 @@ static void settings_applied(const hy_settings_t *old, const hy_settings_t *now)
     if (now->brightness != old->brightness && !idle_active()) {
         settings_brightness_live(now->brightness);
     }
+    hy_cab_run_config(now);
     qs_values_refresh();
     settings_values_refresh();
 }

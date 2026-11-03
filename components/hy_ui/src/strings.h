@@ -171,6 +171,45 @@
 /* ---- idle clock ---- */
 #define HY_S_IDLE_NEXT     "Next: %s at %s"         /* code, HH:MM */
 #define HY_S_CAB_NEXT      "Next: %s at %s"         /* medicine name, HH:MM: the Cabinet open toast */
+
+/* ---- Cabinet open settings, teach and test ---- */
+#define HY_S_SET_CABINET   "Cabinet open"
+#define HY_S_CAB_MODE_ANY  "Any movement"
+#define HY_S_CAB_MODE_TAUGHT "Taught movement"
+#define HY_S_CAB_TRIGGER   "Trigger"
+#define HY_S_CAB_SENS      "Sensitivity"
+#define HY_S_CAB_SENS_VAL  "%u of 5"                /* sensitivity step */
+#define HY_S_CAB_WINDOW    "Remind if due within"
+#define HY_S_CAB_WIN_MIN   "%u min"
+#define HY_S_CAB_WIN_OVERDUE "Overdue only"
+#define HY_S_CAB_CHIME     "Chime"
+#define HY_S_CAB_LIGHT     "Light the screen"
+#define HY_S_CAB_TEACH     "Teach the movement"
+#define HY_S_CAB_TEST      "Test"
+#define HY_S_CAB_FORGET    "Forget the movement"
+#define HY_S_CAB_NOT_TAUGHT "Not taught"
+#define HY_S_CAB_TAUGHT    "Taught"
+#define HY_S_CAB_TEACH_FIRST "Teach the movement first"
+#define HY_S_CAB_MINUS     "â"            /* U+2212 */
+#define HY_S_CAB_T_BODY    "Do the movement 3 times. Start after the high tone. After the low tone, go back to where you started."
+#define HY_S_CAB_T_START   "Start"
+#define HY_S_CAB_T_OF      "%u of 3"                /* take number */
+#define HY_S_CAB_T_STILL   "Hold still"
+#define HY_S_CAB_T_NOW     "Now"
+#define HY_S_CAB_T_GOT     "Got it"
+#define HY_S_CAB_T_SMALL   "Too small, do it again"
+#define HY_S_CAB_T_LONG    "Too long, keep it under 4 seconds"
+#define HY_S_CAB_T_ODD     "That one looked different, do it again"
+#define HY_S_CAB_T_NOMOVE  "No movement, teaching stopped"
+#define HY_S_CAB_T_STOPPED "Teaching stopped"
+#define HY_S_CAB_T_SAVED   "Saved"
+#define HY_S_CAB_X_HINT    "Do the movement."
+#define HY_S_CAB_X_MATCHES "Matches: %u"
+#define HY_S_CAB_X_OTHER   "Other movements: %u"
+#define HY_S_CAB_X_ANY     "Movements: %u"
+#define HY_S_CAB_FORGET_Q  "Forget the taught movement?"
+#define HY_S_CAB_FORGET_YES "Forget"
+#define HY_S_CAB_FORGET_NO "Keep"
 #define HY_S_IDLE_DUE_ONE  "%s due"                 /* code of the open dose */
 #define HY_S_IDLE_DUE_MORE "%s and %u more due"      /* code of the first open dose, count of the others */
 #define HY_S_IDLE_NONE     "No doses scheduled"

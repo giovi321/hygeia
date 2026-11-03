@@ -24,7 +24,7 @@ static const char *TAG = "ui_settings";
 #define ROW_W  (HY_SCREEN - 2 * MARGIN)
 #define MAX_REGIONS 16
 
-enum { R_ZONE, R_DATETIME, R_SOUND, R_DISPLAY, R_WIFI, R_ABOUT, R_N };
+enum { R_ZONE, R_DATETIME, R_SOUND, R_DISPLAY, R_CABINET, R_WIFI, R_ABOUT, R_N };
 
 static lv_obj_t *s_root, *s_list, *s_val[R_N];
 static lv_obj_t *s_zone_root, *s_region, *s_city;
@@ -365,6 +365,9 @@ static void row_tap(void *ud)
     case R_DISPLAY:
         ui_nav_push(HY_V_SET_DISPLAY);
         break;
+    case R_CABINET:
+        ui_nav_push(HY_V_CAB);
+        break;
     case R_ABOUT:
         ui_nav_push(HY_V_ABOUT);
         break;
@@ -430,6 +433,7 @@ static void list_refresh(void)
     lv_label_set_text(s_val[R_DATETIME], t);
     lv_label_set_text_fmt(s_val[R_SOUND], HY_S_SET_VOLUME, (unsigned)st->volume);
     lv_label_set_text_fmt(s_val[R_DISPLAY], HY_S_SET_BRIGHT, (unsigned)st->brightness);
+    lv_label_set_text(s_val[R_CABINET], cab_settings_value());
     hy_net_status_t ns;
     char net[48];
     net_ui_status(&ns);
@@ -504,6 +508,10 @@ void settings_values_refresh(void)
     case HY_V_SET_WIFI:
         wifi_values_refresh();
         break;
+    case HY_V_CAB:
+    case HY_V_CAB_TRIGGER:
+        cab_values_refresh();
+        break;
     default:
         break;
     }
@@ -532,6 +540,7 @@ void settings_create(void)
     make_row(R_DATETIME, HY_S_SET_DATETIME);
     make_row(R_SOUND, HY_S_SET_SOUND);
     make_row(R_DISPLAY, HY_S_SET_DISPLAY);
+    make_row(R_CABINET, HY_S_SET_CABINET);
     make_row(R_WIFI, HY_S_SET_WIFI);
     make_row(R_ABOUT, HY_S_SET_ABOUT);
 

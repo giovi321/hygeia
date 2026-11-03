@@ -27,6 +27,7 @@ static const char *const view_names[N_VIEWS] = {
     "HOME", "OVERVIEW", "HISTORY", "DETAIL", "NOTE", "EARLIER", "QS", "SETTINGS", "SET_ZONE", "SET_TIME",
     "SET_SOUND", "SET_DISPLAY", "ABOUT", "CLOCK_INVALID", "STORAGE_DOWN",
     "MEDFORM", "MED_ARCHIVE", "SET_WIFI", "AP_INFO", "WEB_QR", "UPDATE",
+    "CAB", "CAB_TRIGGER", "CAB_TEACH", "CAB_TEST",
 };
 _Static_assert(sizeof view_names / sizeof view_names[0] == N_VIEWS, "view_names covers every view");
 
@@ -128,6 +129,12 @@ static void refresh_view(hy_view_t v)
     case HY_V_UPDATE:
         upd_view_show();
         break;
+    case HY_V_CAB:
+    case HY_V_CAB_TRIGGER:
+    case HY_V_CAB_TEACH:
+    case HY_V_CAB_TEST:
+        cab_show(v);
+        break;
     case HY_V_SET_TIME:
         timeset_show(false);
         break;
@@ -189,6 +196,9 @@ void ui_show_view(hy_view_t v)
     }
     if (s_shown == HY_V_UPDATE && v != HY_V_UPDATE) {
         upd_view_hide(v);
+    }
+    if ((s_shown == HY_V_CAB_TEACH || s_shown == HY_V_CAB_TEST) && v != s_shown) {
+        cab_hide(v);
     }
     if (s_shown == HY_V_CLOCK_INVALID && v != HY_V_CLOCK_INVALID) {
         timeset_hide();
@@ -388,7 +398,7 @@ void hy_ui_set_storage_ok(bool ok)
  * 120 LVGL objects and a second keyboard that would otherwise sit in internal RAM from boot. A form under quick
  * settings or Settings is still in the stack, so it keeps its widgets and its draft (R13, R14, M1, M2). With
  * CONFIG_HY_DEBUG_CONSOLE every create logs its cost in time and in internal and PSRAM heap. */
-typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_MEDFORM, LZ_ARCHIVE, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_NET, LZ_N } lazy_t;
+typedef enum { LZ_DETAIL, LZ_NOTE, LZ_EARLIER, LZ_MEDFORM, LZ_ARCHIVE, LZ_QS, LZ_SETTINGS, LZ_TIME, LZ_INVALID, LZ_NET, LZ_CAB, LZ_N } lazy_t;
 
 #define WARM_MS 250
 
@@ -429,7 +439,7 @@ static void heap_log(const char *what, const char *name, heap_mark_t m)
 
 static const char *lazy_name(lazy_t k)
 {
-    static const char *const names[LZ_N] = {"detail", "note", "earlier", "medform", "archive", "qs", "settings", "time", "clock-invalid", "net"};
+    static const char *const names[LZ_N] = {"detail", "note", "earlier", "medform", "archive", "qs", "settings", "time", "clock-invalid", "net", "cabinet"};
     return (unsigned)k < LZ_N ? names[k] : "?";
 }
 #endif
@@ -461,6 +471,11 @@ static lazy_t lazy_of(hy_view_t v, bool *is_lazy)
     case HY_V_WEB_QR:
     case HY_V_UPDATE:
         return LZ_NET;
+    case HY_V_CAB:
+    case HY_V_CAB_TRIGGER:
+    case HY_V_CAB_TEACH:
+    case HY_V_CAB_TEST:
+        return LZ_CAB;
     case HY_V_SET_TIME:
         return LZ_TIME;
     case HY_V_CLOCK_INVALID:
@@ -514,6 +529,9 @@ static void create_lazy(lazy_t k)
         apinfo_create();
         webqr_create();
         upd_view_create();
+        break;
+    case LZ_CAB:
+        cab_create();
         break;
     default:
         break;

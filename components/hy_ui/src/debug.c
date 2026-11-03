@@ -771,6 +771,8 @@ static void job_qs(const char *arg)
         {"sound", HY_V_SET_SOUND}, {"display", HY_V_SET_DISPLAY}, {"about", HY_V_ABOUT},
         {"invalid", HY_V_CLOCK_INVALID},   /* the root's layout; the root itself follows the clock */
         {"wifi", HY_V_SET_WIFI}, {"ap", HY_V_AP_INFO}, {"webqr", HY_V_WEB_QR},
+        {"cabinet", HY_V_CAB}, {"cabtrigger", HY_V_CAB_TRIGGER}, {"cabteach", HY_V_CAB_TEACH},
+        {"cabtest", HY_V_CAB_TEST},
     };
     if (strncmp(arg, "view ", 5) == 0) {
         for (size_t i = 0; i < sizeof views / sizeof views[0]; i++) {

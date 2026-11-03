@@ -1,5 +1,6 @@
 #include "hy/audio.h"
 
+#include <math.h>
 #include <stdatomic.h>
 #include <string.h>
 
@@ -20,6 +21,10 @@ static esp_codec_dev_handle_t s_dev;
 static int16_t *s_buf;
 static size_t s_samples;   /* chime samples */
 static size_t s_total;     /* chime plus trailing silence */
+static int16_t *s_tone[HY_TONE_N];     /* rendered cues, same rate as the chime, with the tail silence */
+static size_t s_tone_total[HY_TONE_N];
+static int16_t *s_play;          /* what the task plays next: the chime or a cue */
+static size_t s_play_bytes;
 static TaskHandle_t s_task;
 static atomic_bool s_ok;
 static atomic_bool s_busy;
@@ -65,7 +70,7 @@ static void audio_task(void *arg)
         quiet_end(saved);
         if (err == ESP_CODEC_DEV_OK) {
             esp_codec_dev_set_out_vol(s_dev, atomic_load(&s_volume));
-            err = esp_codec_dev_write(s_dev, s_buf, (int)(s_total * sizeof(int16_t)));
+            err = esp_codec_dev_write(s_dev, s_play, (int)s_play_bytes);
         }
         /* Close also after a failed open: the library marks the output opened before configuring the
          * codec, so without a close the next open would return OK early with the codec unconfigured. */
@@ -84,6 +89,48 @@ static void audio_task(void *arg)
         }
         atomic_store(&s_busy, false);
     }
+}
+
+/* A cue: 1 or 2 bursts of a sine, 5 ms ramps at both ends against clicks, then the tail silence */
+#define TONE_RAMP_MS 5
+#define TONE_AMP     18000.0f
+
+static size_t tone_burst(int16_t *out, unsigned freq, unsigned ms)
+{
+    size_t n = (size_t)HY_CHIME_RATE * ms / 1000, ramp = (size_t)HY_CHIME_RATE * TONE_RAMP_MS / 1000;
+    for (size_t i = 0; i < n; i++) {
+        float env = 1.0f;
+        if (i < ramp) {
+            env = (float)i / (float)ramp;
+        } else if (i + ramp > n) {
+            env = (float)(n - i) / (float)ramp;
+        }
+        out[i] = (int16_t)(TONE_AMP * env * sinf(6.2831853f * (float)freq * (float)i / (float)HY_CHIME_RATE));
+    }
+    return n;
+}
+
+static bool tones_render(void)
+{
+    static const struct { unsigned freq, burst_ms, bursts, gap_ms; } k[HY_TONE_N] = {
+        [HY_TONE_GO] = {1319, 120, 1, 0},
+        [HY_TONE_TAKE] = {880, 80, 2, 60},
+    };
+    size_t silence = (size_t)HY_CHIME_RATE * TAIL_SILENCE_MS / 1000;
+    for (int t = 0; t < HY_TONE_N; t++) {
+        size_t burst = (size_t)HY_CHIME_RATE * k[t].burst_ms / 1000, gap = (size_t)HY_CHIME_RATE * k[t].gap_ms / 1000;
+        size_t total = k[t].bursts * burst + (k[t].bursts - 1) * gap + silence;
+        s_tone[t] = heap_caps_calloc(total, sizeof(int16_t), MALLOC_CAP_SPIRAM);
+        if (!s_tone[t]) {
+            return false;
+        }
+        size_t o = 0;
+        for (unsigned b = 0; b < k[t].bursts; b++) {
+            o += tone_burst(s_tone[t] + o, k[t].freq, k[t].burst_ms) + (b + 1 < k[t].bursts ? gap : 0);
+        }
+        s_tone_total[t] = total;
+    }
+    return true;
 }
 
 /* Above the LVGL task (6): building a screen holds that task for up to 170 ms, longer than the I2S ring plays,
@@ -198,6 +245,13 @@ static esp_err_t audio_init_impl(void)
     }
     memset(s_buf + s_samples, 0, silence * sizeof(int16_t));
     s_total = s_samples + silence;
+    if (!tones_render()) {
+        ESP_LOGW(TAG, "no PSRAM for the cabinet cues, they stay silent");
+        for (int t = 0; t < HY_TONE_N; t++) {
+            heap_caps_free(s_tone[t]);
+            s_tone[t] = NULL;
+        }
+    }
     if (xTaskCreate(audio_task, "hy_audio", 4096, NULL, AUDIO_TASK_PRIO, &s_task) != pdPASS) {
         s_task = NULL;
         err = ESP_ERR_NO_MEM;
@@ -249,5 +303,22 @@ void hy_audio_chime(void)
         ESP_LOGW(TAG, "chime dropped: one is already playing");
         return;
     }
+    s_play = s_buf;
+    s_play_bytes = s_total * sizeof(int16_t);
+    xTaskNotifyGive(s_task);
+}
+
+void hy_audio_tone(hy_tone_t t)
+{
+    if (!s_task || (unsigned)t >= HY_TONE_N || !s_tone[t]) {
+        return;
+    }
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&s_busy, &expected, true)) {
+        ESP_LOGW(TAG, "tone dropped: one is already playing");
+        return;
+    }
+    s_play = s_tone[t];
+    s_play_bytes = s_tone_total[t] * sizeof(int16_t);
     xTaskNotifyGive(s_task);
 }

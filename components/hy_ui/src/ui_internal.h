@@ -306,6 +306,15 @@ void upd_view_open(void);
 void upd_view_debug(const char *arg);            /* "checking|latest|available|dev|confirm|downloading [pct]|verifying|restarting|failed [code]|auto" */
 #endif
 
+/* cabview.c: the Cabinet open page, its trigger list, the teach view and the test view (all lazy, with HY_V_CAB).
+ * cab_event gets the runner's teach and test events from cabinet_ui_event (LVGL task). */
+void        cab_create(void);
+void        cab_show(hy_view_t v);               /* one of the four views became the top: redraw it, start test mode */
+void        cab_hide(hy_view_t next);            /* the teach or test view left the screen: ends teach or test mode */
+void        cab_values_refresh(void);            /* a setting changed elsewhere (web UI): redraw the shown cabinet page */
+void        cab_event(const hy_cabev_t *e);      /* teach and test events: the tones, the status line, the counters */
+const char *cab_settings_value(void);            /* "Off", "Any movement" or "Taught movement": the Settings row value */
+
 /* storage_down.c */
 lv_obj_t *storage_down_create(lv_obj_t *parent);
 

@@ -20,6 +20,11 @@ bool hy_audio_ok(void);
 void hy_audio_set_volume(uint8_t pct);
 /* Non-blocking; a request while one plays is dropped. No-op when init failed. */
 void hy_audio_chime(void);
+/* Short cues of the Cabinet open teach and test views: GO is one high tone (1319 Hz, 120 ms), TAKE two low ones
+ * (880 Hz, 80 ms each). Played at the set volume whatever the Sound and Do not disturb switches say. Non-blocking;
+ * dropped while another sound plays; no-op when init failed. */
+typedef enum { HY_TONE_GO = 0, HY_TONE_TAKE, HY_TONE_N } hy_tone_t;
+void hy_audio_tone(hy_tone_t t);
 
 #ifdef __cplusplus
 }

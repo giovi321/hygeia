@@ -64,8 +64,8 @@ static void react(void)
     }
 }
 
-/* The single dispatch point for the runner's events (LVGL task). Teach and test events are ignored until their view
-   exists; it routes them here. */
+/* The single dispatch point for the runner's events (LVGL task). The teach and test events go to the cabinet views,
+   which ignore them unless a teach or a test is running. */
 void cabinet_ui_event(const hy_cabev_t *e)
 {
     switch (e->kind) {
@@ -76,6 +76,7 @@ void cabinet_ui_event(const hy_cabev_t *e)
         ESP_LOGW(TAG, "cabinet: sensor fault, the feature is off until a settings change");
         break;
     default:
+        cab_event(e);
         break;
     }
 }
