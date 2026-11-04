@@ -20,6 +20,7 @@ description: Every touch gesture, with the thresholds the firmware uses.
 | Swipe down on the due card | shows the previous due dose |
 | Double tap on History | switches between 7 and 30 days |
 | Turn the device | the screen follows in all four orientations once the device has stayed still in the new position, unless Rotation lock is on |
+| Tap anywhere outside Undo while the Undo toast shows | closes the toast; the dose stays logged and the tap does nothing else |
 | Shake the device while the Undo toast shows | undoes the dose or skip, the same as tapping Undo |
 | Double tap while the screen is dimmed or off | wakes the screen; nothing else happens |
 | Single tap while the screen is dimmed or off | does nothing, unless Wake on single tap is on; then it wakes the screen |
@@ -36,7 +37,7 @@ When the screen turns, swipe directions and edges turn with it. Pull down from t
 
 The screen turns once the device has stayed still in the new position for about 1 second. If you turn the device while a finger is on the screen, the screen turns straight to the position the device is held in once you lift the finger. Turn on Rotation lock in Settings to keep the current orientation (see [Quick settings and settings](../settings/)).
 
-After you log or skip a dose, the Undo toast shows for 5 seconds. Shaking the device during that time does what tapping Undo does, and the toast "Undone by shake" confirms it. The shake must be firm: four quick strokes back and forth. A light shake or a bump does not count. A shake at any other time does nothing.
+After you log or skip a dose, the Undo toast shows for 5 seconds, or until you tap outside it. Shaking the device while it shows does what tapping Undo does, and the toast "Undone by shake" confirms it. The shake must be firm: four quick strokes back and forth. A light shake or a bump does not count. A shake at any other time, including after you close the toast, does nothing.
 
 ## Waking the screen
 

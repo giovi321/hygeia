@@ -235,7 +235,7 @@ Gestures:
 | Tap "Skip" (due card) | log as skipped |
 | Double tap while dimmed or off | wake: two taps within 300 ms and 40 px, not passed to the screen underneath; a single tap wakes only when Wake on single tap is on (default off) |
 | Turn the device | the screen follows in all four orientations after about 1 s in the new position, unless Rotation lock is on |
-| Tap anywhere outside the Undo button while the logged or skipped toast shows | closes the toast; the entry stays logged and the tap does nothing else (no tile log, no navigation); the shake no longer undoes it (`hy_toast_stroke`). Swipes, long presses and edge gestures while it shows are consumed and leave it open |
+| Tap anywhere outside the Undo button while the logged or skipped toast shows | closes the toast; the entry stays logged and the tap does nothing else (no tile log, no navigation); the shake no longer undoes it (`hy_toast_stroke`). Swipes, long presses and edge gestures while it shows are consumed and leave it open, as is a stroke that only wakes the screen or lands on the power-off or pairing overlay |
 | Shake the device while the Undo toast shows | undo, the same as tapping Undo |
 
 Swipe directions and edges are those of the screen as the person sees it: they turn with the screen.

@@ -100,7 +100,7 @@ The reaction has two switches, both on by default:
 
 When the screen lights and a dose is open, the due card shows. When the dose is not due yet, the device shows Home with the note "Next: Vitamin D at 08:00" for 5 seconds, naming the medicine and its time. The due card itself appears at the dose time.
 
-The device reacts at most once every 2 minutes, however often the door opens. It does not react while the Undo toast shows, so closing the cabinet right after you log a dose changes nothing, and a shake still undoes it.
+The device reacts at most once every 2 minutes, however often the door opens. It does not react while the Undo toast shows, so closing the cabinet right after you log a dose changes nothing, and a shake still undoes it. Tapping outside the toast closes it early, and the device reacts again from then on.
 
 When both switches are off, Cabinet open does nothing and the motion sensor is not used.
 

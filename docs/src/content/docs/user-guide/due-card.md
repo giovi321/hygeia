@@ -19,7 +19,7 @@ If several doses are due at once, the card shows the first and adds "+2 more". S
 | Swipe left ("swipe left: snooze 15 min") | snoozes the card |
 | Tap Skip | logs the dose as skipped |
 
-After a taken or skipped log, a toast with a 5 second undo countdown appears. Snoozing hides the card and shows "Snoozed until HH:MM" on the tile. Snooze length is 15 minutes by default. The code clamps the setting to 1 to 120 minutes; no screen changes it yet.
+After a taken or skipped log, a toast with a 5 second undo countdown appears. A tap outside Undo closes it at once; the entry stays. Snoozing hides the card and shows "Snoozed until HH:MM" on the tile. Snooze length is 15 minutes by default. The code clamps the setting to 1 to 120 minutes; no screen changes it yet.
 
 ## Chime
 
