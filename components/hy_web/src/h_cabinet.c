@@ -72,25 +72,27 @@ static esp_err_t h_cabinet_test(web_req_t *r)
     return web_send_cjson(r, 200, a);
 }
 
-typedef struct { esp_err_t err; } fctx_t;
+typedef struct { esp_err_t err; bool teaching, checking; } fctx_t;
 
-/* The UI task: forgetting also sets a Taught trigger back to Any movement, which writes the settings */
+/* The UI task: forgetting also sets a Taught trigger back to Any movement, which writes the settings. The
+ * teaching and checking check is made here, on the task that serialises with the device's Start and Test taps,
+ * so a teach or a check cannot begin between the check and the forget. */
 static void job_forget(void *arg)
 {
     fctx_t *c = arg;
+    hy_cab_status_t st;
+    hy_cab_run_status(&st);
+    c->teaching = st.teaching;
+    c->checking = st.checking;
+    if (st.teaching || st.checking) {
+        c->err = ESP_ERR_INVALID_STATE;
+        return;
+    }
     c->err = hy_cab_run_forget_apply();
 }
 
 static esp_err_t h_cabinet_forget(web_req_t *r)
 {
-    hy_cab_status_t st;
-    hy_cab_run_status(&st);
-    if (st.teaching) {
-        return web_send_err(r, 409, "teaching", NULL, "The movement is being taught on the device");
-    }
-    if (st.checking) {
-        return web_send_err(r, 409, "checking", NULL, "The movement is being tested on the device");
-    }
     hy_job_t *j = web_job_new(r, job_forget, sizeof(fctx_t));
     esp_err_t sent;
     if (!j) {
@@ -101,7 +103,14 @@ static esp_err_t h_cabinet_forget(web_req_t *r)
         return sent;
     }
     esp_err_t e = c->err;
+    bool teaching = c->teaching, checking = c->checking;
     hy_job_put(j);
+    if (teaching) {
+        return web_send_err(r, 409, "teaching", NULL, "The movement is being taught on the device");
+    }
+    if (checking) {
+        return web_send_err(r, 409, "checking", NULL, "The movement is being tested on the device");
+    }
     web_ui_settings_refresh();   /* the device's Cabinet open page shows Not taught and the trigger at once */
     if (e != ESP_OK) {
         return web_send_hy_err(r, HY_E_IO, "The taught movement could not be removed");

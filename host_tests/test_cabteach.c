@@ -296,7 +296,7 @@ static void test_failed_capture_start_asks_again(void)
     hy_ct_out_t o = sim_step(&s, true, true);
     TEST_ASSERT_TRUE(o.start_capture);
     o = hy_ct_capture_failed(&s.c, s.t);
-    TEST_ASSERT_FALSE(o.has_ev);
+    expect_ev(o, HY_CABEV_TOO_SMALL, 1);   /* a redo the person hears */
     TEST_ASSERT_EQUAL_UINT8(HY_CT_PAUSE, s.c.phase);
     TEST_ASSERT_EQUAL_UINT8(0, s.c.takes_n);
     o = until(&s, false, false, HY_CABEV_TEACH_STILL, 6000);
@@ -378,13 +378,35 @@ static void test_check_no_move_outcome(void)
     TEST_ASSERT_TRUE(o.end);
 }
 
-static void test_check_not_still_is_an_abort(void)
+static void test_check_failed_capture_start_is_a_redo(void)
+{
+    sim_t s;
+    sim_begin(&s, HY_CT_CHECK, 0);
+    to_go(&s, 1);
+    hy_ct_out_t o = sim_step(&s, true, true);
+    TEST_ASSERT_TRUE(o.start_capture);
+    o = hy_ct_capture_failed(&s.c, s.t);
+    expect_ev(o, HY_CABEV_TOO_SMALL, 1);
+    TEST_ASSERT_EQUAL_UINT8(HY_CT_PAUSE, s.c.phase);
+    TEST_ASSERT_FALSE(o.end);
+}
+
+static void test_teach_still_timeout_stays_a_teach_fail(void)
+{
+    sim_t s;
+    sim_begin(&s, HY_CT_TEACH, 0);
+    until(&s, true, false, HY_CABEV_TEACH_STILL, 6000);
+    hy_ct_out_t o = until(&s, true, false, HY_CABEV_TEACH_FAIL, HY_CT_STILL_MS + 100);
+    expect_ev(o, HY_CABEV_TEACH_FAIL, HY_CAB_FAIL_STILL);
+}
+
+static void test_check_not_still_ends_with_no_still(void)
 {
     sim_t s;
     sim_begin(&s, HY_CT_CHECK, 0);
     until(&s, true, false, HY_CABEV_TEACH_STILL, 6000);
     hy_ct_out_t o = until(&s, true, false, HY_CABEV_CHECK_END, HY_CT_STILL_MS + 100);
-    expect_ev(o, HY_CABEV_CHECK_END, HY_CAB_CHECK_ABORT);
+    expect_ev(o, HY_CABEV_CHECK_END, HY_CAB_CHECK_NO_STILL);
     TEST_ASSERT_TRUE(o.end);
 }
 
@@ -439,7 +461,9 @@ int main(void)
     RUN_TEST(test_check_miss);
     RUN_TEST(test_check_too_small_is_a_redo_of_the_single_take);
     RUN_TEST(test_check_no_move_outcome);
-    RUN_TEST(test_check_not_still_is_an_abort);
+    RUN_TEST(test_check_failed_capture_start_is_a_redo);
+    RUN_TEST(test_check_not_still_ends_with_no_still);
+    RUN_TEST(test_teach_still_timeout_stays_a_teach_fail);
     RUN_TEST(test_check_abort);
     RUN_TEST(test_check_lead_and_pause_ignore_movement);
     return UNITY_END();

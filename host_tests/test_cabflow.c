@@ -91,6 +91,40 @@ static void test_last_take_plays_no_take_cue(void)
     TEST_ASSERT_EQUAL_UINT8(HY_CF_RUNNING, o.phase);
 }
 
+/* A check that stopped returns to SAVED with a status line the view shows, and the next Test clears it */
+static void test_check_stops_give_a_status_and_the_fail_cue(void)
+{
+    hy_cf_t f = at(HY_CF_CHECKING);
+    hy_cf_out_t o = hy_cab_flow_event(&f, HY_CABEV_CHECK_END, HY_CAB_CHECK_NO_STILL);
+    TEST_ASSERT_EQUAL_UINT8(HY_CF_S_C_NOSTILL, o.status);
+    TEST_ASSERT_EQUAL_UINT8(HY_CF_S_C_NOSTILL, f.status);
+    TEST_ASSERT_EQUAL_INT(HY_CUE_FAIL, o.cue);
+    TEST_ASSERT_EQUAL_UINT8(HY_CF_CHECKING, hy_cab_flow_user(&f, HY_CF_U_TEST));
+    TEST_ASSERT_EQUAL_UINT8(HY_CF_S_NONE, f.status);
+    o = hy_cab_flow_event(&f, HY_CABEV_CHECK_END, HY_CAB_CHECK_ABORT);
+    TEST_ASSERT_EQUAL_UINT8(HY_CF_S_C_STOPPED, o.status);
+    TEST_ASSERT_EQUAL_INT(HY_CUE_FAIL, o.cue);
+}
+
+/* The take asked for again after an odd one is the last capture before the build: no TAKE cue, then TAKE again */
+static void test_redo_of_an_odd_take_plays_no_take_cue(void)
+{
+    hy_cf_t f = at(HY_CF_RUNNING);
+    hy_cf_out_t o = hy_cab_flow_event(&f, HY_CABEV_TEACH_ODD, 3);
+    TEST_ASSERT_EQUAL_INT(HY_CUE_REDO, o.cue);
+    o = hy_cab_flow_event(&f, HY_CABEV_TEACH_TAKE, 3);
+    TEST_ASSERT_EQUAL_INT(HY_CUE_NONE, o.cue);
+    TEST_ASSERT_EQUAL_UINT8(HY_CF_S_GOT, o.status);
+    o = hy_cab_flow_event(&f, HY_CABEV_TEACH_TAKE, 2);   /* the bit is spent */
+    TEST_ASSERT_EQUAL_INT(HY_CUE_TAKE, o.cue);
+    /* a redo that was too small keeps the bit until the take is counted */
+    hy_cab_flow_event(&f, HY_CABEV_TEACH_ODD, 1);
+    o = hy_cab_flow_event(&f, HY_CABEV_TOO_SMALL, 1);
+    TEST_ASSERT_EQUAL_INT(HY_CUE_REDO, o.cue);
+    o = hy_cab_flow_event(&f, HY_CABEV_TEACH_TAKE, 1);
+    TEST_ASSERT_EQUAL_INT(HY_CUE_NONE, o.cue);
+}
+
 static void test_teach_done_goes_to_saved_with_the_done_cue(void)
 {
     hy_cf_t f = at(HY_CF_RUNNING);
@@ -151,7 +185,8 @@ static void test_check_outcomes(void)
         {HY_CAB_CHECK_OK, HY_CF_CHECK_OK, HY_CUE_DONE},
         {HY_CAB_CHECK_MISS, HY_CF_CHECK_MISS, HY_CUE_FAIL},
         {HY_CAB_CHECK_NO_MOVE, HY_CF_CHECK_NOMOVE, HY_CUE_FAIL},
-        {HY_CAB_CHECK_ABORT, HY_CF_SAVED, HY_CUE_NONE},
+        {HY_CAB_CHECK_NO_STILL, HY_CF_SAVED, HY_CUE_FAIL},
+        {HY_CAB_CHECK_ABORT, HY_CF_SAVED, HY_CUE_FAIL},
     };
     for (unsigned i = 0; i < sizeof c / sizeof c[0]; i++) {
         hy_cf_t f = at(HY_CF_CHECKING);
@@ -213,6 +248,8 @@ int main(void)
     RUN_TEST(test_phases_without_a_run_ignore_every_event);
     RUN_TEST(test_teaching_status_and_cues);
     RUN_TEST(test_last_take_plays_no_take_cue);
+    RUN_TEST(test_check_stops_give_a_status_and_the_fail_cue);
+    RUN_TEST(test_redo_of_an_odd_take_plays_no_take_cue);
     RUN_TEST(test_teach_done_goes_to_saved_with_the_done_cue);
     RUN_TEST(test_teach_fail_goes_to_failed_with_the_fail_cue);
     RUN_TEST(test_running_ignores_events_of_other_features);

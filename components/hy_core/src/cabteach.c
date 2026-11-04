@@ -72,7 +72,7 @@ hy_ct_out_t hy_ct_step(hy_ct_t *c, uint32_t t, bool still, bool hit)
             o = ev_out(HY_CABEV_TEACH_GO, take_no(c));
             o.take_rest = true;
         } else if (t - c->t0 >= HY_CT_STILL_MS) {
-            return fail(c, HY_CAB_FAIL_STILL, HY_CAB_CHECK_ABORT);
+            return fail(c, HY_CAB_FAIL_STILL, HY_CAB_CHECK_NO_STILL);
         }
         break;
     case HY_CT_GO:
@@ -93,7 +93,10 @@ hy_ct_out_t hy_ct_capture_failed(hy_ct_t *c, uint32_t t)
 {
     hy_ct_out_t o;
     memset(&o, 0, sizeof o);
-    if (c->phase == HY_CT_CAP) pause_from(c, t);
+    if (c->phase == HY_CT_CAP) {
+        o = ev_out(HY_CABEV_TOO_SMALL, take_no(c));   /* the person hears the redo cue like for any asked again take */
+        pause_from(c, t);
+    }
     return o;
 }
 

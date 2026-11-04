@@ -382,6 +382,12 @@ static void t_status_flow(void)
     case HY_CF_S_STOPPED:
         t_status(HY_S_CAB_T_STOPPED, HY_C_AMBER);
         break;
+    case HY_CF_S_C_NOSTILL:
+        t_status(HY_S_CAB_C_NOSTILL, HY_C_AMBER);
+        break;
+    case HY_CF_S_C_STOPPED:
+        t_status(HY_S_CAB_C_STOPPED, HY_C_AMBER);
+        break;
     default:
         t_status("", HY_C_TEXT);
         break;
@@ -423,10 +429,15 @@ static void t_draw(void)
         lv_obj_set_hidden(s_t_dot[i], !dots);
     }
     lv_obj_set_hidden(s_t_count, p != HY_CF_RUNNING);
-    bool status = p == HY_CF_RUNNING || p == HY_CF_CHECKING || p == HY_CF_FAILED || (p == HY_CF_SAVED && s_t_refused);
+    bool status = p == HY_CF_RUNNING || p == HY_CF_CHECKING || p == HY_CF_FAILED ||
+                  (p == HY_CF_SAVED && (s_t_refused || s_flow.status != HY_CF_S_NONE));
     lv_obj_set_hidden(s_t_status, !status);
     if (p == HY_CF_SAVED) {
-        t_status(s_t_refused ? HY_S_CAB_C_REFUSED : "", HY_C_AMBER);
+        if (s_t_refused) {
+            t_status(HY_S_CAB_C_REFUSED, HY_C_AMBER);
+        } else {
+            t_status_flow();   /* a check that stopped: not still, or stopped */
+        }
     } else {
         t_status_flow();
     }

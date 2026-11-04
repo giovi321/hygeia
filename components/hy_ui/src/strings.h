@@ -216,6 +216,8 @@
 #define HY_S_CAB_C_AGAIN   "Teach again"
 #define HY_S_CAB_C_KEEP    "Keep"
 #define HY_S_CAB_C_REFUSED "The test cannot start now"
+#define HY_S_CAB_C_NOSTILL "Not still, test stopped"
+#define HY_S_CAB_C_STOPPED "Test stopped"
 #define HY_S_CAB_X_HINT    "Do the movement."
 #define HY_S_CAB_X_ENDED   "Test ended. Open Test again to run it."
 #define HY_S_CAB_X_MATCHES "Matches: %u"

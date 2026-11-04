@@ -32,7 +32,9 @@ typedef enum {
     HY_CF_S_ODD,        /* looked different, do it again */
     HY_CF_S_NOMOVE,     /* teaching stopped: no movement */
     HY_CF_S_IO,         /* teaching stopped: the file could not be written */
-    HY_CF_S_STOPPED     /* teaching stopped */
+    HY_CF_S_STOPPED,    /* teaching stopped */
+    HY_CF_S_C_NOSTILL,  /* a check: not still, test stopped */
+    HY_CF_S_C_STOPPED   /* a check: test stopped */
 } hy_cf_status_t;
 
 typedef enum { HY_CUE_NONE = 0, HY_CUE_GO, HY_CUE_TAKE, HY_CUE_REDO, HY_CUE_DONE, HY_CUE_FAIL } hy_cab_cue_t;
@@ -43,12 +45,13 @@ typedef enum {
     HY_CF_U_AGAIN       /* Teach again: CHECK_MISS or CHECK_NOMOVE to RUNNING */
 } hy_cf_user_t;
 
-typedef struct { uint8_t phase; uint8_t status; } hy_cf_t;
+typedef struct { uint8_t phase; uint8_t status; bool redo; } hy_cf_t;   /* redo: the take in hand is asked for again */
 typedef struct { uint8_t phase; uint8_t status; hy_cab_cue_t cue; } hy_cf_out_t;
 
 void hy_cab_flow_init(hy_cf_t *f);   /* IDLE, no status */
 /* The runner's event kind and take field. Events that do not apply to the phase change nothing and give no cue.
-   The cue of the last take's TEACH_TAKE is none: the DONE, REDO or FAIL cue follows within the build time. The
+   The cue of the last take's TEACH_TAKE is none, and so is the cue of a take asked for again after an odd one (it is
+   the last capture before the build): the DONE, REDO or FAIL cue follows within the build time. The
    returned phase and status are also stored in f. */
 hy_cf_out_t hy_cab_flow_event(hy_cf_t *f, hy_cabev_kind_t kind, uint8_t take);
 /* A button. Returns the new phase (unchanged when the button does not apply to the phase). The caller starts the

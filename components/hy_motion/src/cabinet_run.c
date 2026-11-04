@@ -585,12 +585,17 @@ void hy_cab_int_screen_off(void)
 {
     portENTER_CRITICAL(&s_cmux);
     bool testing = s_testing;
+    bool teaching = s_teaching, checking = s_checking;
     s_testing = false;
     s_teaching = false;
     s_checking = false;
     portEXIT_CRITICAL(&s_cmux);
     if (s_st.tactive) {
         teach_abort();
+    } else if (teaching) {
+        post_ev(HY_CABEV_TEACH_FAIL, (uint8_t)HY_CAB_FAIL_ABORT, 0, 0);   /* the first stream sample never came */
+    } else if (checking) {
+        post_ev(HY_CABEV_CHECK_END, (uint8_t)HY_CAB_CHECK_ABORT, 0, 0);
     }
     if (testing) {
         ESP_LOGI(TAG, "cabinet: test off (screen off)");
@@ -829,7 +834,9 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
     portENTER_CRITICAL(&s_cmux);
     uint16_t trig = s_trig_mg;
     portEXIT_CRITICAL(&s_cmux);
-    uint16_t thr = s_st.tactive ? HY_CAB_TEACH_TRIG_MG : c.mode == HY_CAB_TAUGHT ? trig : hy_cab_wom_mg(c.sens);
+    /* A check uses the trigger in use (the model's), so a recognised movement is one the device would act on */
+    uint16_t thr = s_st.tactive ? (s_st.ct.mode == HY_CT_CHECK ? trig : HY_CAB_TEACH_TRIG_MG)
+                                : c.mode == HY_CAB_TAUGHT ? trig : hy_cab_wom_mg(c.sens);
     bool hit = s_st.hist_n >= 3 && hy_cab_wom_hit(hy_cab_wom_prev(s_st.hist[1], s_st.hist[2]), a, thr);
     s_st.hist[2] = s_st.hist[1];
     s_st.hist[1] = s_st.hist[0];
@@ -939,10 +946,12 @@ esp_err_t hy_cab_run_teach(bool start)
     bool on = hy_motion_int_on();   /* outside s_cmux: it takes the motion task's lock */
     portENTER_CRITICAL(&s_cmux);
     bool ok = !start || (!s_fault && on);
+    bool test_off = false;
     if (ok && start) {
         s_teaching = true;
         s_checking = false;
         s_teach_seq++;
+        test_off = s_testing;
         s_testing = false;
     } else if (!start) {
         s_teaching = false;
@@ -950,6 +959,9 @@ esp_err_t hy_cab_run_teach(bool start)
     portEXIT_CRITICAL(&s_cmux);
     if (!ok) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (test_off) {
+        post_ev(HY_CABEV_TEST_END, 0, 0, 0);   /* the test the teach replaced ends like any other test */
     }
     hy_motion_int_wake();
     return ESP_OK;

@@ -160,6 +160,57 @@ void test_cab_three_take_file_still_decodes(void)
     same_model(&s_m, &s_d);
 }
 
+/* A 3-take file built by hand (not by hy_cab_encode): header, three takes of two samples with distinct values,
+   CRC-32 over everything before it. It must decode with n 3, whatever the encoder does today. */
+static const uint8_t GOLDEN_3[] = {
+    0x48, 0x59, 0x43, 0x42, 0x01, 0x32, 0x03, 0x01, 0x64, 0x00, 0xDC, 0x00,
+    0x00, 0x00, 0xC0, 0x3F, 0x00, 0x3B, 0xE1, 0x6A, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x0A, 0x00,
+    0xEC, 0xFF, 0xE8, 0x03, 0x64, 0x00, 0x00, 0x00, 0xD4, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x65, 0x00, 0xFB, 0xFF, 0xD4, 0x03, 0x07, 0x00,
+    0xFD, 0xFF, 0x00, 0x00, 0x02, 0x00, 0x0B, 0x00, 0xEC, 0xFF, 0xE9, 0x03,
+    0xC8, 0x00, 0x00, 0x00, 0xD5, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+    0xC9, 0x00, 0xFB, 0xFF, 0xD5, 0x03, 0x07, 0x00, 0xFD, 0xFF, 0x01, 0x00,
+    0x02, 0x00, 0x0C, 0x00, 0xEC, 0xFF, 0xEA, 0x03, 0x2C, 0x01, 0x00, 0x00,
+    0xD6, 0x03, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x2D, 0x01, 0xFB, 0xFF,
+    0xD6, 0x03, 0x07, 0x00, 0xFD, 0xFF, 0x02, 0x00, 0x45, 0x4C, 0xBB, 0x17,
+};
+
+void test_cab_golden_three_take_file_decodes(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(132, sizeof GOLDEN_3);
+    int64_t created = 0;
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_decode(GOLDEN_3, sizeof GOLDEN_3, &s_d, &created));
+    TEST_ASSERT_EQUAL_INT64(1793145600LL, created);
+    TEST_ASSERT_EQUAL_UINT8(3, s_d.n);
+    TEST_ASSERT_EQUAL_UINT16(100, s_d.trig_mg);
+    TEST_ASSERT_EQUAL_FLOAT(1.5f, s_d.d_self);
+    for (int t = 0; t < 3; t++) {
+        TEST_ASSERT_EQUAL_UINT16(2, s_d.take[t].n);
+        TEST_ASSERT_TRUE(s_d.take[t].has_gyro);
+        TEST_ASSERT_EQUAL_INT16(10 + t, s_d.take[t].rest.x);
+        TEST_ASSERT_EQUAL_INT16(-20, s_d.take[t].rest.y);
+        TEST_ASSERT_EQUAL_INT16(1000 + t, s_d.take[t].rest.z);
+        for (int i = 0; i < 2; i++) {
+            TEST_ASSERT_EQUAL_INT16(100 * (t + 1) + i, s_d.take[t].s[i].a[0]);
+            TEST_ASSERT_EQUAL_INT16(-5 * i, s_d.take[t].s[i].a[1]);
+            TEST_ASSERT_EQUAL_INT16(980 + t, s_d.take[t].s[i].a[2]);
+            TEST_ASSERT_EQUAL_INT16(i * 7, s_d.take[t].s[i].g[0]);
+            TEST_ASSERT_EQUAL_INT16(-i * 3, s_d.take[t].s[i].g[1]);
+            TEST_ASSERT_EQUAL_INT16(t, s_d.take[t].s[i].g[2]);
+        }
+    }
+    /* the encoder writes the same bytes for the same model */
+    static uint8_t again[sizeof GOLDEN_3];
+    TEST_ASSERT_EQUAL_UINT32(sizeof GOLDEN_3, hy_cab_encode(&s_d, created, again, sizeof again));
+    TEST_ASSERT_EQUAL_MEMORY(GOLDEN_3, again, sizeof GOLDEN_3);
+    /* a flipped byte fails the CRC */
+    static uint8_t bad[sizeof GOLDEN_3];
+    memcpy(bad, GOLDEN_3, sizeof bad);
+    bad[40] ^= 1;
+    TEST_ASSERT_EQUAL(HY_E_CORRUPT, hy_cab_decode(bad, sizeof bad, &s_d, NULL));
+}
+
 static void put_crc(size_t n);
 
 /* The takes field outside 3 to HY_CAB_TAKES is refused even with a good CRC, and so is one that disagrees with the length */
@@ -397,6 +448,7 @@ int main(void)
     RUN_TEST(test_cab_max_size);
     RUN_TEST(test_cab_five_takes_roundtrip);
     RUN_TEST(test_cab_three_take_file_still_decodes);
+    RUN_TEST(test_cab_golden_three_take_file_decodes);
     RUN_TEST(test_cab_decode_takes_field_range);
     RUN_TEST(test_cab_crc_known_value);
     RUN_TEST(test_cab_decode_bad_crc);

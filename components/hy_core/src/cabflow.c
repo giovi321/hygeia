@@ -4,6 +4,7 @@ void hy_cab_flow_init(hy_cf_t *f)
 {
     f->phase = HY_CF_IDLE;
     f->status = HY_CF_S_NONE;
+    f->redo = false;
 }
 
 static hy_cf_out_t out(hy_cf_t *f, uint8_t phase, uint8_t status, hy_cab_cue_t cue)
@@ -36,8 +37,14 @@ hy_cf_out_t hy_cab_flow_event(hy_cf_t *f, hy_cabev_kind_t kind, uint8_t take)
     if (teach) {
         switch (kind) {
         case HY_CABEV_TEACH_TAKE:
-            return out(f, p, HY_CF_S_GOT, take < HY_CAB_TAKES ? HY_CUE_TAKE : HY_CUE_NONE);
+        {
+            /* the last take and a take asked for after an odd one are the last capture before the build */
+            hy_cab_cue_t cue = take < HY_CAB_TAKES && !f->redo ? HY_CUE_TAKE : HY_CUE_NONE;
+            f->redo = false;
+            return out(f, p, HY_CF_S_GOT, cue);
+        }
         case HY_CABEV_TEACH_ODD:
+            f->redo = true;
             return out(f, p, HY_CF_S_ODD, HY_CUE_REDO);
         case HY_CABEV_TEACH_DONE:
             return out(f, HY_CF_SAVED, HY_CF_S_NONE, HY_CUE_DONE);
@@ -56,8 +63,10 @@ hy_cf_out_t hy_cab_flow_event(hy_cf_t *f, hy_cabev_kind_t kind, uint8_t take)
             return out(f, HY_CF_CHECK_MISS, HY_CF_S_NONE, HY_CUE_FAIL);
         case HY_CAB_CHECK_NO_MOVE:
             return out(f, HY_CF_CHECK_NOMOVE, HY_CF_S_NONE, HY_CUE_FAIL);
-        default:   /* aborted: back to the saved screen, so the test can be started again */
-            return out(f, HY_CF_SAVED, HY_CF_S_NONE, HY_CUE_NONE);
+        case HY_CAB_CHECK_NO_STILL:   /* back to the saved screen, so the test can be started again */
+            return out(f, HY_CF_SAVED, HY_CF_S_C_NOSTILL, HY_CUE_FAIL);
+        default:   /* aborted */
+            return out(f, HY_CF_SAVED, HY_CF_S_C_STOPPED, HY_CUE_FAIL);
         }
     }
     return (hy_cf_out_t){p, s, HY_CUE_NONE};
@@ -70,18 +79,21 @@ uint8_t hy_cab_flow_user(hy_cf_t *f, hy_cf_user_t u)
         if (f->phase == HY_CF_IDLE || f->phase == HY_CF_FAILED) {
             f->phase = HY_CF_RUNNING;
             f->status = HY_CF_S_NONE;
+            f->redo = false;
         }
         break;
     case HY_CF_U_TEST:
         if (f->phase == HY_CF_SAVED) {
             f->phase = HY_CF_CHECKING;
             f->status = HY_CF_S_NONE;
+            f->redo = false;
         }
         break;
     case HY_CF_U_AGAIN:
         if (f->phase == HY_CF_CHECK_MISS || f->phase == HY_CF_CHECK_NOMOVE) {
             f->phase = HY_CF_RUNNING;
             f->status = HY_CF_S_NONE;
+            f->redo = false;
         }
         break;
     }

@@ -62,7 +62,7 @@ hy_ct_out_t hy_ct_begin(hy_ct_t *c, hy_ct_mode_t mode, uint32_t t);
 hy_ct_out_t hy_ct_step(hy_ct_t *c, uint32_t t, bool still, bool hit);
 /* The capture ended (res other than HY_CAP_MORE). TOO_SHORT and TOO_LONG ask for the take again. */
 hy_ct_out_t hy_ct_capture_done(hy_ct_t *c, uint32_t t, hy_cap_res_t res);
-/* The switch to the capture failed: the take is asked for again. */
+/* The switch to the capture failed: the take is asked for again (TOO_SMALL, so the person hears the redo cue). */
 hy_ct_out_t hy_ct_capture_failed(hy_ct_t *c, uint32_t t);
 /* After build: ok (hy_cab_model_build returned HY_OK), odd (its *odd), d_self_finite (the model's d_self). Posts
    TEACH_ODD and pauses for an odd take, at most HY_CT_REDOS times; after that an odd take with a finite d_self is

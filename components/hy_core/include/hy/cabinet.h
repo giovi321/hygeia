@@ -177,7 +177,8 @@ typedef enum { HY_CAB_FAIL_STILL = 0,   /* not still for 1 s within 20 s ("Hold 
 typedef enum { HY_CAB_CHECK_OK = 0,     /* the movement matched the taught one */
                HY_CAB_CHECK_MISS,       /* a movement was captured and did not match */
                HY_CAB_CHECK_NO_MOVE,    /* no movement within 60 s after GO */
-               HY_CAB_CHECK_ABORT,      /* the screen went off, the shake toast showed, the IMU failed, or no stillness */
+               HY_CAB_CHECK_ABORT,      /* the screen went off, the shake toast showed, or the IMU failed */
+               HY_CAB_CHECK_NO_STILL,   /* not still for 1 s within 20 s */
 } hy_cab_check_t;
 /* take: TEACH_READY, TEACH_STILL, GO, TAKE, ODD, TOO_SMALL, TOO_LONG: the take 1 to HY_CAB_TAKES it concerns (a
    check is always take 1); TEACH_FAIL: hy_cab_fail_t; CHECK_END: hy_cab_check_t. dist, thr: MATCH, OTHER, REACT and
