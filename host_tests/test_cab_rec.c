@@ -12,6 +12,8 @@
 #include "hy/motion.h"
 #include "cab_synth.h"
 
+#define TK3 3   /* the recordings and the synthetic movements were made with three takes */
+
 #ifndef HY_TEST_DATA_DIR
 #error HY_TEST_DATA_DIR must be defined by the Makefile
 #endif
@@ -406,18 +408,18 @@ static bool build_model(model_t *md)
            md->file, n_plain, pads, s_results[HY_CAP_DONE], s_results[HY_CAP_TOO_SHORT], s_results[HY_CAP_TOO_LONG],
            s_results[HY_CAP_MORE]);
     print_caps(md);
-    if (md->n_caps < HY_CAB_TAKES) return false;
-    static hy_cab_seq_t takes[HY_CAB_TAKES];
-    for (int k = 0; k < HY_CAB_TAKES; k++) takes[k] = md->caps[k].seq;
+    if (md->n_caps < TK3) return false;
+    static hy_cab_seq_t takes[TK3];
+    for (int k = 0; k < TK3; k++) takes[k] = md->caps[k].seq;
     int odd = -1;
-    hy_err_t e = hy_cab_model_build(&md->m, takes, &odd);
+    hy_err_t e = hy_cab_model_build_n(&md->m, takes, TK3, &odd);
     TEST_ASSERT_TRUE_MESSAGE(isfinite(md->m.d_self), md->file);
     if (e != HY_OK) md->m.valid = true;
     printf("%s model: trigger %u mg, d_self %.3f, threshold at 3 %.3f, odd take %d; each take's smallest distance to "
            "the others:", md->file, (unsigned)md->m.trig_mg, md->m.d_self, hy_cab_threshold(&md->m, 3), odd);
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < TK3; k++) {
         float b = INFINITY;
-        for (int j = 0; j < HY_CAB_TAKES; j++)
+        for (int j = 0; j < TK3; j++)
             if (j != k) b = fminf(b, hy_cab_dist(&md->m.take[j], &md->m.take[k]));
         printf(" %.3f", b);
     }
@@ -608,9 +610,9 @@ static void test_taught_putdown_pickup(void)
     /* Each take fits the other two at sensitivity 3. The largest of these distances is d_self, so this holds
        exactly when the threshold is not clamped under d_self (HY_CAB_THR_MAX >= d_self); it is not a held-out
        positive, as the recording has no fourth take. */
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < TK3; k++) {
         float b = INFINITY;
-        for (int j = 0; j < HY_CAB_TAKES; j++)
+        for (int j = 0; j < TK3; j++)
             if (j != k) b = fminf(b, hy_cab_dist(&md->m.take[j], &md->m.take[k]));
         char msg[96];
         snprintf(msg, sizeof msg, "take %d against the other two: %.3f over %.3f", k, b, hy_cab_threshold(&md->m, 3));
@@ -632,8 +634,8 @@ static void taught_from_file(const char *file, const char *cause, const char *co
         snprintf(why, sizeof why, "%s: %d captures, fewer than 3 (%s)", file, md->n_caps, cause);
         TEST_IGNORE_MESSAGE(why);
     }
-    if (md->n_caps >= HY_CAB_TAKES + 1)
-        for (int k = HY_CAB_TAKES; k < md->n_caps; k++) expect_match_variants(md, k);
+    if (md->n_caps >= TK3 + 1)
+        for (int k = TK3; k < md->n_caps; k++) expect_match_variants(md, k);
     else
         printf("%s: %d captures, positives not asserted\n", file, md->n_caps);
     if (neg) {
@@ -771,7 +773,7 @@ static void test_owner_samples(void)
     snprintf(dir, sizeof dir, "%s/cabinet", HY_TEST_DATA_DIR);
     DIR *d = opendir(dir);
     if (!d) TEST_IGNORE_MESSAGE("no data/cabinet");
-    static hy_cab_seq_t takes[HY_CAB_TAKES + 1], caps[64];
+    static hy_cab_seq_t takes[TK3 + 1], caps[64];
     static hy_cab_model_t m;
     int teach_files = 0;
     struct dirent *e;
@@ -783,9 +785,9 @@ static void test_owner_samples(void)
         memcpy(base, e->d_name, bl);
         base[bl] = '\0';
         snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
-        TEST_ASSERT_EQUAL_INT_MESSAGE(HY_CAB_TAKES, load_download(path, DL_TEACH, takes, HY_CAB_TAKES + 1), path);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(TK3, load_download(path, DL_TEACH, takes, TK3 + 1), path);
         int odd;
-        if (hy_cab_model_build(&m, takes, &odd) != HY_OK) m.valid = true;
+        if (hy_cab_model_build_n(&m, takes, TK3, &odd) != HY_OK) m.valid = true;
         TEST_ASSERT_TRUE_MESSAGE(isfinite(m.d_self), path);
         printf("%s: trigger %u mg, d_self %.3f, threshold at 3 %.3f\n", base, (unsigned)m.trig_mg, m.d_self,
                hy_cab_threshold(&m, 3));

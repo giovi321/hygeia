@@ -200,8 +200,8 @@ static void cmd_imu(const char *args)
 static void cmd_motion(const char *args) { hy_motion_debug(args); }
 static void cmd_cab(const char *args)
 {
-    if (args && strncmp(args, "react", 5) == 0) {
-        hy_ui_debug_cab("react");
+    if (args && (strncmp(args, "react", 5) == 0 || strncmp(args, "ui", 2) == 0)) {
+        hy_ui_debug_cab(args);
         return;
     }
     hy_cab_run_debug(args);

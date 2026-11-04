@@ -124,18 +124,21 @@ static void trim_to_trigger(hy_cab_seq_t *q, uint16_t trig)
     q->n = (uint16_t)(q->n - k);
 }
 
-hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_TAKES], int *odd)
+hy_err_t hy_cab_model_build_n(hy_cab_model_t *m, const hy_cab_seq_t *takes, int n, int *odd)
 {
     memset(m, 0, sizeof *m);
     *odd = -1;
+    if (n < HY_CAB_TAKES_MIN || n > HY_CAB_TAKES) return HY_E_INVALID;
+    m->n = (uint8_t)n;
     uint16_t min_peak = UINT16_MAX;
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < n; k++) {
         if (takes[k].n == 0 || takes[k].n > HY_CAB_MAX_N) {
             *odd = k;
             return HY_E_INVALID;
         }
         if (takes[k].has_gyro != takes[0].has_gyro) {
             *odd = HY_CAB_ODD_GYRO_MIX;
+            m->n = 0;
             return HY_E_INVALID;
         }
         uint16_t p = peak_mg(&takes[k]);
@@ -145,24 +148,24 @@ hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_T
     if (trig < HY_CAB_TRIG_MIN_MG) trig = HY_CAB_TRIG_MIN_MG;
     if (trig > HY_CAB_TRIG_MAX_MG) trig = HY_CAB_TRIG_MAX_MG;
     m->trig_mg = trig;
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < n; k++) {
         m->take[k] = takes[k];
         trim_to_trigger(&m->take[k], trig);
     }
 
     float s[HY_CAB_TAKES];
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < n; k++) {
         s[k] = INFINITY;
-        for (int j = 0; j < HY_CAB_TAKES; j++)
+        for (int j = 0; j < n; j++)
             if (j != k) s[k] = fmin2(s[k], hy_cab_dist(&m->take[j], &m->take[k]));
     }
     int worst = 0, outlier = -1;
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < n; k++) {
         if (s[k] > s[worst]) worst = k;
         float others = 0.0f;
-        for (int j = 0; j < HY_CAB_TAKES; j++)
+        for (int j = 0; j < n; j++)
             if (j != k) others += s[j];
-        float med = others / (HY_CAB_TAKES - 1);   /* the median of two values is their mean */
+        float med = others / (float)(n - 1);   /* the mean of the other takes' s */
         if (s[k] > HY_CAB_ODD_RATIO * med && s[k] > HY_CAB_THR_MIN && (outlier < 0 || s[k] > s[outlier]))
             outlier = k;
     }
@@ -173,6 +176,11 @@ hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_T
     }
     m->valid = true;
     return HY_OK;
+}
+
+hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_TAKES], int *odd)
+{
+    return hy_cab_model_build_n(m, takes, HY_CAB_TAKES, odd);
 }
 
 float hy_cab_threshold(const hy_cab_model_t *m, uint8_t sens)
@@ -188,7 +196,7 @@ bool hy_cab_match(const hy_cab_model_t *m, uint8_t sens, const hy_cab_seq_t *cap
 {
     float d = INFINITY;
     if (m->valid)
-        for (int k = 0; k < HY_CAB_TAKES; k++) d = fmin2(d, hy_cab_dist(&m->take[k], cap));
+        for (int k = 0; k < m->n; k++) d = fmin2(d, hy_cab_dist(&m->take[k], cap));
     if (best) *best = d;
     return m->valid && d <= hy_cab_threshold(m, sens);
 }

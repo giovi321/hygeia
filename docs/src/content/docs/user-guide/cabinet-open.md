@@ -12,7 +12,7 @@ Cabinet open is off by default. Turn it on in Settings › Cabinet open on the d
 Trigger has two choices:
 
 - Any movement: the motion sensor reacts to any movement stronger than the set sensitivity. Nothing to teach. This is the default
-- Taught movement: you teach the device one movement, and only a movement close to it counts. The movement can be anything, not only opening a door. Taught movement can be chosen only after a movement is taught; until then the device shows "Teach the movement first"
+- Taught movement: you teach the device one movement, and only a movement close to it counts. The movement can be anything, not only opening a door. Taught movement can be chosen only after a movement is taught; until then the device shows "Teach the movement first". Saving a taught movement switches the trigger from Any movement to Taught movement, and forgetting it switches the trigger back
 
 Sensitivity goes from 1 to 5 and shows as "3 of 5" (the default). With Any movement it sets how small a movement wakes the device. With Taught movement it sets how close a movement must be to the taught one: 1 is the strictest, 5 the loosest.
 
@@ -21,31 +21,53 @@ The default sensitivity, 3 of 5, is set to catch the door opening, even a slow o
 ## Mounting
 
 - Fix the device on the inside of the cabinet door, so it moves with the door. A device that can slide or lift on its own counts those movements too
-- The screen can face into the cabinet. Teaching and testing use tones, so you do not need to see the screen while you do the movement
+- The screen can face into the cabinet. Teaching, checking and testing use tones, so you do not need to see the screen while you do the movement
 - The device can be mounted in any of the four orientations; teach the movement in the orientation you use
 - After you move the device to another place on the door, or to another door, teach the movement again
 
 ## Teaching the movement
 
-Teach the movement on the device: Settings › Cabinet open › Teach the movement. The page says "Do the movement 3 times. Start after the high tone. After the low tone, go back to where you started." Tap Start.
+Teach the movement on the device: Settings › Cabinet open › Teach the movement. The page says "Do the movement 5 times. After Start, put everything back and wait. High tone: do the movement. Two low tones: got it, go back and wait." Tap Start. Start and the page text then give way to a counter ("1 of 5"), five dots and a status line, and Cancel is the only button.
 
-For each of the 3 takes:
+After Start the device shows "Get ready" for 5 seconds. Use them to put the device, and whatever it is fixed to, back where it was: the tap on Start moved it. Movement in these 5 seconds is ignored. For each of the 5 takes:
 
-1. The device shows "1 of 3" and "Hold still". Keep the device still for about a second
-2. "Now" and a high tone: do the movement, for example open the door
-3. Stop and hold still. "Got it" and a low tone end the take. Then go back to where you started, for example close the door, and wait for the next "Hold still"
+1. "Hold still": keep the device still for about a second. The device waits up to 20 seconds for that
+2. "Now" and a high tone: do the movement
+3. Stop and hold still. "Got it" and two low tones end the take (takes 1 to 4). Then go back to where you started and wait. The device ignores movement for 5 seconds, then shows "Hold still" for the next take
 
-After the third take the device compares the three. If one of them looks different from the other two, it shows "That one looked different, do it again" and asks for that take again (at most twice; after that the takes are kept as they are). When all three agree it shows "Saved". The tones play at the set volume, also when the sound is off or do not disturb is on.
+The device always signals with sound as well as the screen, so you do not need to see the screen while you do the movement:
+
+| Sound | Meaning |
+| --- | --- |
+| One high tone | Now: do the movement |
+| Two low tones | Got it: go back to where you started and wait |
+| One long low tone | Too small, too long or looked different: wait for the next high tone and do it again |
+| Three rising tones | Saved. The test recognised the movement |
+| Two falling tones | Teaching stopped. The test did not recognise the movement, or saw none |
+
+The tones play at the set volume, also when the sound is off or do not disturb is on. Two sounds in a row both play.
+
+The fifth take plays no "got it" tones: within a moment the device plays the long low tone (one take looked different), the falling tones (teaching stopped) or the rising tones (saved). After the fifth take the device compares the five. If one of them looks different from the others, it shows "That one looked different, do it again" and asks for that take again (at most twice; after that the takes are kept as they are). When the five agree, the page changes to "Movement saved" with "Test it now?" and the buttons Test and Done. Done closes the page. Taught movement is then the trigger: if the trigger was Any movement, the device sets it to Taught movement when the movement is saved.
 
 A movement must:
 
-- Last at least about a quarter of a second. A tap or a knock is shorter and cannot be taught. The device shows "Too small, do it again"
+- Last at least about a quarter of a second. A tap or a knock is shorter and cannot be taught. The device shows "Too small, do it again" and plays the long low tone
 - Last less than 4 seconds. A longer one shows "Too long, keep it under 4 seconds"
 - Have no pause in it. A pause of 400 ms or more ends the take, so a movement with a stop in the middle is cut at the stop
 
-If the device sees no movement for a minute after "Now", it shows "No movement, teaching stopped". If the device does not stay still for a second within 10 seconds, or the takes give nothing usable, it shows "Teaching stopped": tap Start to begin again. Leaving the page also stops teaching, and the movement taught before stays as it was. The screen stays on while teaching runs (it neither dims nor turns off, also on battery); the normal screen timers resume when teaching ends or you leave the page.
+If the device sees no movement for a minute after "Now", it shows "No movement, teaching stopped" and plays the falling tones. If the device does not stay still for a second within 20 seconds, or the takes give nothing usable, it shows "Teaching stopped": tap Start to begin again. Leaving the page also stops teaching, and the movement taught before stays as it was. The screen stays on while teaching runs (it neither dims nor turns off, also on battery); the normal screen timers resume when teaching ends or you leave the page.
 
-The taught movement is kept across a restart. Settings › Cabinet open › Forget the movement removes it after the question "Forget the taught movement?". The web UI has the same button. Without a taught movement, Taught movement does nothing.
+The taught movement is kept across a restart. Settings › Cabinet open › Forget the movement removes it after the question "Forget the taught movement?". The web UI has the same button. When the trigger was Taught movement, forgetting also sets it back to Any movement. Without a taught movement, Taught movement does nothing.
+
+## Checking the movement
+
+Test on the "Movement saved" page checks the movement you just taught. The page then says "Put everything back and wait. After the high tone, do the movement once." and shows "Get ready", "Hold still" and "Now" with the same tones as in teaching. Do the movement once. The result:
+
+- "Movement recognised" with the rising tones: the movement matches. Done closes the page
+- "Not recognised. Teach the movement again?" with the falling tones: the movement was seen and does not match
+- "No movement seen. Teach the movement again?" with the falling tones: nothing moved for a minute after "Now"
+
+After a miss, Teach again starts teaching at once, with the 5 seconds to get ready, and Keep closes the page and leaves the taught movement as it was. A movement that is too small or too long counts as a redo of the check: the long low tone, then wait for the next high tone. If the check cannot start, the page says "The test cannot start now". Cancel, or leaving the page, stops the check. The screen stays on while the check runs. The web UI shows "The movement is being tested on the device" and disables Start while it runs.
 
 ## Test mode
 
@@ -88,7 +110,7 @@ If the motion sensor stops answering, Cabinet open pauses itself until it is swi
 
 The Cabinet open page of the web UI has Download samples. It downloads `cabinet-samples.csv` with:
 
-- The 3 takes of the taught movement
+- The 5 takes of the taught movement (3 for a movement taught by an earlier version)
 - The last 8 movements captured with Taught movement, from the test and from use. These are kept in memory only and are gone after a restart
 
 Each row holds the time in milliseconds and the readings of the motion sensor at 50 per second: acceleration in mg and rotation rate in tenths of a degree per second. A `rest_` row before each movement gives the position the device was resting in. The file holds no medicine or log data. It is useful to check or tune the matching on a computer.

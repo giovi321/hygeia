@@ -75,7 +75,10 @@ bool hy_cab_still_feed(hy_cab_still_t *st, uint32_t t_ms, hy_accel_t a, hy_accel
 
 /* Taught movement matcher. */
 
-#define HY_CAB_TAKES          3
+/* Takes of a teach, and the most a template file holds. A model has n of them in use (3 to HY_CAB_TAKES: a file
+   written with fewer keeps working). */
+#define HY_CAB_TAKES          5
+#define HY_CAB_TAKES_MIN      3
 #define HY_CAB_OPEN_BEGIN_N  10      /* 200 ms */
 /* Threshold bounds from the replays (test_cabmatch.c, test_cab_rec.c). THR_MIN: the tightest model's variants
    need up to 0.200 (synthetic lift; door 0.289, tilt 0.629), so a model of near identical takes still accepts its
@@ -86,7 +89,8 @@ bool hy_cab_still_feed(hy_cab_still_t *st, uint32_t t_ms, hy_accel_t a, hy_accel
 #define HY_CAB_THR_MIN     0.25f
 #define HY_CAB_THR_MAX     2.0f
 #define HY_CAB_ODD_RATIO   3.0f
-typedef struct { hy_cab_seq_t take[HY_CAB_TAKES]; float d_self; uint16_t trig_mg; bool valid; } hy_cab_model_t;
+/* Large (about 12 KB): keep it off the stack. */
+typedef struct { hy_cab_seq_t take[HY_CAB_TAKES]; float d_self; uint16_t trig_mg; uint8_t n; bool valid; } hy_cab_model_t;
 
 /* DTW distance between a template and a capture over the four features, scaled (gv, gh by 1/50 dps; av, ah by
    1/100 mg), local cost the L1 sum, gyro channels left out where masked in either row or absent in either
@@ -100,15 +104,18 @@ typedef struct { hy_cab_seq_t take[HY_CAB_TAKES]; float d_self; uint16_t trig_mg
 float    hy_cab_dist(const hy_cab_seq_t *tmpl, const hy_cab_seq_t *cap);
 /* Copies the takes into m and trims each to the first sample at which the live trigger fires (hy_cab_wom_hit_at
    at trig_mg; trig_mg = half the smallest peak the trigger sees over the takes, clamped to HY_CAB_TRIG_MIN_MG to
-   HY_CAB_TRIG_MAX_MG). For each take, s = its smallest distance as a capture to the other two as templates;
-   d_self = the largest s. A take whose s is above HY_CAB_ODD_RATIO times the mean of the other two s and above
+   HY_CAB_TRIG_MAX_MG). For each take, s = its smallest distance as a capture to the other takes as templates;
+   d_self = the largest s. A take whose s is above HY_CAB_ODD_RATIO times the mean of the other takes' s and above
    HY_CAB_THR_MIN is the outlier (the largest such s if several). HY_E_INVALID with *odd set to the outlier, or to
    the take with the largest s when d_self is not finite, or to an empty take; else HY_OK, *odd = -1, m->valid.
    On HY_E_INVALID for an outlier or a non-finite d_self, m still holds the trimmed takes, trig_mg and d_self with
    m->valid false: a caller that accepts the takes as they are (after the last redo) sets m->valid. With a
    non-finite d_self the threshold is HY_CAB_THR_MAX. Takes that disagree on has_gyro give HY_E_INVALID with
-   *odd = HY_CAB_ODD_GYRO_MIX and m left zeroed (never accepted as they are). */
+   *odd = HY_CAB_ODD_GYRO_MIX and m left zeroed (never accepted as they are). m->n is set to the number of takes
+   used. hy_cab_model_build uses HY_CAB_TAKES takes; hy_cab_model_build_n any count from HY_CAB_TAKES_MIN to
+   HY_CAB_TAKES (HY_E_INVALID with *odd = -1 outside that). */
 #define HY_CAB_ODD_GYRO_MIX    (-2)
+hy_err_t hy_cab_model_build_n(hy_cab_model_t *m, const hy_cab_seq_t *takes, int n, int *odd);
 hy_err_t hy_cab_model_build(hy_cab_model_t *m, const hy_cab_seq_t takes[HY_CAB_TAKES], int *odd);
 /* What one accel stream sample may do. idle: nothing is on (no teach, no test, feature not live): drop any
    capture and the still tracker. suspended (the Undo toast shows) while something is on: no trigger and no
@@ -119,18 +126,20 @@ hy_cab_stream_plan_t hy_cab_stream_plan(bool suspended, bool teach_active, bool 
 /* clamp(k[sens] * d_self, HY_CAB_THR_MIN, HY_CAB_THR_MAX), k = 1.0, 1.3, 1.6, 2.0, 2.5 for sensitivity 1 to 5;
    out of range: 3. */
 float    hy_cab_threshold(const hy_cab_model_t *m, uint8_t sens);
-/* True when the smallest distance from the capture to the model's takes is at or under the threshold; *best (may
+/* True when the smallest distance from the capture to the model's n takes is at or under the threshold; *best (may
    be NULL) gets that distance. False with INFINITY for a model that is not valid. */
 bool     hy_cab_match(const hy_cab_model_t *m, uint8_t sens, const hy_cab_seq_t *cap, float *best);
 
 /* Template file and CSV. Little-endian file: 32-byte header (magic "HYCB", version 1, rate, takes, flags bit 0
    has_gyro, trigger mg u16, gyro start ms u16, d_self f32, created i64, 8 reserved bytes), then per take n u16,
    the rest vector 3 x i16 and n x 6 x i16 (ax, ay, az mg; gx, gy, gz deci-dps), then the CRC-32 (IEEE) of
-   everything before it. */
-#define HY_CAB_FILE_MAX 7260   /* 32 + 3 x (8 + 200 x 12) + 4 */
-/* Bytes written, or 0 when max is too small, the model is not valid or a take has no samples or too many. */
+   everything before it. The header's takes field is 3 to HY_CAB_TAKES. */
+#define HY_CAB_FILE_MAX 12076   /* 32 + 5 x (8 + 200 x 12) + 4 */
+/* Bytes written, or 0 when max is too small, the model is not valid, m->n is outside 3 to HY_CAB_TAKES or a take has
+   no samples or too many. */
 size_t   hy_cab_encode(const hy_cab_model_t *m, int64_t created, uint8_t *buf, size_t max);
-/* HY_E_CORRUPT on bad magic, length or CRC; HY_E_VERSION on another version. On success m is valid, each take's
+/* HY_E_CORRUPT on bad magic, length, CRC or a takes field outside 3 to HY_CAB_TAKES; HY_E_VERSION on another
+   version. On success m is valid, m->n is the file's takes field, each take's
    has_gyro comes from the file's flag, and *created (may be NULL) is set. On failure m->valid is false. */
 hy_err_t hy_cab_decode(const uint8_t *buf, size_t len, hy_cab_model_t *m, int64_t *created);
 /* One CSV block for a sequence: rows "kind,take,t_ms,ax,ay,az,gx,gy,gz\n" (no header), t_ms from the first
@@ -143,10 +152,36 @@ size_t   hy_cab_csv_rows(const hy_cab_seq_t *q, const char *kind, int take, char
    (hy_cab_run_snapshot). Plain data, so the JSON encoder in hy_core and its host tests can use them. */
 typedef struct { bool taught; int64_t taught_at; uint8_t mode; bool live, testing, teaching; float d_self, thr;
                  uint16_t trig_mg; uint32_t wom_irq, captures, matches, others, reactions, capture_ms;
-                 uint32_t test_matches, test_others; } hy_cab_status_t;
+                 uint32_t test_matches, test_others; bool checking; } hy_cab_status_t;
 
 typedef enum { HY_CAB_REC_LIVE = 0, HY_CAB_REC_TEST } hy_cab_rec_kind_t;
 /* One recent Taught capture. at: epoch s (0 when the clock was not valid); dist INFINITY when a gate rejected it. */
 typedef struct { uint8_t kind; int64_t at; float dist, thr; bool match; hy_cab_seq_t seq; } hy_cab_recent_t;
+
+/* Events of the runner, in the order of the name list in cabinet_run.c: never reorder, append only. */
+typedef enum { HY_CABEV_REACT = 0, HY_CABEV_MATCH, HY_CABEV_OTHER, HY_CABEV_TOO_SMALL, HY_CABEV_TOO_LONG,
+               HY_CABEV_TRIGGER, HY_CABEV_TEACH_STILL, HY_CABEV_TEACH_GO, HY_CABEV_TEACH_TAKE, HY_CABEV_TEACH_ODD,
+               HY_CABEV_TEACH_DONE, HY_CABEV_TEACH_FAIL, HY_CABEV_FAULT,
+               HY_CABEV_TEST_END,     /* the runner ended a test: time, screen off or Forget */
+               HY_CABEV_TEACH_READY,  /* a teach or check began: lead-in running ("Get ready"); take 1 */
+               HY_CABEV_CHECK_END     /* a check ended: take = hy_cab_check_t; dist, thr of the match when there was one */
+} hy_cabev_kind_t;
+/* Why a teach failed: the take field of a HY_CABEV_TEACH_FAIL event */
+typedef enum { HY_CAB_FAIL_STILL = 0,   /* not still for 1 s within 20 s ("Hold still") */
+               HY_CAB_FAIL_NO_MOVE,     /* no movement within 60 s after GO */
+               HY_CAB_FAIL_MODEL,       /* the takes give no usable template (distance not finite) */
+               HY_CAB_FAIL_SAVE,        /* the template file could not be written */
+               HY_CAB_FAIL_ABORT,       /* the screen went off, the shake toast showed, or the IMU failed */
+} hy_cab_fail_t;
+/* The result of a check: the take field of a HY_CABEV_CHECK_END event */
+typedef enum { HY_CAB_CHECK_OK = 0,     /* the movement matched the taught one */
+               HY_CAB_CHECK_MISS,       /* a movement was captured and did not match */
+               HY_CAB_CHECK_NO_MOVE,    /* no movement within 60 s after GO */
+               HY_CAB_CHECK_ABORT,      /* the screen went off, the shake toast showed, the IMU failed, or no stillness */
+} hy_cab_check_t;
+/* take: TEACH_READY, TEACH_STILL, GO, TAKE, ODD, TOO_SMALL, TOO_LONG: the take 1 to HY_CAB_TAKES it concerns (a
+   check is always take 1); TEACH_FAIL: hy_cab_fail_t; CHECK_END: hy_cab_check_t. dist, thr: MATCH, OTHER, REACT and
+   CHECK_END after a Taught capture (dist INFINITY when a gate rejected it); 0 otherwise. */
+typedef struct { hy_cabev_kind_t kind; uint8_t take; float dist, thr; } hy_cabev_t;
 
 #endif

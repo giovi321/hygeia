@@ -8,6 +8,7 @@
 
 #include "esp_log.h"
 #include "hy/audio.h"
+#include "hy/cabflow.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
 #include "ui_internal.h"
@@ -27,7 +28,7 @@ static lv_obj_t *s_pg, *s_list, *s_row[P_N], *s_val[P_N], *s_fg;
 static lv_obj_t *s_tr, *s_tr_row[2];
 static lv_obj_t *s_te, *s_t_body, *s_t_dot[HY_CAB_TAKES], *s_t_count, *s_t_status;
 static lv_obj_t *s_xt, *s_x_hint, *s_x_a, *s_x_b;
-static bool s_t_running, s_t_done[HY_CAB_TAKES];
+static bool s_t_done[HY_CAB_TAKES];
 static bool s_x_on;
 static int s_x_last;   /* 0 none, 1 match, 2 other */
 
@@ -209,7 +210,7 @@ static void stepper_row(int idx, const char *title)
 static void forget_yes_tap(void *ud)
 {
     (void)ud;
-    esp_err_t err = hy_cab_run_forget();
+    esp_err_t err = hy_cab_run_forget_apply();   /* also sets a Taught trigger back to Any movement */
     ESP_LOGI(TAG, "taught movement forgotten: %s", esp_err_to_name(err));
     lv_obj_set_hidden(s_fg, true);
     page_refresh();
@@ -307,6 +308,27 @@ static void trig_create(void)
 
 /* ---- the teach view ---- */
 
+/* One view for teaching, the saved screen and the check. The phase is hy_cab_flow's; t_draw shows it. */
+static hy_cf_t s_flow;
+static bool s_t_refused;   /* the Test button was refused: the status line says so (saved phase only) */
+static lv_obj_t *s_t_title, *s_t_msg;
+static lv_obj_t *s_t_start, *s_t_cancel, *s_t_test, *s_t_done_b, *s_t_again, *s_t_keep;
+
+static bool t_running(void)
+{
+    return s_flow.phase == HY_CF_RUNNING || s_flow.phase == HY_CF_CHECKING;
+}
+
+static void cue_play(hy_cab_cue_t cue)
+{
+    static const hy_tone_t tone[] = {HY_TONE_GO, HY_TONE_GO, HY_TONE_TAKE, HY_TONE_REDO, HY_TONE_DONE, HY_TONE_FAIL};
+    if (cue == HY_CUE_NONE || (unsigned)cue >= sizeof tone / sizeof tone[0]) {
+        return;
+    }
+    ESP_LOGI(TAG, "cue %s", hy_cab_cue_name(cue));
+    hy_audio_tone(tone[cue]);   /* at the set volume, whatever the sound and do not disturb switches say */
+}
+
 static void dots_refresh(int cur)   /* cur: the take in progress (0 based), -1 none */
 {
     for (int i = 0; i < HY_CAB_TAKES; i++) {
@@ -316,33 +338,133 @@ static void dots_refresh(int cur)   /* cur: the take in progress (0 based), -1 n
     }
 }
 
+static void t_count(unsigned take)
+{
+    lv_label_set_text_fmt(s_t_count, HY_S_CAB_T_OF, take, (unsigned)HY_CAB_TAKES);
+}
+
 static void t_status(const char *text, uint32_t color)
 {
     lv_label_set_text(s_t_status, text);
     lv_obj_set_style_text_color(s_t_status, lv_color_hex(color), 0);
 }
 
-static void t_count(unsigned take)
+static void t_status_flow(void)
 {
-    lv_label_set_text_fmt(s_t_count, HY_S_CAB_T_OF, take);
-    lv_obj_set_hidden(s_t_count, false);
+    switch (s_flow.status) {
+    case HY_CF_S_READY:
+        t_status(HY_S_CAB_T_READY, HY_C_TEXT2);
+        break;
+    case HY_CF_S_STILL:
+        t_status(HY_S_CAB_T_STILL, HY_C_TEXT2);
+        break;
+    case HY_CF_S_NOW:
+        t_status(HY_S_CAB_T_NOW, HY_C_OK);
+        break;
+    case HY_CF_S_GOT:
+        t_status(HY_S_CAB_T_GOT, HY_C_OK);
+        break;
+    case HY_CF_S_SMALL:
+        t_status(HY_S_CAB_T_SMALL, HY_C_AMBER);
+        break;
+    case HY_CF_S_LONG:
+        t_status(HY_S_CAB_T_LONG, HY_C_AMBER);
+        break;
+    case HY_CF_S_ODD:
+        t_status(HY_S_CAB_T_ODD, HY_C_AMBER);
+        break;
+    case HY_CF_S_NOMOVE:
+        t_status(HY_S_CAB_T_NOMOVE, HY_C_AMBER);
+        break;
+    case HY_CF_S_IO:
+        t_status(HY_S_ERR_IO, HY_C_AMBER);
+        break;
+    case HY_CF_S_STOPPED:
+        t_status(HY_S_CAB_T_STOPPED, HY_C_AMBER);
+        break;
+    default:
+        t_status("", HY_C_TEXT);
+        break;
+    }
 }
 
-/* idle: the instructions and the empty dots; running: the status line, the counter and the dots */
+/* Button placement: bottom row at y 346; two half buttons, or one full width */
+static void t_btn(lv_obj_t *b, bool show, int slot)   /* slot 0 left half, 1 right half, 2 full width */
+{
+    lv_obj_set_hidden(b, !show);
+    if (!show) {
+        return;
+    }
+    int32_t half = (HY_SCREEN - 2 * EDGE_X - 12) / 2;
+    lv_obj_set_width(b, slot == 2 ? HY_SCREEN - 2 * EDGE_X : half);
+    lv_obj_set_pos(b, slot == 1 ? EDGE_X + half + 12 : EDGE_X, 346);
+}
+
+static void t_draw(void)
+{
+    uint8_t p = s_flow.phase;
+    bool check = p == HY_CF_CHECKING || p == HY_CF_CHECK_OK || p == HY_CF_CHECK_MISS || p == HY_CF_CHECK_NOMOVE;
+    lv_label_set_text(s_t_title, p == HY_CF_SAVED ? HY_S_CAB_D_TITLE : check ? HY_S_CAB_TEST : HY_S_CAB_TEACH);
+
+    bool body = p == HY_CF_IDLE || p == HY_CF_CHECKING;
+    lv_obj_set_hidden(s_t_body, !body);
+    if (body) {
+        lv_label_set_text(s_t_body, p == HY_CF_IDLE ? HY_S_CAB_T_BODY : HY_S_CAB_C_BODY);
+    }
+    const char *msg = p == HY_CF_SAVED ? HY_S_CAB_D_ASK : p == HY_CF_CHECK_OK ? HY_S_CAB_C_OK :
+                      p == HY_CF_CHECK_MISS ? HY_S_CAB_C_MISS : p == HY_CF_CHECK_NOMOVE ? HY_S_CAB_C_NOMOVE : NULL;
+    lv_obj_set_hidden(s_t_msg, msg == NULL);
+    if (msg) {
+        lv_label_set_text(s_t_msg, msg);
+        lv_obj_set_style_text_color(s_t_msg, lv_color_hex(p == HY_CF_CHECK_OK ? HY_C_OK : HY_C_TEXT), 0);
+    }
+    bool dots = p == HY_CF_IDLE || p == HY_CF_RUNNING || p == HY_CF_FAILED;
+    for (int i = 0; i < HY_CAB_TAKES; i++) {
+        lv_obj_set_hidden(s_t_dot[i], !dots);
+    }
+    lv_obj_set_hidden(s_t_count, p != HY_CF_RUNNING);
+    bool status = p == HY_CF_RUNNING || p == HY_CF_CHECKING || p == HY_CF_FAILED || (p == HY_CF_SAVED && s_t_refused);
+    lv_obj_set_hidden(s_t_status, !status);
+    if (p == HY_CF_SAVED) {
+        t_status(s_t_refused ? HY_S_CAB_C_REFUSED : "", HY_C_AMBER);
+    } else {
+        t_status_flow();
+    }
+    t_btn(s_t_start, p == HY_CF_IDLE || p == HY_CF_FAILED, 0);
+    t_btn(s_t_cancel, p == HY_CF_IDLE || p == HY_CF_FAILED, 1);
+    if (p == HY_CF_RUNNING || p == HY_CF_CHECKING) {
+        t_btn(s_t_cancel, true, 2);
+    }
+    t_btn(s_t_test, p == HY_CF_SAVED, 0);
+    t_btn(s_t_done_b, p == HY_CF_SAVED || p == HY_CF_CHECK_OK, p == HY_CF_SAVED ? 1 : 2);
+    t_btn(s_t_again, p == HY_CF_CHECK_MISS || p == HY_CF_CHECK_NOMOVE, 0);
+    t_btn(s_t_keep, p == HY_CF_CHECK_MISS || p == HY_CF_CHECK_NOMOVE, 1);
+}
+
+/* idle: the instructions and the empty dots */
 static void teach_reset(void)
 {
-    s_t_running = false;
+    hy_cab_flow_init(&s_flow);
+    s_t_refused = false;
     memset(s_t_done, 0, sizeof s_t_done);
     dots_refresh(-1);
-    lv_obj_set_hidden(s_t_body, false);
-    lv_obj_set_hidden(s_t_status, true);
-    lv_obj_set_hidden(s_t_count, true);
+    t_draw();
+}
+
+/* Teaching begins: the runner accepted it */
+static void t_teaching_began(void)
+{
+    s_t_refused = false;
+    memset(s_t_done, 0, sizeof s_t_done);
+    dots_refresh(0);
+    t_count(1);
+    t_draw();
 }
 
 static void t_start_tap(void *ud)
 {
     (void)ud;
-    if (s_t_running) {
+    if (s_flow.phase != HY_CF_IDLE && s_flow.phase != HY_CF_FAILED) {
         return;
     }
     esp_err_t err = hy_cab_run_teach(true);
@@ -350,84 +472,155 @@ static void t_start_tap(void *ud)
         ESP_LOGW(TAG, "teach did not start: %s", esp_err_to_name(err));
         return;
     }
-    memset(s_t_done, 0, sizeof s_t_done);
-    dots_refresh(0);
-    s_t_running = true;
-    lv_obj_set_hidden(s_t_body, true);
-    t_status("", HY_C_TEXT);
-    lv_obj_set_hidden(s_t_status, false);
+    hy_cab_flow_user(&s_flow, HY_CF_U_START);
+    t_teaching_began();
+}
+
+static void t_again_tap(void *ud)
+{
+    (void)ud;
+    if (s_flow.phase != HY_CF_CHECK_MISS && s_flow.phase != HY_CF_CHECK_NOMOVE) {
+        return;
+    }
+    esp_err_t err = hy_cab_run_teach(true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "teach did not start: %s", esp_err_to_name(err));
+        return;
+    }
+    hy_cab_flow_user(&s_flow, HY_CF_U_AGAIN);
+    t_teaching_began();
+}
+
+static void t_test_tap(void *ud)
+{
+    (void)ud;
+    if (s_flow.phase != HY_CF_SAVED) {
+        return;
+    }
+    esp_err_t err = hy_cab_run_check(true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "check did not start: %s", esp_err_to_name(err));
+        s_t_refused = true;
+        t_draw();
+        return;
+    }
+    s_t_refused = false;
+    hy_cab_flow_user(&s_flow, HY_CF_U_TEST);
+    t_draw();
 }
 
 static void t_cancel_tap(void *ud)
 {
     (void)ud;
-    hy_cab_run_teach(false);
-    s_t_running = false;
+    if (s_flow.phase == HY_CF_RUNNING) {
+        hy_cab_run_teach(false);
+    } else if (s_flow.phase == HY_CF_CHECKING) {
+        hy_cab_run_check(false);
+    }
+    teach_reset();
     ui_nav_pop();
+}
+
+static void t_close_tap(void *ud)   /* Done and Keep */
+{
+    (void)ud;
+    ui_nav_pop();
+}
+
+/* A saved movement: the trigger follows it, so the reminder uses what was just taught */
+static void t_saved(void)
+{
+    if (hy_settings()->cab_mode != HY_CAB_ANY) {
+        return;
+    }
+    hy_settings_t n = *hy_settings();
+    n.cab_mode = HY_CAB_TAUGHT;
+    cab_save(&n);
 }
 
 static void teach_event(const hy_cabev_t *e)
 {
-    if (!s_t_running) {
+    if (!t_running()) {
         return;
     }
     int cur = e->take >= 1 && e->take <= HY_CAB_TAKES ? e->take - 1 : -1;
-    switch (e->kind) {
-    case HY_CABEV_TEACH_STILL:
-        t_count(e->take);
-        dots_refresh(cur);
-        t_status(HY_S_CAB_T_STILL, HY_C_TEXT2);
-        break;
-    case HY_CABEV_TEACH_GO:
-        t_status(HY_S_CAB_T_NOW, HY_C_OK);
-        hy_audio_tone(HY_TONE_GO);   /* at the set volume, whatever the sound and do not disturb switches say */
-        break;
-    case HY_CABEV_TEACH_TAKE:
-        if (cur >= 0) {
-            s_t_done[cur] = true;
+    bool teach = s_flow.phase == HY_CF_RUNNING;
+    hy_cf_out_t o = hy_cab_flow_event(&s_flow, e->kind, e->take);
+    if (teach) {
+        switch (e->kind) {
+        case HY_CABEV_TEACH_READY:
+        case HY_CABEV_TEACH_STILL:
+            t_count(e->take);
+            dots_refresh(cur);
+            break;
+        case HY_CABEV_TEACH_TAKE:
+            if (cur >= 0) {
+                s_t_done[cur] = true;
+            }
+            t_count(e->take);
+            dots_refresh(-1);
+            break;
+        case HY_CABEV_TEACH_ODD:
+            if (cur >= 0) {
+                s_t_done[cur] = false;
+            }
+            t_count(e->take);
+            dots_refresh(cur);
+            break;
+        case HY_CABEV_TEACH_DONE:
+            for (int i = 0; i < HY_CAB_TAKES; i++) {
+                s_t_done[i] = true;
+            }
+            t_count(HY_CAB_TAKES);
+            dots_refresh(-1);
+            t_saved();
+            break;
+        default:
+            break;
         }
-        t_count(e->take);
-        dots_refresh(-1);
-        t_status(HY_S_CAB_T_GOT, HY_C_OK);
-        hy_audio_tone(HY_TONE_TAKE);
-        break;
-    case HY_CABEV_TOO_SMALL:
-        t_status(HY_S_CAB_T_SMALL, HY_C_AMBER);
-        break;
-    case HY_CABEV_TOO_LONG:
-        t_status(HY_S_CAB_T_LONG, HY_C_AMBER);
-        break;
-    case HY_CABEV_TEACH_ODD:
-        if (cur >= 0) {
-            s_t_done[cur] = false;
-        }
-        t_count(e->take);
-        dots_refresh(cur);
-        t_status(HY_S_CAB_T_ODD, HY_C_AMBER);
-        break;
-    case HY_CABEV_TEACH_DONE:
-        for (int i = 0; i < HY_CAB_TAKES; i++) {
-            s_t_done[i] = true;
-        }
-        t_count(HY_CAB_TAKES);
-        dots_refresh(-1);
-        t_status(HY_S_CAB_T_SAVED, HY_C_OK);
-        s_t_running = false;
-        break;
-    case HY_CABEV_TEACH_FAIL:
-        t_status(e->take == HY_CAB_FAIL_NO_MOVE ? HY_S_CAB_T_NOMOVE : e->take == HY_CAB_FAIL_SAVE ? HY_S_ERR_IO :
-                 HY_S_CAB_T_STOPPED, HY_C_AMBER);
-        s_t_running = false;
-        break;
-    default:
-        break;
     }
+    cue_play(o.cue);
+    t_draw();
 }
 
-static lv_obj_t *wide_button(lv_obj_t *parent, int32_t x, int32_t w, const char *text, ui_action_cb cb)
+#if CONFIG_HY_DEBUG_CONSOLE
+/* `cab ui <idle|running|saved|checking|ok|miss|nomove|failed>`: the teach view in that phase without the runner, for
+   screenshots. Leaving the view resets it. */
+void cab_debug_ui(const char *phase)
 {
+    static const struct { const char *name; uint8_t phase, status; } k[] = {
+        {"idle", HY_CF_IDLE, HY_CF_S_NONE},       {"running", HY_CF_RUNNING, HY_CF_S_NOW},
+        {"saved", HY_CF_SAVED, HY_CF_S_NONE},     {"checking", HY_CF_CHECKING, HY_CF_S_STILL},
+        {"ok", HY_CF_CHECK_OK, HY_CF_S_NONE},     {"miss", HY_CF_CHECK_MISS, HY_CF_S_NONE},
+        {"nomove", HY_CF_CHECK_NOMOVE, HY_CF_S_NONE}, {"failed", HY_CF_FAILED, HY_CF_S_STOPPED},
+    };
+    for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) {
+        if (phase && strcmp(phase, k[i].name) == 0) {
+            if (ui_current_view() != HY_V_CAB_TEACH) {
+                ui_nav_push(HY_V_CAB_TEACH);
+            }
+            teach_reset();
+            s_flow.phase = k[i].phase;
+            s_flow.status = k[i].status;
+            if (k[i].phase == HY_CF_RUNNING) {
+                s_t_done[0] = s_t_done[1] = true;
+                dots_refresh(2);
+                t_count(3);
+            }
+            t_draw();
+            ESP_LOGI(TAG, "cab ui: %s", k[i].name);
+            return;
+        }
+    }
+    ESP_LOGI(TAG, "usage: cab ui idle|running|saved|checking|ok|miss|nomove|failed");
+}
+#endif
+
+static lv_obj_t *wide_button(lv_obj_t *parent, const char *text, ui_action_cb cb)
+{
+    int32_t w = (HY_SCREEN - 2 * EDGE_X - 12) / 2;
     lv_obj_t *b = ui_button(parent, w, ROW_H, hy_type.body_bold, text, cb, NULL);
-    lv_obj_set_pos(b, x, 346);
+    lv_obj_set_pos(b, EDGE_X, 346);
     return b;
 }
 
@@ -435,12 +628,18 @@ static void teach_create(void)
 {
     s_te = ui_view_box();
     ui_register_view(HY_V_CAB_TEACH, s_te);
-    ui_view_title(s_te, HY_S_CAB_TEACH);
+    s_t_title = ui_view_title(s_te, HY_S_CAB_TEACH);
 
     s_t_body = ui_label(s_te, hy_type.body, HY_C_TEXT, HY_S_CAB_T_BODY);
     lv_obj_set_width(s_t_body, HY_SCREEN - 2 * EDGE_X);
     lv_label_set_long_mode(s_t_body, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_pos(s_t_body, EDGE_X, 72);
+
+    s_t_msg = ui_label(s_te, hy_type.title, HY_C_TEXT, "");
+    lv_obj_set_width(s_t_msg, HY_SCREEN - 2 * EDGE_X);
+    lv_label_set_long_mode(s_t_msg, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_style_text_align(s_t_msg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(s_t_msg, EDGE_X, 150);
 
     const int32_t dot = 24, gap = 24;
     int32_t x0 = (HY_SCREEN - (HY_CAB_TAKES * dot + (HY_CAB_TAKES - 1) * gap)) / 2;
@@ -464,9 +663,12 @@ static void teach_create(void)
     lv_obj_set_style_text_align(s_t_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(s_t_status, EDGE_X, 262);
 
-    int32_t w = (HY_SCREEN - 2 * EDGE_X - 12) / 2;
-    wide_button(s_te, EDGE_X, w, HY_S_CAB_T_START, t_start_tap);
-    wide_button(s_te, EDGE_X + w + 12, w, HY_S_CANCEL, t_cancel_tap);
+    s_t_start = wide_button(s_te, HY_S_CAB_T_START, t_start_tap);
+    s_t_cancel = wide_button(s_te, HY_S_CANCEL, t_cancel_tap);
+    s_t_test = wide_button(s_te, HY_S_CAB_D_TEST, t_test_tap);
+    s_t_done_b = wide_button(s_te, HY_S_CAB_D_DONE, t_close_tap);
+    s_t_again = wide_button(s_te, HY_S_CAB_C_AGAIN, t_again_tap);
+    s_t_keep = wide_button(s_te, HY_S_CAB_C_KEEP, t_close_tap);
     teach_reset();
 }
 
@@ -505,7 +707,7 @@ static void test_event(const hy_cabev_t *e)
     switch (e->kind) {
     case HY_CABEV_MATCH:
         s_x_last = 1;
-        hy_audio_tone(HY_TONE_TAKE);   /* the low tone, at the set volume whatever the switches say */
+        cue_play(HY_CUE_TAKE);   /* the low tones, at the set volume whatever the switches say */
         break;
     case HY_CABEV_OTHER:
         s_x_last = 2;
@@ -563,10 +765,12 @@ void cab_show(hy_view_t v)
 void cab_hide(hy_view_t next)
 {
     (void)next;
-    if (s_t_running) {
+    if (s_flow.phase == HY_CF_RUNNING) {
         hy_cab_run_teach(false);
-        s_t_running = false;
+    } else if (s_flow.phase == HY_CF_CHECKING) {
+        hy_cab_run_check(false);
     }
+    hy_cab_flow_init(&s_flow);
     if (s_x_on) {
         hy_cab_run_test(false);
         s_x_on = false;
@@ -593,12 +797,14 @@ void cab_event(const hy_cabev_t *e)
         return;   /* the views are not built yet */
     }
     switch (e->kind) {
+    case HY_CABEV_TEACH_READY:
     case HY_CABEV_TEACH_STILL:
     case HY_CABEV_TEACH_GO:
     case HY_CABEV_TEACH_TAKE:
     case HY_CABEV_TEACH_ODD:
     case HY_CABEV_TEACH_DONE:
     case HY_CABEV_TEACH_FAIL:
+    case HY_CABEV_CHECK_END:
     case HY_CABEV_TOO_SMALL:
     case HY_CABEV_TOO_LONG:
         teach_event(e);

@@ -10,7 +10,7 @@
 #include "hy/store.h"
 
 static char base[64];
-static hy_cab_model_t s_m, s_d;   /* static: about 7 KB each */
+static hy_cab_model_t s_m, s_d;   /* static: about 12 KB each */
 static uint8_t s_buf[HY_CAB_FILE_MAX + 16];
 
 static void fill_take(hy_cab_seq_t *q, uint16_t n, int seed, bool gyro)
@@ -34,6 +34,18 @@ static void make_model(hy_cab_model_t *m, uint16_t n0, uint16_t n1, uint16_t n2,
     fill_take(&m->take[0], n0, 1, gyro);
     fill_take(&m->take[1], n1, 2, gyro);
     fill_take(&m->take[2], n2, 3, gyro);
+    m->n = 3;   /* a model from a file written with three takes */
+    m->d_self = 0.4375f;
+    m->trig_mg = 85;
+    m->valid = true;
+}
+
+/* count takes of len samples each */
+static void make_model_n(hy_cab_model_t *m, int count, uint16_t len, bool gyro)
+{
+    memset(m, 0, sizeof *m);
+    for (int t = 0; t < count && t < HY_CAB_TAKES; t++) fill_take(&m->take[t], len, t + 1, gyro);
+    m->n = (uint8_t)count;
     m->d_self = 0.4375f;
     m->trig_mg = 85;
     m->valid = true;
@@ -59,7 +71,8 @@ static void same_model(const hy_cab_model_t *a, const hy_cab_model_t *b)
     TEST_ASSERT_TRUE(b->valid);
     TEST_ASSERT_EQUAL_UINT16(a->trig_mg, b->trig_mg);
     TEST_ASSERT_EQUAL_FLOAT(a->d_self, b->d_self);
-    for (int t = 0; t < HY_CAB_TAKES; t++) {
+    TEST_ASSERT_EQUAL_UINT8(a->n, b->n);
+    for (int t = 0; t < a->n; t++) {
         TEST_ASSERT_EQUAL_UINT16(a->take[t].n, b->take[t].n);
         TEST_ASSERT_EQUAL(a->take[t].has_gyro, b->take[t].has_gyro);
         TEST_ASSERT_EQUAL_INT16(a->take[t].rest.x, b->take[t].rest.x);
@@ -90,17 +103,80 @@ void test_cab_roundtrip(void)
 
 void test_cab_max_size(void)
 {
-    make_model(&s_m, 200, 200, 200, true);
+    TEST_ASSERT_EQUAL_UINT32(5, HY_CAB_TAKES);
+    TEST_ASSERT_EQUAL_UINT32(12076, HY_CAB_FILE_MAX);
+    make_model_n(&s_m, HY_CAB_TAKES, 200, true);
     TEST_ASSERT_EQUAL_UINT32(HY_CAB_FILE_MAX, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
     TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, HY_CAB_FILE_MAX - 1));
-    make_model(&s_m, 200, 200, 200, true);
+    make_model_n(&s_m, HY_CAB_TAKES, 200, true);
     s_m.take[1].n = 201;   /* beyond the capture limit */
     TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
-    make_model(&s_m, 20, 0, 20, true);
+    make_model_n(&s_m, HY_CAB_TAKES, 20, true);
+    s_m.take[4].n = 0;   /* an empty take */
     TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
     make_model(&s_m, 20, 20, 20, true);
     s_m.valid = false;
     TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
+}
+
+/* count takes in use: 5 round-trip, 3 (an older file) too, 4 as well; fewer than 3 or more than 5 are not encoded */
+void test_cab_five_takes_roundtrip(void)
+{
+    make_model_n(&s_m, 5, 33, true);
+    size_t n = hy_cab_encode(&s_m, 1793145600LL, s_buf, sizeof s_buf);
+    TEST_ASSERT_EQUAL_UINT32(32 + 5 * 8 + 12 * 5 * 33 + 4, n);
+    TEST_ASSERT_EQUAL_UINT8(5, s_buf[6]);
+    int64_t got = 0;
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_decode(s_buf, n, &s_d, &got));
+    TEST_ASSERT_EQUAL_INT64(1793145600LL, got);
+    TEST_ASSERT_EQUAL_UINT8(5, s_d.n);
+    same_model(&s_m, &s_d);
+
+    make_model_n(&s_m, 4, 33, false);
+    n = hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf);
+    TEST_ASSERT_EQUAL_UINT32(32 + 4 * 8 + 12 * 4 * 33 + 4, n);
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_decode(s_buf, n, &s_d, NULL));
+    same_model(&s_m, &s_d);
+
+    make_model_n(&s_m, 2, 33, true);
+    TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
+    make_model_n(&s_m, 5, 33, true);
+    s_m.n = 6;
+    TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
+    s_m.n = 0;
+    TEST_ASSERT_EQUAL_UINT32(0, hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf));
+}
+
+/* A file written with three takes (the earlier format, version 1) still decodes, with n 3 */
+void test_cab_three_take_file_still_decodes(void)
+{
+    make_model_n(&s_m, 3, 200, true);
+    size_t n = hy_cab_encode(&s_m, 7, s_buf, sizeof s_buf);
+    TEST_ASSERT_EQUAL_UINT32(7260, n);   /* 32 + 3 x (8 + 200 x 12) + 4 */
+    TEST_ASSERT_EQUAL_UINT8(1, s_buf[4]);
+    TEST_ASSERT_EQUAL_UINT8(3, s_buf[6]);
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_decode(s_buf, n, &s_d, NULL));
+    TEST_ASSERT_EQUAL_UINT8(3, s_d.n);
+    same_model(&s_m, &s_d);
+}
+
+static void put_crc(size_t n);
+
+/* The takes field outside 3 to HY_CAB_TAKES is refused even with a good CRC, and so is one that disagrees with the length */
+void test_cab_decode_takes_field_range(void)
+{
+    make_model_n(&s_m, 3, 20, true);
+    size_t n = hy_cab_encode(&s_m, 1, s_buf, sizeof s_buf);
+    static const uint8_t bad[] = { 0, 1, 2, 4, 5, 6, 255 };
+    for (unsigned i = 0; i < sizeof bad; i++) {
+        s_buf[6] = bad[i];
+        put_crc(n);
+        TEST_ASSERT_EQUAL_MESSAGE(HY_E_CORRUPT, hy_cab_decode(s_buf, n, &s_d, NULL), "takes field");
+        TEST_ASSERT_FALSE(s_d.valid);
+    }
+    s_buf[6] = 3;
+    put_crc(n);
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_decode(s_buf, n, &s_d, NULL));
 }
 
 static void put_crc(size_t n)
@@ -285,7 +361,7 @@ void test_cab_store_atomic(void)
     same_model(&s_m, &s_d);
 
     /* the next save replaces both */
-    make_model(&s_m, 20, 21, 22, false);
+    make_model_n(&s_m, HY_CAB_TAKES, 100, true);   /* five takes through the file */
     TEST_ASSERT_EQUAL(HY_OK, hy_cab_file_save(&s_m, 222));
     TEST_ASSERT_FALSE(exists("cabinet.bin.tmp"));
     TEST_ASSERT_EQUAL(HY_OK, hy_cab_file_load(&s_d, &created));
@@ -319,6 +395,9 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_cab_roundtrip);
     RUN_TEST(test_cab_max_size);
+    RUN_TEST(test_cab_five_takes_roundtrip);
+    RUN_TEST(test_cab_three_take_file_still_decodes);
+    RUN_TEST(test_cab_decode_takes_field_range);
     RUN_TEST(test_cab_crc_known_value);
     RUN_TEST(test_cab_decode_bad_crc);
     RUN_TEST(test_cab_decode_bad_version);

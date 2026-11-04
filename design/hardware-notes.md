@@ -115,6 +115,7 @@ Verified on the board, 2026-10-28 (serial) and 2026-10-29 (by hand, build 586713
 - Codec path ES8311 verified: `hy_audio_init` returns ESP_OK, the chime renders to 16319 samples at 22050 Hz, played in about 850 ms including 100 ms of trailing silence (748 ms before the silence was added)
 - Volume 60 judged "fine" by ear on 2026-10-29
 - Not yet checked: the "Play chime" button in Sound settings, and the repeat chimes every 2 min up to 5 times (device muted in an office)
+- Cabinet open cues are rendered at boot from note lists (sine, 5 ms ramps, 22050 Hz, then 100 ms of silence): GO 1319 Hz 120 ms; TAKE 880 Hz 80 ms twice with a 60 ms gap; REDO 440 Hz 400 ms; DONE 659, 880, 1319 Hz 120 ms each with 40 ms gaps; FAIL 659 then 440 Hz 250 ms each with a 60 ms gap. Each plays as its own open, write and close of the codec; up to 4 requests wait, the chime is dropped while anything plays. Every cue request logs `cue <name>`. Not yet heard on the board: that two cues in a row both play and that the rising and falling cues are told apart by ear
 
 ## Gestures
 
@@ -176,7 +177,7 @@ Any movement trigger counts on the motion recordings (`host_tests/data/motion`, 
 - Wake-on-motion noise measured in low-power mode (`imu wom`, 30 s each, device still on a desk): 655 events at 1 mg, 534 at 4 mg, 225 at 8 mg, 10 at 16 mg, 0 at 40 mg. Live at 40 mg over about 20 minutes in an office with people at the desk: 7 interrupts. The 50 Hz stream on the same desk: largest slope between successive samples 8 mg over 60 s
 - The slope of a real cabinet door is to be measured
 
-Taught movement matcher margins at sensitivity 3 (`test_cab_rec.c`, `test_cabmatch.c`):
+Taught movement matcher margins at sensitivity 3 (`test_cab_rec.c`, `test_cabmatch.c`; these were made with 3 takes, the device now teaches 5, and the host tests build the 3-take models with `hy_cab_model_build_n`):
 
 | Model | d_self | Threshold | Largest positive | Smallest negative |
 | --- | --- | --- | --- | --- |
@@ -188,6 +189,8 @@ Taught movement matcher margins at sensitivity 3 (`test_cab_rec.c`, `test_cabmat
 - Threshold bounds 0.25 and 2.0; the upper bound sits a third below the nearest recording negative. The putdown_pickup model rests on 3 takes from one recording with rests padded in the replay; no held-out real positive exists yet
 - Capture: from the trigger until 400 ms of stillness (accel steps within 40 mg around the current pose, gyro under 10 dps), 220 ms minimum, 4 s maximum. The recorded taps capture as 20 to 60 ms, so a tap cannot be taught
 - rotate_cycle and tap_double give fewer than 3 captures and have no model
+
+The template file holds 5 takes: at most 32 + 5 x (8 + 200 x 12) + 4 = 12076 bytes (`HY_CAB_FILE_MAX`); the model in memory is about 12 KB, held in PSRAM, never on a stack. A file with 3 or 4 takes still loads.
 
 Measured on the board: motion task stack free minimum 3736 bytes of 6144 (debug build, after reactions, test mode and a teach); the release build was not measured. DIRAM used: 114977 bytes (debug), 113921 bytes (release). At boot the motion task arms wake on motion for about 100 ms before the screen comes on (`cabinet: armed any 40 mg`, then `motion: on`).
 

@@ -108,10 +108,10 @@ While the Cabinet open test runs, every counted movement sends `{"ev":"cabinet",
 | `POST /api/chime/test`, `POST /api/power/off` | play the chime, power off |
 | `POST /api/ota` | firmware update from an uploaded file |
 | `GET /api/update`, `POST /api/update/check`, `POST /api/update/install` | firmware update from GitHub |
-| `GET /api/cabinet` | Cabinet open state: `taught`, `taught_at`, `mode`, `live`, `testing`, `teaching`, `threshold`, `trigger_mg`, `counts`, `test` and the `recent` Taught captures |
-| `POST /api/cabinet/test` | start or stop the test: `{"on":true}` or `{"on":false}`; `409` with `teaching`, `not_taught` or `screen_off` when it cannot start |
+| `GET /api/cabinet` | Cabinet open state: `taught`, `taught_at`, `mode`, `live`, `testing`, `teaching`, `checking`, `threshold`, `trigger_mg`, `counts`, `test` and the `recent` Taught captures. `teaching` is true while the movement is being taught on the device, `checking` while the taught movement is being tested there (the Test button after teaching) |
+| `POST /api/cabinet/test` | start or stop the test: `{"on":true}` or `{"on":false}`; `409` with `teaching`, `checking`, `not_taught` or `screen_off` when it cannot start |
 | `GET /api/cabinet/samples.csv` | the taught takes and the recent Taught captures as CSV |
-| `DELETE /api/cabinet/teach` | forget the taught movement; `409` while it is being taught |
+| `DELETE /api/cabinet/teach` | forget the taught movement and, when the trigger was Taught movement, set it back to Any movement; `409` with `teaching` or `checking` while the movement is being taught or checked |
 
 Passwords are write-only. No route returns a Wi-Fi password, except `GET /api/export.json?secrets=1`, which writes the saved passwords into the file.
 

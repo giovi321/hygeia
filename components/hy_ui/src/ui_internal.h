@@ -418,7 +418,8 @@ void poweroff_debug(const char *arg);            /* show | slide | cancel | crit
 void cabinet_ui_init(void);                      /* hy_cab_run_init with the event callback, then hy_cab_run_config */
 void cabinet_ui_event(const hy_cabev_t *e);      /* the single dispatch point for the runner's events */
 #if CONFIG_HY_DEBUG_CONSOLE
-void cabinet_debug(const char *arg);             /* `cab react`: posts a REACT as the runner would */
+void cabinet_debug(const char *arg);             /* `cab react`: posts a REACT as the runner would; `cab ui <phase>` */
+void cab_debug_ui(const char *phase);            /* the teach view in a phase, without the runner */
 #endif
 
 /* toast.c */

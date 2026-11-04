@@ -216,7 +216,8 @@ cJSON *hy_api_cabinet_json(const hy_cab_status_t *st, const hy_cab_recent_t *rec
     }
     ok = ok && cJSON_AddStringToObject(o, "mode", st->mode == HY_CAB_TAUGHT ? "taught" : "any") &&
          cJSON_AddBoolToObject(o, "live", st->live) && cJSON_AddBoolToObject(o, "testing", st->testing) &&
-         cJSON_AddBoolToObject(o, "teaching", st->teaching) && add_num_or_null(o, "threshold", st->thr, st->taught) &&
+         cJSON_AddBoolToObject(o, "teaching", st->teaching) &&
+         cJSON_AddBoolToObject(o, "checking", st->checking) && add_num_or_null(o, "threshold", st->thr, st->taught) &&
          cJSON_AddNumberToObject(o, "trigger_mg", st->trig_mg);
     cJSON *c = ok ? cJSON_AddObjectToObject(o, "counts") : NULL;
     ok = c && cJSON_AddNumberToObject(c, "wom", st->wom_irq) && cJSON_AddNumberToObject(c, "captures", st->captures) &&

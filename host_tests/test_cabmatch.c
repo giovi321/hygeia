@@ -6,6 +6,8 @@
 #include "hy/cabinet.h"
 #include "cab_synth.h"
 
+#define TK3 3   /* the recordings and the synthetic movements were made with three takes */
+
 void setUp(void) {}
 void tearDown(void) {}
 
@@ -73,11 +75,11 @@ static void capture(const cab_syn_t *p, uint16_t trig_mg, uint32_t pre, hy_cab_s
 }
 
 /* The three takes of a teach: the teach trigger, sizes a person's repeats might differ by. */
-static void teach(cab_syn_kind_t kind, hy_cab_seq_t takes[HY_CAB_TAKES])
+static void teach(cab_syn_kind_t kind, hy_cab_seq_t takes[TK3])
 {
-    static const float amp[HY_CAB_TAKES] = { 1.0f, 1.1f, 0.9f };
-    static const float dur[HY_CAB_TAKES] = { 1.0f, 0.9f, 1.1f };
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    static const float amp[TK3] = { 1.0f, 1.1f, 0.9f };
+    static const float dur[TK3] = { 1.0f, 0.9f, 1.1f };
+    for (int k = 0; k < TK3; k++) {
         cab_syn_t p = mv(kind, amp[k], dur[k], 11u + (uint32_t)k);
         capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[k]);
     }
@@ -85,10 +87,10 @@ static void teach(cab_syn_kind_t kind, hy_cab_seq_t takes[HY_CAB_TAKES])
 
 static void build(cab_syn_kind_t kind, hy_cab_model_t *m)
 {
-    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_seq_t takes[TK3];
     teach(kind, takes);
     int odd = 99;
-    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(m, takes, &odd));
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build_n(m, takes, TK3, &odd));
     TEST_ASSERT_EQUAL(-1, odd);
     TEST_ASSERT_TRUE(m->valid);
 }
@@ -274,7 +276,7 @@ static void test_sensitivity_monotone(void)
 
 static void test_model_odd_take(void)
 {
-    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_seq_t takes[TK3];
     static hy_cab_model_t m;
     cab_syn_t p0 = mv(CAB_SYN_TILT, 1.0f, 1.0f, 21), p1 = mv(CAB_SYN_TILT, 1.1f, 0.9f, 22);
     cab_syn_t p2 = mv(CAB_SYN_LIFT, 1.0f, 1.0f, 23);
@@ -282,7 +284,7 @@ static void test_model_odd_take(void)
     capture(&p1, HY_CAB_TEACH_TRIG_MG, 0, &takes[1]);
     capture(&p2, HY_CAB_TEACH_TRIG_MG, 0, &takes[2]);
     int odd = -1;
-    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build_n(&m, takes, TK3, &odd));
     TEST_ASSERT_EQUAL(2, odd);
     TEST_ASSERT_FALSE(m.valid);
     TEST_ASSERT_FALSE(hy_cab_match(&m, 3, &takes[0], NULL));
@@ -290,7 +292,7 @@ static void test_model_odd_take(void)
        is the upper bound. */
     TEST_ASSERT_TRUE(isinf(m.d_self));
     TEST_ASSERT_EQUAL_FLOAT(HY_CAB_THR_MAX, hy_cab_threshold(&m, 3));
-    for (int k = 0; k < HY_CAB_TAKES; k++) TEST_ASSERT_TRUE(m.take[k].n > 0);
+    for (int k = 0; k < TK3; k++) TEST_ASSERT_TRUE(m.take[k].n > 0);
     m.valid = true;
     TEST_ASSERT_TRUE(hy_cab_match(&m, 3, &takes[0], NULL));
 }
@@ -299,53 +301,53 @@ static void test_model_odd_take(void)
    the takes as they are. */
 static void test_model_odd_take_accept(void)
 {
-    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_seq_t takes[TK3];
     static hy_cab_model_t m;
-    static const float amp[HY_CAB_TAKES] = { 1.0f, 1.05f, 0.55f };
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    static const float amp[TK3] = { 1.0f, 1.05f, 0.55f };
+    for (int k = 0; k < TK3; k++) {
         cab_syn_t p = mv(CAB_SYN_DOOR_OPEN, amp[k], 1.0f, 31u + (uint32_t)k);
         capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[k]);
     }
     int odd = -1;
-    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build_n(&m, takes, TK3, &odd));
     TEST_ASSERT_EQUAL(2, odd);
     TEST_ASSERT_FALSE(m.valid);
     TEST_ASSERT_TRUE(m.trig_mg >= HY_CAB_TRIG_MIN_MG && m.trig_mg <= HY_CAB_TRIG_MAX_MG);
     /* d_self is the worst-take rule over all three trimmed takes. */
     float worst = 0.0f;
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < TK3; k++) {
         TEST_ASSERT_TRUE(m.take[k].n > 0 && m.take[k].n <= takes[k].n);
         /* trimmed to the first sample of the take at which the trigger fires */
         uint16_t cut = (uint16_t)(takes[k].n - m.take[k].n);
         TEST_ASSERT_TRUE(hy_cab_wom_hit_at(&takes[k], cut, m.trig_mg));
         for (uint16_t i = 0; i < cut; i++) TEST_ASSERT_FALSE(hy_cab_wom_hit_at(&takes[k], i, m.trig_mg));
         float best = INFINITY;
-        for (int j = 0; j < HY_CAB_TAKES; j++)
+        for (int j = 0; j < TK3; j++)
             if (j != k) best = fminf(best, hy_cab_dist(&m.take[j], &m.take[k]));
         if (best > worst) worst = best;
     }
     TEST_ASSERT_TRUE(isfinite(m.d_self) && m.d_self > 0.0f);
     TEST_ASSERT_EQUAL_FLOAT(worst, m.d_self);
     m.valid = true;
-    for (int k = 0; k < HY_CAB_TAKES; k++) TEST_ASSERT_TRUE(hy_cab_match(&m, 3, &m.take[k], NULL));
+    for (int k = 0; k < TK3; k++) TEST_ASSERT_TRUE(hy_cab_match(&m, 3, &m.take[k], NULL));
 }
 
 /* Takes that disagree on has_gyro are refused outright: no model, no trimmed takes, a distinct odd value. */
 static void test_model_mixed_gyro_refused(void)
 {
-    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_seq_t takes[TK3];
     static hy_cab_model_t m;
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < TK3; k++) {
         cab_syn_t p = mv(CAB_SYN_DOOR_OPEN, 1.0f, 1.0f, 61u + (uint32_t)k);
         capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[k]);
         takes[k].has_gyro = true;
     }
     int odd = -1;
-    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(&m, takes, &odd));
-    for (int bad = 0; bad < HY_CAB_TAKES; bad++) {
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build_n(&m, takes, TK3, &odd));
+    for (int bad = 0; bad < TK3; bad++) {
         takes[bad].has_gyro = false;
         odd = -1;
-        TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build(&m, takes, &odd));
+        TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build_n(&m, takes, TK3, &odd));
         TEST_ASSERT_EQUAL(HY_CAB_ODD_GYRO_MIX, odd);
         TEST_ASSERT_FALSE(m.valid);
         takes[bad].has_gyro = true;
@@ -386,14 +388,14 @@ static void test_cab_suspended_while_armed(void)
 
 static void test_threshold_clamp(void)
 {
-    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_seq_t takes[TK3];
     static hy_cab_model_t m;
     cab_syn_t p = mv(CAB_SYN_DOOR_OPEN, 1.0f, 1.0f, 3);
     capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[0]);
     takes[1] = takes[0];
     takes[2] = takes[0];
     int odd = 99;
-    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build_n(&m, takes, TK3, &odd));
     TEST_ASSERT_EQUAL_FLOAT(0.0f, m.d_self);
     for (uint8_t s = 0; s <= 6; s++) TEST_ASSERT_EQUAL_FLOAT(HY_CAB_THR_MIN, hy_cab_threshold(&m, s));
     m.d_self = 100.0f;
@@ -405,7 +407,7 @@ static void test_threshold_clamp(void)
 
 static void test_model_trim_trigger(void)
 {
-    static hy_cab_seq_t takes[HY_CAB_TAKES], orig;
+    static hy_cab_seq_t takes[TK3], orig;
     static hy_cab_model_t m;
     teach(CAB_SYN_DOOR_OPEN, takes);
     /* Take 0 gets a 300 ms slow lead-in: an accel drift growing to 30 mg, under any trigger level. */
@@ -421,7 +423,7 @@ static void test_model_trim_trigger(void)
     memcpy(&orig.s[lead], takes[0].s, takes[0].n * sizeof takes[0].s[0]);
     takes[0] = orig;
     int odd = 99;
-    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build_n(&m, takes, TK3, &odd));
     TEST_ASSERT_TRUE(m.trig_mg >= HY_CAB_TRIG_MIN_MG && m.trig_mg <= HY_CAB_TRIG_MAX_MG);
     uint16_t k = 0;
     while (k < orig.n && !hy_cab_wom_hit_at(&orig, k, m.trig_mg)) k++;
@@ -434,10 +436,10 @@ static void test_model_trim_trigger(void)
 /* Host time per hy_cab_match with 200-sample takes and capture. */
 static void test_match_timing(void)
 {
-    static hy_cab_seq_t takes[HY_CAB_TAKES], q;
+    static hy_cab_seq_t takes[TK3], q;
     static hy_cab_model_t m;
     /* A 6 s tilt read from 1.8 s on, so every take starts above the trigger and keeps all 200 samples. */
-    for (int k = 0; k < HY_CAB_TAKES; k++) {
+    for (int k = 0; k < TK3; k++) {
         cab_syn_t p = cab_syn_new(CAB_SYN_TILT);
         p.dur = 6.0f;
         p.noise = true;
@@ -451,7 +453,7 @@ static void test_match_timing(void)
     q = takes[0];
     q.s[100].a[0] = (int16_t)(q.s[100].a[0] + 5);
     int odd;
-    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build_n(&m, takes, TK3, &odd));
     TEST_ASSERT_EQUAL_UINT16(HY_CAB_MAX_N, m.take[0].n);
     const int reps = 50;
     struct timespec t0, t1;
@@ -461,6 +463,73 @@ static void test_match_timing(void)
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double us = ((double)(t1.tv_sec - t0.tv_sec) * 1e6 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e3) / reps;
     printf("hy_cab_match, 3 takes x 200 samples, capture 200 samples: %.0f us per match (host, -O0)\n", us);
+}
+
+/* Five takes, the count a teach makes now: the model keeps n 5, matches the movement's variants and refuses another. */
+static void test_model_five_takes(void)
+{
+    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_model_t m;
+    static const float amp[HY_CAB_TAKES] = { 1.0f, 1.1f, 0.9f, 1.05f, 0.95f };
+    static const float dur[HY_CAB_TAKES] = { 1.0f, 0.9f, 1.1f, 1.0f, 0.95f };
+    TEST_ASSERT_EQUAL(5, HY_CAB_TAKES);
+    for (int k = 0; k < HY_CAB_TAKES; k++) {
+        cab_syn_t p = mv(CAB_SYN_TILT, amp[k], dur[k], 41u + (uint32_t)k);
+        capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[k]);
+    }
+    int odd = 99;
+    TEST_ASSERT_EQUAL(HY_OK, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(-1, odd);
+    TEST_ASSERT_TRUE(m.valid);
+    TEST_ASSERT_EQUAL_UINT8(HY_CAB_TAKES, m.n);
+    for (int k = 0; k < HY_CAB_TAKES; k++) TEST_ASSERT_TRUE(m.take[k].n > 0);
+    expect_all(&m, CAB_SYN_TILT, false);
+    expect_none(&m, CAB_SYN_LIFT);
+}
+
+/* The odd take of five is reported by its index: s above 3 times the mean of the other four */
+static void test_model_five_takes_odd(void)
+{
+    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_model_t m;
+    for (int k = 0; k < HY_CAB_TAKES; k++) {
+        cab_syn_t p = mv(k == 3 ? CAB_SYN_LIFT : CAB_SYN_TILT, 1.0f + 0.05f * (float)k, 1.0f, 51u + (uint32_t)k);
+        capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &takes[k]);
+    }
+    int odd = -1;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build(&m, takes, &odd));
+    TEST_ASSERT_EQUAL(3, odd);
+    TEST_ASSERT_FALSE(m.valid);
+    TEST_ASSERT_EQUAL_UINT8(HY_CAB_TAKES, m.n);
+}
+
+static void test_model_build_n_range(void)
+{
+    static hy_cab_seq_t takes[HY_CAB_TAKES];
+    static hy_cab_model_t m;
+    int odd = 7;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build_n(&m, takes, 2, &odd));
+    TEST_ASSERT_EQUAL(-1, odd);
+    TEST_ASSERT_FALSE(m.valid);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_cab_model_build_n(&m, takes, HY_CAB_TAKES + 1, &odd));
+    TEST_ASSERT_EQUAL(-1, odd);
+}
+
+/* The matcher reads the n takes in use: a stray take beyond n never matches */
+static void test_match_uses_n_takes(void)
+{
+    static hy_cab_model_t m;
+    static hy_cab_seq_t lift;
+    build(CAB_SYN_TILT, &m);
+    TEST_ASSERT_EQUAL_UINT8(3, m.n);
+    cab_syn_t p = mv(CAB_SYN_LIFT, 1.0f, 1.0f, 61);
+    capture(&p, HY_CAB_TEACH_TRIG_MG, 0, &lift);
+    m.take[3] = lift;
+    float d = 0.0f;
+    TEST_ASSERT_FALSE(hy_cab_match(&m, 5, &lift, &d));
+    m.n = 4;
+    TEST_ASSERT_TRUE(hy_cab_match(&m, 5, &lift, &d));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, d);
 }
 
 int main(void)
@@ -482,5 +551,9 @@ int main(void)
     RUN_TEST(test_threshold_clamp);
     RUN_TEST(test_model_trim_trigger);
     RUN_TEST(test_match_timing);
+    RUN_TEST(test_model_five_takes);
+    RUN_TEST(test_model_five_takes_odd);
+    RUN_TEST(test_model_build_n_range);
+    RUN_TEST(test_match_uses_n_takes);
     return UNITY_END();
 }

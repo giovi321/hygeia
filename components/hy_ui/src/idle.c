@@ -308,14 +308,14 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
     }
 }
 
-/* A running Cabinet open teach or test keeps the screen on, whatever started it (the device views, the web UI or
-   the console): teaching needs it readable through the three takes and a test runs up to 10 minutes. The runner's
+/* A running Cabinet open teach, check or test keeps the screen on, whatever started it (the device views, the web UI
+   or the console): teaching needs it readable through all the takes and a test runs up to 10 minutes. The runner's
    state decides, so the hold ends with every way a run ends. */
 static bool cab_run_active(void)
 {
     hy_cab_status_t s;
     hy_cab_run_status(&s);
-    return s.testing || s.teaching;
+    return s.testing || s.teaching || s.checking;
 }
 
 static bool hold_now(void)

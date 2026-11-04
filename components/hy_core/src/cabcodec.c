@@ -31,8 +31,9 @@ static uint64_t get64(const uint8_t *p) { return get32(p) | ((uint64_t)get32(p +
 size_t hy_cab_encode(const hy_cab_model_t *m, int64_t created, uint8_t *buf, size_t max)
 {
     if (!m || !m->valid || !buf) return 0;
+    if (m->n < HY_CAB_TAKES_MIN || m->n > HY_CAB_TAKES) return 0;
     size_t need = HDR_LEN + CRC_LEN;
-    for (int t = 0; t < HY_CAB_TAKES; t++) {
+    for (int t = 0; t < m->n; t++) {
         if (m->take[t].n == 0 || m->take[t].n > HY_CAB_MAX_N) return 0;
         if (m->take[t].has_gyro != m->take[0].has_gyro) return 0;   /* the file has one flag for all takes */
         need += TAKE_HDR + (size_t)m->take[t].n * SAMPLE_B;
@@ -43,7 +44,7 @@ size_t hy_cab_encode(const hy_cab_model_t *m, int64_t created, uint8_t *buf, siz
     memcpy(buf, MAGIC, 4);
     buf[4] = VERSION;
     buf[5] = HY_CAB_RATE_HZ;
-    buf[6] = HY_CAB_TAKES;
+    buf[6] = m->n;
     buf[7] = m->take[0].has_gyro ? 1 : 0;
     put16(buf + 8, m->trig_mg);
     put16(buf + 10, HY_CAB_GYRO_START_MS);
@@ -54,7 +55,7 @@ size_t hy_cab_encode(const hy_cab_model_t *m, int64_t created, uint8_t *buf, siz
     /* bytes 24 to 31 reserved, zero */
 
     uint8_t *p = buf + HDR_LEN;
-    for (int t = 0; t < HY_CAB_TAKES; t++) {
+    for (int t = 0; t < m->n; t++) {
         const hy_cab_seq_t *q = &m->take[t];
         put16(p, q->n);
         put16(p + 2, (uint16_t)q->rest.x);
@@ -79,11 +80,12 @@ hy_err_t hy_cab_decode(const uint8_t *buf, size_t len, hy_cab_model_t *m, int64_
     if (!buf || len < HDR_LEN + CRC_LEN || memcmp(buf, MAGIC, 4) != 0) return HY_E_CORRUPT;
     if (buf[4] != VERSION) return HY_E_VERSION;
     if (get32(buf + len - CRC_LEN) != crc32_ieee(buf, len - CRC_LEN)) return HY_E_CORRUPT;
-    if (buf[5] != HY_CAB_RATE_HZ || buf[6] != HY_CAB_TAKES) return HY_E_CORRUPT;
+    if (buf[5] != HY_CAB_RATE_HZ || buf[6] < HY_CAB_TAKES_MIN || buf[6] > HY_CAB_TAKES) return HY_E_CORRUPT;
+    int takes = buf[6];
 
     /* Walk the takes against the length before writing anything. */
     size_t end = len - CRC_LEN, off = HDR_LEN;
-    for (int t = 0; t < HY_CAB_TAKES; t++) {
+    for (int t = 0; t < takes; t++) {
         if (end - off < TAKE_HDR) return HY_E_CORRUPT;
         uint16_t n = get16(buf + off);
         if (n == 0 || n > HY_CAB_MAX_N || (end - off - TAKE_HDR) / SAMPLE_B < n) return HY_E_CORRUPT;
@@ -99,11 +101,12 @@ hy_err_t hy_cab_decode(const uint8_t *buf, size_t len, hy_cab_model_t *m, int64_
     if (trig < HY_CAB_TRIG_MIN_MG || trig > HY_CAB_TRIG_MAX_MG || !isfinite(d_self) || !(d_self > 0.0f))
         return HY_E_CORRUPT;
     memset(m, 0, sizeof *m);
+    m->n = (uint8_t)takes;
     m->trig_mg = get16(buf + 8);
     memcpy(&m->d_self, &d, sizeof d);
     if (created) *created = (int64_t)get64(buf + 16);
     const uint8_t *p = buf + HDR_LEN;
-    for (int t = 0; t < HY_CAB_TAKES; t++) {
+    for (int t = 0; t < takes; t++) {
         hy_cab_seq_t *q = &m->take[t];
         q->n = get16(p);
         q->has_gyro = gyro;

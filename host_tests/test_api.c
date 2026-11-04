@@ -991,6 +991,7 @@ static void test_api_cabinet_json_not_taught(void)
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "live")));
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "testing")));
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "teaching")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "checking")));
     TEST_ASSERT_EQUAL_INT(0, (int)cJSON_GetObjectItemCaseSensitive(o, "trigger_mg")->valuedouble);
     const cJSON *c = cJSON_GetObjectItemCaseSensitive(o, "counts");
     TEST_ASSERT_TRUE(cJSON_IsObject(c));
@@ -1024,6 +1025,7 @@ static void test_api_cabinet_json_taught(void)
     TEST_ASSERT_EQUAL_STRING("taught", cJSON_GetObjectItemCaseSensitive(o, "mode")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "live")));
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "testing")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "checking")));
     ASSERT_NUM(0.75, cJSON_GetObjectItemCaseSensitive(o, "threshold")->valuedouble);
     TEST_ASSERT_EQUAL_INT(90, (int)cJSON_GetObjectItemCaseSensitive(o, "trigger_mg")->valuedouble);
     const cJSON *c = cJSON_GetObjectItemCaseSensitive(o, "counts");

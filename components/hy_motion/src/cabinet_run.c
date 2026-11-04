@@ -22,9 +22,11 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/cabinet_file.h"
+#include "hy/cabteach.h"
 #include "hy/clock.h"
 #include "hy/power_run.h"
 #include "hy/sched_run.h"
+#include "hy/store.h"
 #include "lvgl.h"
 
 static const char *TAG = "cabinet";
@@ -34,10 +36,6 @@ static const char *TAG = "cabinet";
 #define IO_FAILS_MAX     3
 #define STILL_WAIT_MS    10000   /* after a capture: at most this long for stillness before re-arming */
 #define RETRY_MS         5000    /* then this long with the IMU off before the next try */
-#define TEACH_STILL_MS   10000   /* teach: 1 s still within this time */
-#define TEACH_GO_MS      60000   /* teach: a movement within this time after GO */
-#define TEACH_PAUSE_MS   5000    /* teach: triggers ignored after a take */
-#define TEACH_REDOS      2
 #define EVQ_N            8
 
 /* ---- shared state, under s_cmux ---- */
@@ -50,7 +48,8 @@ static int64_t s_taught_at;
 static uint16_t s_trig_mg;
 static float s_d_self, s_thr;
 static bool s_teaching;            /* hy_cab_run_teach(true) in force; the motion task clears it at the end */
-static uint32_t s_teach_seq;       /* bumped by every teach start */
+static bool s_checking;            /* hy_cab_run_check(true) in force, likewise */
+static uint32_t s_teach_seq;       /* bumped by every teach or check start */
 static bool s_testing;
 static int64_t s_test_until_ms;
 static hy_cab_status_t s_ctr;      /* counters only: wom_irq .. test_others */
@@ -84,7 +83,6 @@ static struct {
 
 /* Stream path */
 enum { CAP_LIVE = 0, CAP_TEST, CAP_TEACH };
-enum { T_STILL = 0, T_GO, T_CAP, T_PAUSE };
 static struct {
     bool capturing, repower, have_rest, holdoff, tactive;
     uint8_t cap_for;
@@ -94,9 +92,9 @@ static struct {
     hy_accel_t hist[3];   /* the last three samples, [0] the newest */
     uint8_t hist_n;
     uint32_t holdoff_until;
-    /* teach */
-    uint8_t tstate, takes_n, cur, redos;
-    uint32_t t0, teach_seen;
+    /* teach and check */
+    hy_ct_t ct;
+    uint32_t teach_seen;
     hy_accel_t trest;
 } s_st;
 
@@ -124,7 +122,8 @@ static bool cfg_get(cab_cfg_t *c)
 static const char *ev_name(hy_cabev_kind_t k)
 {
     static const char *const n[] = {"react", "match", "other", "too small", "too long", "trigger", "teach still",
-                                    "teach go", "teach take", "teach odd", "teach done", "teach fail", "fault"};
+                                    "teach go", "teach take", "teach odd", "teach done", "teach fail", "fault", "test end",
+                                    "teach ready", "check end"};
     return (unsigned)k < sizeof n / sizeof n[0] ? n[k] : "?";
 }
 
@@ -145,7 +144,8 @@ static void ev_cb(void *p)
 /* Motion task. Queues the event for the LVGL task under the bounded LVGL lock; dropped without a handler. */
 static void post_ev(hy_cabev_kind_t kind, uint8_t take, float dist, float thr)
 {
-    if (kind >= HY_CABEV_TEACH_STILL && kind <= HY_CABEV_TEACH_FAIL) {
+    if ((kind >= HY_CABEV_TEACH_STILL && kind <= HY_CABEV_TEACH_FAIL) || kind == HY_CABEV_TEACH_READY ||
+        kind == HY_CABEV_CHECK_END) {
         ESP_LOGI(TAG, "cabinet: %s %u", ev_name(kind), (unsigned)take);
     }
     portENTER_CRITICAL(&s_cmux);
@@ -210,13 +210,16 @@ static void teach_end(void)
     portENTER_CRITICAL(&s_cmux);
     if (s_teach_seq == s_st.teach_seen) {
         s_teaching = false;
+        s_checking = false;
     }
     portEXIT_CRITICAL(&s_cmux);
 }
 
-static void teach_fail(hy_cab_fail_t why)
+/* The sequencer's abort event for the run in force; the run ends */
+static void teach_abort(void)
 {
-    post_ev(HY_CABEV_TEACH_FAIL, (uint8_t)why, 0, 0);
+    hy_ct_out_t o = hy_ct_abort(&s_st.ct);
+    post_ev(o.ev, o.take, 0, 0);
     teach_end();
 }
 
@@ -227,13 +230,17 @@ static void fault(const char *what, esp_err_t err)
     s_fault = true;
     bool testing = s_testing;
     bool teaching = s_teaching;
+    bool checking = s_checking;
     s_testing = false;
     s_teaching = false;
+    s_checking = false;
     portEXIT_CRITICAL(&s_cmux);
     if (s_st.tactive) {
-        teach_fail(HY_CAB_FAIL_ABORT);
+        teach_abort();
     } else if (teaching) {
         post_ev(HY_CABEV_TEACH_FAIL, (uint8_t)HY_CAB_FAIL_ABORT, 0, 0);   /* the first stream sample never came */
+    } else if (checking) {
+        post_ev(HY_CABEV_CHECK_END, (uint8_t)HY_CAB_CHECK_ABORT, 0, 0);
     }
     if (testing) {
         ESP_LOGI(TAG, "cabinet: test off");
@@ -580,9 +587,10 @@ void hy_cab_int_screen_off(void)
     bool testing = s_testing;
     s_testing = false;
     s_teaching = false;
+    s_checking = false;
     portEXIT_CRITICAL(&s_cmux);
     if (s_st.tactive) {
-        teach_fail(HY_CAB_FAIL_ABORT);
+        teach_abort();
     }
     if (testing) {
         ESP_LOGI(TAG, "cabinet: test off (screen off)");
@@ -624,7 +632,7 @@ void hy_cab_int_stream_error(esp_err_t err)
     cab_cfg_t c;
     bool live = cfg_get(&c);
     portENTER_CRITICAL(&s_cmux);
-    bool active = live || s_testing || s_teaching;
+    bool active = live || s_testing || s_teaching || s_checking;
     portEXIT_CRITICAL(&s_cmux);
     if (active && err == ESP_ERR_INVALID_STATE) {
         fault("imu absent", err);   /* no IMU at all cannot recover: end a teach or test at once */
@@ -633,13 +641,9 @@ void hy_cab_int_stream_error(esp_err_t err)
     }
 }
 
-static void teach_pause(uint32_t t)
-{
-    s_st.tstate = T_PAUSE;
-    s_st.t0 = t + TEACH_PAUSE_MS;
-}
+static void tc_apply(hy_ct_out_t o, uint32_t t, hy_accel_t a);
 
-static void teach_save(void)
+static void teach_save(uint32_t t, hy_accel_t a)
 {
     int64_t created = hy_clock_valid() ? (int64_t)time(NULL) : 0;
     xSemaphoreTake(s_mu, portMAX_DELAY);
@@ -650,7 +654,7 @@ static void teach_save(void)
     xSemaphoreGive(s_mu);
     if (e != HY_OK) {
         ESP_LOGE(TAG, "cabinet: template save failed: %s", hy_err_str(e));
-        teach_fail(HY_CAB_FAIL_SAVE);
+        tc_apply(hy_ct_saved(&s_st.ct, false), t, a);
         return;
     }
     portENTER_CRITICAL(&s_cmux);
@@ -660,110 +664,99 @@ static void teach_save(void)
     s_d_self = s_tmodel.d_self;
     portEXIT_CRITICAL(&s_cmux);
     thr_cache();
-    ESP_LOGI(TAG, "cabinet: taught, d_self %.3f trigger %u mg", (double)s_tmodel.d_self, (unsigned)s_tmodel.trig_mg);
-    post_ev(HY_CABEV_TEACH_DONE, HY_CAB_TAKES, s_tmodel.d_self, 0);
-    teach_end();
+    ESP_LOGI(TAG, "cabinet: taught, %u takes, d_self %.3f trigger %u mg", (unsigned)s_tmodel.n, (double)s_tmodel.d_self,
+             (unsigned)s_tmodel.trig_mg);
+    tc_apply(hy_ct_saved(&s_st.ct, true), t, a);
 }
 
-static void teach_build(uint32_t t)
+static void teach_build(uint32_t t, hy_accel_t a)
 {
     int odd = -1;
     hy_err_t e = hy_cab_model_build(&s_tmodel, s_takes, &odd);
-    if (e == HY_OK) {
-        teach_save();
-        return;
-    }
-    if (odd >= 0 && odd < HY_CAB_TAKES && s_st.redos < TEACH_REDOS) {
-        s_st.redos++;
-        s_st.cur = (uint8_t)odd;
+    hy_ct_out_t o = hy_ct_build_result(&s_st.ct, t, e == HY_OK, odd, isfinite(s_tmodel.d_self));
+    if (o.has_ev && o.ev == HY_CABEV_TEACH_ODD) {
         ESP_LOGI(TAG, "cabinet: take %d differs (d_self %.3f), redo %u of %d", odd + 1, (double)s_tmodel.d_self,
-                 (unsigned)s_st.redos, TEACH_REDOS);
-        post_ev(HY_CABEV_TEACH_ODD, (uint8_t)(odd + 1), s_tmodel.d_self, 0);
-        teach_pause(t);
-        return;
-    }
-    if (odd >= 0 && isfinite(s_tmodel.d_self)) {
+                 (unsigned)s_st.ct.redos, HY_CT_REDOS);
+    } else if (o.accept_as_is) {
         ESP_LOGI(TAG, "cabinet: take %d still differs, accepted as is", odd + 1);
-        s_tmodel.valid = true;
-        teach_save();
-        return;
+    } else if (!o.save) {
+        ESP_LOGW(TAG, "cabinet: no usable template (%s, d_self %.3f)", hy_err_str(e), (double)s_tmodel.d_self);
     }
-    ESP_LOGW(TAG, "cabinet: no usable template (%s, d_self %.3f)", hy_err_str(e), (double)s_tmodel.d_self);
-    teach_fail(HY_CAB_FAIL_MODEL);
+    tc_apply(o, t, a);
 }
 
-static void teach_capture_done(hy_cap_res_t res, uint32_t t)
+/* The match of a finished check capture; ends the run */
+static void check_match(void)
 {
-    if (res == HY_CAP_TOO_SHORT || res == HY_CAP_TOO_LONG) {
-        ESP_LOGI(TAG, "cabinet: take %u %s, redo", (unsigned)s_st.cur + 1, res == HY_CAP_TOO_SHORT ? "too short" :
-                 "too long");
-        post_ev(res == HY_CAP_TOO_SHORT ? HY_CABEV_TOO_SMALL : HY_CABEV_TOO_LONG, (uint8_t)(s_st.cur + 1), 0, 0);
-        teach_pause(t);
-        return;
+    cab_cfg_t c;
+    cfg_get(&c);
+    float dist = INFINITY, thr = 0.0f;
+    bool match = false;
+    xSemaphoreTake(s_mu, portMAX_DELAY);
+    if (s_model.valid) {
+        thr = hy_cab_threshold(&s_model, c.sens);
+        match = hy_cab_match(&s_model, c.sens, &s_cap.seq, &dist);
     }
-    s_takes[s_st.cur] = s_cap.seq;
-    post_ev(HY_CABEV_TEACH_TAKE, (uint8_t)(s_st.cur + 1), 0, 0);
-    if (s_st.takes_n < HY_CAB_TAKES && s_st.cur == s_st.takes_n) {
-        s_st.takes_n++;
-    }
-    if (s_st.takes_n == HY_CAB_TAKES) {
-        teach_build(t);
-        return;
-    }
-    s_st.cur = s_st.takes_n;
-    teach_pause(t);
+    xSemaphoreGive(s_mu);
+    ESP_LOGI(TAG, "cabinet: check %u samples dist %.3f thr %.3f %s", (unsigned)s_cap.seq.n, (double)dist, (double)thr,
+             match ? "match" : "other");
+    hy_ct_out_t o = hy_ct_check_result(&s_st.ct, match);
+    post_ev(o.ev, o.take, dist, thr);
+    teach_end();
 }
 
-static void teach_begin(uint32_t t)
+/* Acts on what the sequencer returned, in the order documented in hy/cabteach.h */
+static void tc_apply(hy_ct_out_t o, uint32_t t, hy_accel_t a)
+{
+    if (o.has_ev) {
+        post_ev(o.ev, o.take, o.ev == HY_CABEV_TEACH_DONE ? s_tmodel.d_self : 0.0f, 0.0f);
+    }
+    if (o.reset_still) {
+        stream_reset();
+    }
+    if (o.start_capture) {
+        capture_begin(t, a, CAP_TEACH, s_st.trest);
+        if (!s_st.capturing) {
+            tc_apply(hy_ct_capture_failed(&s_st.ct, t), t, a);   /* the switch failed: try the take again */
+        }
+    }
+    if (o.store && s_st.ct.mode == HY_CT_TEACH) {
+        s_takes[o.slot] = s_cap.seq;
+    }
+    if (o.build) {
+        teach_build(t, a);
+    }
+    if (o.save) {
+        if (o.accept_as_is) {
+            s_tmodel.valid = true;
+        }
+        teach_save(t, a);
+    }
+    if (o.match) {
+        check_match();
+    }
+    if (o.end) {
+        teach_end();
+    }
+}
+
+static void teach_begin(uint32_t t, bool check)
 {
     capture_abort();
     s_st.tactive = true;
-    s_st.takes_n = 0;
-    s_st.cur = 0;
-    s_st.redos = 0;
-    s_st.tstate = T_STILL;
-    s_st.t0 = t;
     stream_reset();
-    ESP_LOGI(TAG, "cabinet: teach start");
-    post_ev(HY_CABEV_TEACH_STILL, 1, 0, 0);
+    ESP_LOGI(TAG, "cabinet: %s start", check ? "check" : "teach");
+    tc_apply(hy_ct_begin(&s_st.ct, check ? HY_CT_CHECK : HY_CT_TEACH, t), t, (hy_accel_t){0, 0, 0});
 }
 
-/* One stream sample while teaching and not capturing */
+/* One stream sample while teaching or checking and not capturing */
 static void teach_step(uint32_t t, hy_accel_t a, bool still, hy_accel_t rest, bool hit)
 {
-    switch (s_st.tstate) {
-    case T_PAUSE:
-        if ((int32_t)(t - s_st.t0) >= 0) {
-            s_st.tstate = T_STILL;
-            s_st.t0 = t;
-            stream_reset();
-            post_ev(HY_CABEV_TEACH_STILL, (uint8_t)(s_st.cur + 1), 0, 0);
-        }
-        break;
-    case T_STILL:
-        if (still) {
-            s_st.trest = rest;
-            s_st.tstate = T_GO;
-            s_st.t0 = t;
-            post_ev(HY_CABEV_TEACH_GO, (uint8_t)(s_st.cur + 1), 0, 0);   /* the UI plays the high tone */
-        } else if (t - s_st.t0 >= TEACH_STILL_MS) {
-            teach_fail(HY_CAB_FAIL_STILL);
-        }
-        break;
-    case T_GO:
-        if (hit) {
-            s_st.tstate = T_CAP;
-            capture_begin(t, a, CAP_TEACH, s_st.trest);
-            if (!s_st.capturing) {
-                teach_pause(t);   /* the switch failed: try the take again */
-            }
-        } else if (t - s_st.t0 >= TEACH_GO_MS) {
-            teach_fail(HY_CAB_FAIL_NO_MOVE);
-        }
-        break;
-    default:
-        break;
+    hy_ct_out_t o = hy_ct_step(&s_st.ct, t, still, hit);
+    if (o.take_rest) {
+        s_st.trest = rest;
     }
+    tc_apply(o, t, a);
 }
 
 void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool suspended)
@@ -773,7 +766,7 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
     bool live = cfg_get(&c);
     int64_t mono = mono_ms();
     portENTER_CRITICAL(&s_cmux);
-    bool teaching = s_teaching;
+    bool teaching = s_teaching, checking = s_checking;
     uint32_t tseq = s_teach_seq;
     bool test_end = s_testing && mono >= s_test_until_ms;
     if (test_end) {
@@ -785,20 +778,20 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
         ESP_LOGI(TAG, "cabinet: test off (time)");
         post_ev(HY_CABEV_TEST_END, 0, 0, 0);
     }
-    if (teaching && tseq != s_st.teach_seen) {
+    if ((teaching || checking) && tseq != s_st.teach_seen) {
         s_st.teach_seen = tseq;
-        teach_begin(t);
-    } else if (!teaching && s_st.tactive) {
+        teach_begin(t, checking);
+    } else if (!teaching && !checking && s_st.tactive) {
         s_st.tactive = false;   /* cancelled by the UI */
         capture_abort();
-        ESP_LOGI(TAG, "cabinet: teach cancelled");
+        ESP_LOGI(TAG, "cabinet: %s cancelled", s_st.ct.mode == HY_CT_CHECK ? "check" : "teach");
     }
     hy_cab_stream_plan_t plan = hy_cab_stream_plan(suspended, s_st.tactive, testing, live);
     if (!plan.run) {
         /* Suspended: the Undo toast shows, no trigger; the still tracker starts again when it closes */
         if (plan.abort_teach) {
             capture_abort();
-            teach_fail(HY_CAB_FAIL_ABORT);
+            teach_abort();
         }
         if (plan.abort_capture) {
             capture_abort();
@@ -819,7 +812,7 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
         stream_reset();
         if (s_st.cap_for == CAP_TEACH) {
             if (s_st.tactive) {
-                teach_capture_done(res, t);
+                tc_apply(hy_ct_capture_done(&s_st.ct, t, res), t, a);
             }
         } else {
             capture_done(res, s_st.cap_for == CAP_TEST);
@@ -879,7 +872,7 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
 bool hy_cab_int_rot_locked(void)
 {
     portENTER_CRITICAL(&s_cmux);
-    bool l = s_teaching || s_testing;
+    bool l = s_teaching || s_checking || s_testing;
     portEXIT_CRITICAL(&s_cmux);
     return l;
 }
@@ -948,6 +941,7 @@ esp_err_t hy_cab_run_teach(bool start)
     bool ok = !start || (!s_fault && on);
     if (ok && start) {
         s_teaching = true;
+        s_checking = false;
         s_teach_seq++;
         s_testing = false;
     } else if (!start) {
@@ -961,11 +955,30 @@ esp_err_t hy_cab_run_teach(bool start)
     return ESP_OK;
 }
 
+esp_err_t hy_cab_run_check(bool start)
+{
+    bool screen = hy_motion_int_on();   /* outside s_cmux: it takes the motion task's lock */
+    portENTER_CRITICAL(&s_cmux);
+    bool ok = !start || (!s_fault && !s_teaching && !s_testing && screen && s_taught);
+    if (ok && start) {
+        s_checking = true;
+        s_teach_seq++;
+    } else if (!start) {
+        s_checking = false;
+    }
+    portEXIT_CRITICAL(&s_cmux);
+    if (!ok) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    hy_motion_int_wake();
+    return ESP_OK;
+}
+
 esp_err_t hy_cab_run_test(bool on)
 {
     bool screen = hy_motion_int_on();   /* outside s_cmux: it takes the motion task's lock */
     portENTER_CRITICAL(&s_cmux);
-    bool ok = !on || (!s_fault && !s_teaching && screen && (s_cfg.mode == HY_CAB_ANY || s_taught));
+    bool ok = !on || (!s_fault && !s_teaching && !s_checking && screen && (s_cfg.mode == HY_CAB_ANY || s_taught));
     bool was = s_testing;
     if (ok) {
         s_testing = on;
@@ -1018,6 +1031,19 @@ esp_err_t hy_cab_run_forget(void)
     return e == HY_OK ? ESP_OK : ESP_FAIL;
 }
 
+esp_err_t hy_cab_run_forget_apply(void)
+{
+    esp_err_t e = hy_cab_run_forget();
+    if (hy_settings()->cab_mode == HY_CAB_TAUGHT) {
+        hy_settings_t n = *hy_settings();
+        n.cab_mode = HY_CAB_ANY;
+        esp_err_t se = hy_settings_update(&n);
+        hy_cab_run_config(hy_settings());
+        ESP_LOGI(TAG, "cabinet: trigger set back to any movement: %s", esp_err_to_name(se));
+    }
+    return e;
+}
+
 void hy_cab_run_status(hy_cab_status_t *out)
 {
     portENTER_CRITICAL(&s_cmux);
@@ -1028,6 +1054,7 @@ void hy_cab_run_status(hy_cab_status_t *out)
     out->live = live_locked(&s_cfg);
     out->testing = s_testing;
     out->teaching = s_teaching;
+    out->checking = s_checking;
     out->d_self = s_d_self;
     out->thr = s_thr;
     out->trig_mg = s_trig_mg;
@@ -1069,6 +1096,12 @@ void hy_cab_run_debug(const char *args)
     } else if (strncmp(args, "teach", 5) == 0) {
         what = "teach";
         err = hy_cab_run_teach(true);
+    } else if (strncmp(args, "check stop", 10) == 0) {
+        what = "check stop";
+        err = hy_cab_run_check(false);
+    } else if (strncmp(args, "check", 5) == 0) {
+        what = "check";
+        err = hy_cab_run_check(true);
     } else if (strncmp(args, "test on", 7) == 0) {
         what = "test on";
         err = hy_cab_run_test(true);
@@ -1079,7 +1112,7 @@ void hy_cab_run_debug(const char *args)
         what = "forget";
         err = hy_cab_run_forget();
     } else {
-        printf("usage: cab teach [stop] | cab test on|off | cab forget (teach and test need the screen on)\n");
+        printf("usage: cab teach [stop] | cab check [stop] | cab test on|off | cab forget (teach, check and test need the screen on)\n");
         return;
     }
     printf("cab %s: %s\n", what, esp_err_to_name(err));
@@ -1089,9 +1122,9 @@ void hy_cab_run_debug_stat(void)
 {
     hy_cab_status_t s;
     hy_cab_run_status(&s);
-    printf("cabstat: taught %d at %lld mode %s live %d testing %d teaching %d d_self %.3f thr %.3f trigger %u mg\n",
+    printf("cabstat: taught %d at %lld mode %s live %d testing %d teaching %d checking %d d_self %.3f thr %.3f trigger %u mg\n",
            s.taught, (long long)s.taught_at, s.mode == HY_CAB_TAUGHT ? "taught" : "any", s.live, s.testing,
-           s.teaching, (double)s.d_self, (double)s.thr, (unsigned)s.trig_mg);
+           s.teaching, s.checking, (double)s.d_self, (double)s.thr, (unsigned)s.trig_mg);
     printf("cabstat: wom irq %lu captures %lu matches %lu others %lu reactions %lu capture ms %lu test matches %lu "
            "test others %lu\n", (unsigned long)s.wom_irq, (unsigned long)s.captures, (unsigned long)s.matches,
            (unsigned long)s.others, (unsigned long)s.reactions, (unsigned long)s.capture_ms,

@@ -18,12 +18,14 @@ bool hy_audio_pending(void);
 /* false when init failed or the last play failed */
 bool hy_audio_ok(void);
 void hy_audio_set_volume(uint8_t pct);
-/* Non-blocking; a request while one plays is dropped. No-op when init failed. */
+/* Non-blocking; dropped while any sound plays or waits (the chime is never queued). No-op when init failed. */
 void hy_audio_chime(void);
-/* Short cues of the Cabinet open teach and test views: GO is one high tone (1319 Hz, 120 ms), TAKE two low ones
- * (880 Hz, 80 ms each). Played at the set volume whatever the Sound and Do not disturb switches say. Non-blocking;
- * dropped while another sound plays; no-op when init failed. */
-typedef enum { HY_TONE_GO = 0, HY_TONE_TAKE, HY_TONE_N } hy_tone_t;
+/* Short cues of the Cabinet open teach and test views, as note lists: GO one high tone (1319 Hz, 120 ms); TAKE two
+ * low tones (880 Hz, 80 ms each, 60 ms gap); REDO one long low tone (440 Hz, 400 ms); DONE rising 659, 880 and
+ * 1319 Hz (120 ms each, 40 ms gaps); FAIL falling 659 then 440 Hz (250 ms each, 60 ms gap). Played at the set
+ * volume whatever the Sound and Do not disturb switches say. Non-blocking; up to 4 requests wait, so two cues in a
+ * row both play, and a request beyond that is dropped; no-op when init failed. */
+typedef enum { HY_TONE_GO = 0, HY_TONE_TAKE, HY_TONE_REDO, HY_TONE_DONE, HY_TONE_FAIL, HY_TONE_N } hy_tone_t;
 void hy_audio_tone(hy_tone_t t);
 
 #ifdef __cplusplus

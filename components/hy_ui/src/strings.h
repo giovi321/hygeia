@@ -193,9 +193,10 @@
 #define HY_S_CAB_PAUSED    "Paused: sensor fault"   /* Cabinet open switched itself off until a setting changes */
 #define HY_S_CAB_TEACH_FIRST "Teach the movement first"
 #define HY_S_CAB_MINUS     "\xE2\x88\x92"            /* U+2212 */
-#define HY_S_CAB_T_BODY    "Do the movement 3 times. Start after the high tone. After the low tone, go back to where you started."
+#define HY_S_CAB_T_BODY    "Do the movement 5 times. After Start, put everything back and wait. High tone: do the movement. Two low tones: got it, go back and wait."
 #define HY_S_CAB_T_START   "Start"
-#define HY_S_CAB_T_OF      "%u of 3"                /* take number */
+#define HY_S_CAB_T_OF      "%u of %u"               /* take number, takes */
+#define HY_S_CAB_T_READY   "Get ready"
 #define HY_S_CAB_T_STILL   "Hold still"
 #define HY_S_CAB_T_NOW     "Now"
 #define HY_S_CAB_T_GOT     "Got it"
@@ -204,7 +205,17 @@
 #define HY_S_CAB_T_ODD     "That one looked different, do it again"
 #define HY_S_CAB_T_NOMOVE  "No movement, teaching stopped"
 #define HY_S_CAB_T_STOPPED "Teaching stopped"
-#define HY_S_CAB_T_SAVED   "Saved"
+#define HY_S_CAB_D_TITLE   "Movement saved"       /* the teach view after the last take */
+#define HY_S_CAB_D_ASK     "Test it now?"
+#define HY_S_CAB_D_TEST    "Test"
+#define HY_S_CAB_D_DONE    "Done"
+#define HY_S_CAB_C_BODY    "Put everything back and wait. After the high tone, do the movement once."
+#define HY_S_CAB_C_OK      "Movement recognised"
+#define HY_S_CAB_C_MISS    "Not recognised. Teach the movement again?"
+#define HY_S_CAB_C_NOMOVE  "No movement seen. Teach the movement again?"
+#define HY_S_CAB_C_AGAIN   "Teach again"
+#define HY_S_CAB_C_KEEP    "Keep"
+#define HY_S_CAB_C_REFUSED "The test cannot start now"
 #define HY_S_CAB_X_HINT    "Do the movement."
 #define HY_S_CAB_X_ENDED   "Test ended. Open Test again to run it."
 #define HY_S_CAB_X_MATCHES "Matches: %u"

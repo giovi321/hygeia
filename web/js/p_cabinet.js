@@ -3,6 +3,8 @@
 // state, runs the test with live counters and downloads the taught and recent samples.
 (function () {
   var POLL_MS = 3000;
+  var TEACHING_MSG = "The movement is being taught on the device";
+  var CHECKING_MSG = "The movement is being tested on the device";
 
   function sensText(n) { return n + " of 5"; }
   function winText(m) { return m === 0 ? "Overdue only" : m + " min"; }
@@ -134,14 +136,15 @@
       var c = st.counts;
       countLine.textContent = "Since start: " + c.wom + " motion interrupts, " + c.captures + " captures, " + c.matches +
         " matches, " + c.others + " other, " + c.reactions + " reminders";
-      forgetBtn.disabled = !st.taught;
-      startBtn.disabled = busy || st.testing || st.teaching;
+      startBtn.disabled = busy || st.testing || st.teaching || st.checking;
       stopBtn.disabled = busy || !st.testing;
       showCounters(st.test);
-      if (st.teaching) { testMsg.textContent = "The movement is being taught on the device"; }
-      else if (!st.testing && testMsg.textContent === "The movement is being taught on the device") { testMsg.textContent = ""; }
+      if (st.teaching) { testMsg.textContent = TEACHING_MSG; }
+      else if (st.checking) { testMsg.textContent = CHECKING_MSG; }
+      else if (!st.testing && (testMsg.textContent === TEACHING_MSG || testMsg.textContent === CHECKING_MSG)) { testMsg.textContent = ""; }
+      forgetBtn.disabled = !st.taught || st.teaching || st.checking;
       clearTimeout(timer);
-      if (st.testing) { timer = setTimeout(load, POLL_MS); }   // the test ends by itself after 10 minutes or when the screen goes off
+      if (st.testing || st.teaching || st.checking) { timer = setTimeout(load, POLL_MS); }   // the test ends by itself after 10 minutes or when the screen goes off
     }
 
     // ---- actions
