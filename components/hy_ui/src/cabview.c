@@ -609,7 +609,10 @@ void cab_event(const hy_cabev_t *e)
         test_event(e);
         break;
     case HY_CABEV_TEST_END:
-        s_x_on = false;   /* time, screen off or Forget: the screen hold ends with the test */
+        if (s_x_on) {   /* time, screen off, Forget or Stop: the screen hold ends with the test */
+            s_x_on = false;
+            lv_label_set_text(s_x_hint, HY_S_CAB_X_ENDED);
+        }
         break;
     case HY_CABEV_FAULT:
         if (s_x_on) {

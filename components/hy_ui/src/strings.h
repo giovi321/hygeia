@@ -206,6 +206,7 @@
 #define HY_S_CAB_T_STOPPED "Teaching stopped"
 #define HY_S_CAB_T_SAVED   "Saved"
 #define HY_S_CAB_X_HINT    "Do the movement."
+#define HY_S_CAB_X_ENDED   "Test ended. Open Test again to run it."
 #define HY_S_CAB_X_MATCHES "Matches: %u"
 #define HY_S_CAB_X_OTHER   "Other movements: %u"
 #define HY_S_CAB_X_ANY     "Movements: %u"

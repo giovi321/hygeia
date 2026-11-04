@@ -981,6 +981,9 @@ esp_err_t hy_cab_run_test(bool on)
     }
     if (was != on) {
         ESP_LOGI(TAG, "cabinet: test %s", on ? "on" : "off");
+        if (was && !on) {
+            post_ev(HY_CABEV_TEST_END, 0, 0, 0);   /* a web or console Stop updates the device view */
+        }
     }
     hy_motion_int_wake();
     return ESP_OK;
