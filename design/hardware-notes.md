@@ -149,6 +149,7 @@ Gyro measured (`imu cap`, 11 runs, board still):
 
 - After `hy_board_imu_capture_on` the data registers keep their last values (not zero) until the first new sample, 100 to 140 ms later. The `imu cap` line therefore reports the first new sample (the first read that differs from the registers read right after the switch) and the settle time (end of the last sample with an accel step of 200 mg or more or a gyro over 10 dps)
 - The first new samples are disturbed on accel and gyro alike (accel up to 1.7 g, gyro up to 108 dps on a still board); the last disturbed sample was at 180 to 201 ms, settled from 220 ms on every run. `HY_CAB_GYRO_START_MS` is 220 (11 runs, rounded up to 20 ms), and the accel is held over the same time
+- Re-measured on firmware v0.4.1-28-g8b697c9 (debug build), 2026-11-04, 10 runs of `imu cap 1`: first new sample at 119 to 141 ms, settled at 199 to 220 ms by the firmware's rule (6 runs at 220 ms, 4 at 199 to 200 ms). The 220 ms mask covers every run, with no margin on 6 of them
 - Still noise over 5 s after settling: largest absolute value 1.2, 2.3 and 1.0 dps (x, y, z), mean offset 0.8, -2.0 and -0.5 dps
 - The sign of z for a clockwise turn is not measured yet (needs the board turned by hand)
 
