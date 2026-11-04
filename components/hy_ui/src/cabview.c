@@ -573,11 +573,6 @@ void cab_hide(hy_view_t next)
     }
 }
 
-bool cab_running(void)
-{
-    return s_t_running || s_x_on;
-}
-
 void cab_values_refresh(void)
 {
     switch (ui_current_view()) {

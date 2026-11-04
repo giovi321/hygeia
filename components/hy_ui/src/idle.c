@@ -18,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "hy/board.h"
+#include "hy/cabinet_run.h"
 #include "hy/clock.h"
 #include "hy/occ.h"
 #include "hy/power_run.h"
@@ -307,16 +308,19 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
     }
 }
 
-/* A running Cabinet open teach or test keeps the screen on: teaching needs it readable through the three takes
-   and a test runs up to 10 minutes. The normal timers resume when it ends or the view closes. */
-static bool cab_view_open(void)
+/* A running Cabinet open teach or test keeps the screen on, whatever started it (the device views, the web UI or
+   the console): teaching needs it readable through the three takes and a test runs up to 10 minutes. The runner's
+   state decides, so the hold ends with every way a run ends. */
+static bool cab_run_active(void)
 {
-    return cab_running();
+    hy_cab_status_t s;
+    hy_cab_run_status(&s);
+    return s.testing || s.teaching;
 }
 
 static bool hold_now(void)
 {
-    return poweroff_visible() || poweroff_countdown_visible() || pair_visible() || cab_view_open() ||
+    return poweroff_visible() || poweroff_countdown_visible() || pair_visible() || cab_run_active() ||
            (due_visible() && s_scr.usb);
 }
 
@@ -432,7 +436,7 @@ void screen_touch_wake(void)
 bool idle_double_tap_required(void)
 {
     return !hy_settings()->wake_single_tap && !poweroff_visible() && !poweroff_countdown_visible() && !pair_visible() &&
-           !cab_view_open();
+           !cab_run_active();
 }
 
 /* The power task judged a double tap while the screen was OFF: both taps are over and LVGL never saw them, so no

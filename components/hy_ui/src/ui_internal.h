@@ -310,7 +310,6 @@ void upd_view_debug(const char *arg);            /* "checking|latest|available|d
  * cab_event gets the runner's teach and test events from cabinet_ui_event (LVGL task). */
 void        cab_create(void);
 void        cab_show(hy_view_t v);               /* one of the four views became the top: redraw it, start test mode */
-bool        cab_running(void);                   /* a teach or a test is running: the screen stays on */
 void        cab_hide(hy_view_t next);            /* the teach or test view left the screen: ends teach or test mode */
 void        cab_values_refresh(void);            /* a setting changed elsewhere (web UI): redraw the shown cabinet page */
 void        cab_event(const hy_cabev_t *e);      /* teach and test events: the tones, the status line, the counters */

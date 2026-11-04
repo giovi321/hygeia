@@ -51,7 +51,7 @@ The page sets [Cabinet open](../cabinet-open/) and shows its state. It has three
 
 - Reminder: Cabinet open on or off, Trigger (Any movement or Taught movement), Sensitivity ("1 of 5" to "5 of 5"), "Remind if due within" ("Overdue only" or 5 to 120 min), Chime and Light the screen. Taught movement can be chosen only once a movement is taught
 - Movement: "Not taught" or when the movement was taught, the matching limit, counters since the start (motion interrupts, captures, matches, other movements, reminders), Download samples and Forget the movement. The movement itself is taught on the device
-- Test: Start and Stop. The counters follow the device live, with the distance and limit of the last Taught capture. The screen of the device has to be on
+- Test: Start and Stop. The counters follow the device live, with the distance and limit of the last Taught capture. The screen of the device has to be on to start, and it stays on while the test runs
 
 The page uses `GET /api/cabinet`, `POST /api/cabinet/test`, `GET /api/cabinet/samples.csv` and `DELETE /api/cabinet/teach`, and the `cabinet` object of `GET /api/settings` and `PUT /api/settings` (see the [REST API](../../reference/rest-api/#routes)). Forget is refused while the movement is being taught on the device.
 
