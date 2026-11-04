@@ -271,8 +271,8 @@ static void test_cap_feed_held(void)
     TEST_ASSERT_EQUAL_INT16(1700, c.seq.s[held + 1].a[0]);
 }
 
-/* A still device with a disturbed start ends in DONE only from the real data, and a disturbance inside the span
-   never extends the movement */
+/* A still device with a disturbed start: the disturbance inside the span never extends the movement; an all still
+   feed is too short */
 static void test_cap_held_disturbance_does_not_move(void)
 {
     hy_cab_cap_t c;
@@ -287,10 +287,52 @@ static void test_cap_held_disturbance_does_not_move(void)
         }
         r = hy_cab_cap_feed_held(&c, i * CAB_SYN_STEP_MS, &s, rest);
     }
-    TEST_ASSERT_TRUE(r != HY_CAP_MORE);
+    TEST_ASSERT_EQUAL_INT(HY_CAP_TOO_SHORT, r);
     for (uint16_t i = 0; i < c.seq.n; i++) {
         TEST_ASSERT_EQUAL_INT16(0, c.seq.s[i].a[0]);
     }
+}
+
+/* One capture as the firmware feeds it: start at the trigger read, the trigger sample as sample 0 (accel only), then
+   the sensor's samples with the start-up disturbance, each held at the trigger sample through the start span. The
+   stream path and the wake-on-motion path both run this sequence. */
+static hy_cab_cap_t held_capture(const cab_syn_t *p, uint32_t trig_i, uint32_t t0, hy_accel_t trig)
+{
+    hy_cab_cap_t c;
+    hy_cab_cap_start(&c, p->rest, true, t0);
+    hy_imu6_t first = {{trig.x, trig.y, trig.z}, {0, 0, 0}};
+    hy_cab_cap_feed(&c, t0, &first);
+    hy_cap_res_t r = HY_CAP_MORE;
+    for (uint32_t i = 1; i < 150 && r == HY_CAP_MORE; i++) {
+        hy_imu6_t s = cab_syn_sample(p, trig_i + i);
+        if (i * CAB_SYN_STEP_MS < 200) {   /* disturbed start */
+            s.a[0] = (int16_t)(s.a[0] + 1500);
+            s.g[1] = 1000;
+        }
+        r = hy_cab_cap_feed_held(&c, t0 + i * CAB_SYN_STEP_MS, &s, trig);
+    }
+    return c;
+}
+
+/* The same movement gives the same held prefix and features whichever path captures it and whenever its trigger
+   read happens in the clock */
+static void test_cap_both_paths_same_prefix(void)
+{
+    cab_syn_t p = noisy(CAB_SYN_DOOR_OPEN, 11);
+    p.start_ms = 100;
+    uint32_t k = 6;   /* the trigger sample, mid swing */
+    hy_imu6_t t = cab_syn_sample(&p, k);
+    hy_accel_t trig = {t.a[0], t.a[1], t.a[2]};
+    hy_cab_cap_t stream = held_capture(&p, k, 1000, trig);
+    hy_cab_cap_t wom = held_capture(&p, k, 987654, trig);
+    TEST_ASSERT_EQUAL_UINT16(stream.seq.n, wom.seq.n);
+    TEST_ASSERT_EQUAL_MEMORY(stream.seq.s, wom.seq.s, sizeof(hy_imu6_t) * stream.seq.n);
+    for (uint32_t i = 0; i < HY_CAB_GYRO_START_MS / CAB_SYN_STEP_MS; i++) {
+        TEST_ASSERT_EQUAL_INT16(trig.x, stream.seq.s[i].a[0]);
+        TEST_ASSERT_EQUAL_INT16(trig.z, wom.seq.s[i].a[2]);
+    }
+    TEST_ASSERT_TRUE(stream.seq.n > HY_CAB_GYRO_START_MS / CAB_SYN_STEP_MS);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, hy_cab_dist(&stream.seq, &wom.seq));
 }
 
 static void test_cap_too_short(void)
@@ -399,6 +441,7 @@ int main(void)
     RUN_TEST(test_cap_door_done_with_lead);
     RUN_TEST(test_cap_feed_held);
     RUN_TEST(test_cap_held_disturbance_does_not_move);
+    RUN_TEST(test_cap_both_paths_same_prefix);
     RUN_TEST(test_cap_too_short);
     RUN_TEST(test_cap_too_long);
     RUN_TEST(test_cap_new_pose_done);

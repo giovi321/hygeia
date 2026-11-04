@@ -417,13 +417,24 @@ static bool sleep_still_wait(void)
 static void sleep_capture(void)
 {
     s_sl.need_still = true;   /* whatever happens below, the next arm waits for stillness first */
+    /* The trigger sample: one reading from the armed low-power stream, taken before the switch. It starts the
+       capture, is its sample 0 and is the value held through the start span, as on the stream path. The rest
+       vector stands in when the read fails. */
+    int16_t t[3];
+    hy_accel_t trig = s_sl.rest;
+    if (hy_board_imu_read(t) == ESP_OK) {
+        trig = (hy_accel_t){t[0], t[1], t[2]};
+    }
+    uint32_t t0 = (uint32_t)mono_ms();
     esp_err_t err = hy_board_imu_capture_on();
     io_result(err, "capture on");
     if (err != ESP_OK) {
         s_sl.imu_on = false;   /* left powered down */
         return;
     }
-    hy_cab_cap_start(&s_cap, s_sl.rest, true, (uint32_t)mono_ms());
+    hy_cab_cap_start(&s_cap, s_sl.rest, true, t0);
+    hy_imu6_t first = {{trig.x, trig.y, trig.z}, {0, 0, 0}};   /* accel only; the gyro start is masked */
+    hy_cab_cap_feed(&s_cap, t0, &first);
     TickType_t last = xTaskGetTickCount();
     hy_cap_res_t res = HY_CAP_MORE;
     while (res == HY_CAP_MORE) {
@@ -442,7 +453,7 @@ static void sleep_capture(void)
             continue;
         }
         hy_imu6_t x = {{a[0], a[1], a[2]}, {g[0], g[1], g[2]}};
-        res = hy_cab_cap_feed_held(&s_cap, (uint32_t)mono_ms(), &x, s_sl.rest);   /* the last good reading before the switch */
+        res = hy_cab_cap_feed_held(&s_cap, (uint32_t)mono_ms(), &x, trig);   /* the trigger sample, held through the start span */
     }
     capture_done(res, false);
 }
