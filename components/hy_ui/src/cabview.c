@@ -613,6 +613,9 @@ void cab_event(const hy_cabev_t *e)
     case HY_CABEV_TRIGGER:
         test_event(e);
         break;
+    case HY_CABEV_TEST_END:
+        s_x_on = false;   /* time, screen off or Forget: the screen hold ends with the test */
+        break;
     case HY_CABEV_FAULT:
         if (s_x_on) {
             s_x_on = false;   /* the runner ended the test */

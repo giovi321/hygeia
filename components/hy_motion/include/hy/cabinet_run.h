@@ -25,7 +25,8 @@ extern "C" {
 
 typedef enum { HY_CABEV_REACT = 0, HY_CABEV_MATCH, HY_CABEV_OTHER, HY_CABEV_TOO_SMALL, HY_CABEV_TOO_LONG,
                HY_CABEV_TRIGGER, HY_CABEV_TEACH_STILL, HY_CABEV_TEACH_GO, HY_CABEV_TEACH_TAKE, HY_CABEV_TEACH_ODD,
-               HY_CABEV_TEACH_DONE, HY_CABEV_TEACH_FAIL, HY_CABEV_FAULT } hy_cabev_kind_t;
+               HY_CABEV_TEACH_DONE, HY_CABEV_TEACH_FAIL, HY_CABEV_FAULT,
+               HY_CABEV_TEST_END /* the runner ended a test: time, screen off or Forget */ } hy_cabev_kind_t;
 /* Why a teach failed: the take field of a HY_CABEV_TEACH_FAIL event */
 typedef enum { HY_CAB_FAIL_STILL = 0,   /* not still for 1 s within 10 s ("Hold still") */
                HY_CAB_FAIL_NO_MOVE,     /* no movement within 60 s after GO */

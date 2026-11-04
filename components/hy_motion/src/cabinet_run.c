@@ -422,10 +422,13 @@ static void sleep_capture(void)
        vector stands in when the read fails. */
     int16_t t[3];
     hy_accel_t trig = s_sl.rest;
-    if (hy_board_imu_read(t) == ESP_OK) {
+    bool trig_ok = hy_board_imu_read(t) == ESP_OK;
+    if (trig_ok) {
         trig = (hy_accel_t){t[0], t[1], t[2]};
     }
     uint32_t t0 = (uint32_t)mono_ms();
+    ESP_LOGI(TAG, "cabinet: trigger read %s, minus rest %d %d %d mg", trig_ok ? "ok" : "failed, rest used",
+             trig.x - s_sl.rest.x, trig.y - s_sl.rest.y, trig.z - s_sl.rest.z);
     esp_err_t err = hy_board_imu_capture_on();
     io_result(err, "capture on");
     if (err != ESP_OK) {
@@ -583,6 +586,7 @@ void hy_cab_int_screen_off(void)
     }
     if (testing) {
         ESP_LOGI(TAG, "cabinet: test off (screen off)");
+        post_ev(HY_CABEV_TEST_END, 0, 0, 0);
     }
     s_st.capturing = false;   /* the motion task powers the IMU down or the screen-off path takes it over */
     s_st.repower = false;
@@ -779,6 +783,7 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
     portEXIT_CRITICAL(&s_cmux);
     if (test_end) {
         ESP_LOGI(TAG, "cabinet: test off (time)");
+        post_ev(HY_CABEV_TEST_END, 0, 0, 0);
     }
     if (teaching && tseq != s_st.teach_seen) {
         s_st.teach_seen = tseq;
@@ -996,10 +1001,15 @@ esp_err_t hy_cab_run_forget(void)
     s_trig_mg = 0;
     s_d_self = 0;
     s_thr = 0;
+    bool test_off = false;
     if (s_cfg.mode == HY_CAB_TAUGHT) {
+        test_off = s_testing;
         s_testing = false;
     }
     portEXIT_CRITICAL(&s_cmux);
+    if (test_off) {
+        post_ev(HY_CABEV_TEST_END, 0, 0, 0);
+    }
     ESP_LOGI(TAG, "cabinet: template forgotten (%s)", hy_err_str(e));
     hy_motion_int_wake();
     return e == HY_OK ? ESP_OK : ESP_FAIL;

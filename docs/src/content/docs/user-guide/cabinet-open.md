@@ -54,7 +54,7 @@ Settings › Cabinet open › Test, or Start under Test in the web UI, checks th
 - With Taught movement: "Matches" and "Other movements". On the device a match plays the low tone
 - With Any movement: "Movements"
 
-The device stays silent otherwise and does not remind during the test. The screen stays on while the test runs (it neither dims nor turns off, also on battery). The test ends when you leave the page, when the screen is turned off (for example with the PWR key) or after 10 minutes, and the normal screen timers then resume. The web UI shows the same counters live, and for each Taught capture its distance from the taught movement and the limit.
+The device stays silent otherwise and does not remind during the test. The screen stays on while the test runs (it neither dims nor turns off, also on battery). The test ends when you leave the page, when the screen is turned off (for example with the PWR key), when the taught movement is forgotten or after 10 minutes, and the normal screen timers then resume. The web UI shows the same counters live, and for each Taught capture its distance from the taught movement and the limit.
 
 A good taught movement gives a match for nearly every opening and few matches for other things, such as closing the door, knocking or tapping the screen. If other movements match too often, lower the sensitivity or teach again.
 
