@@ -166,4 +166,10 @@ Measured on the board on firmware v0.4.0-16-ga1298af (debug build), 2026-11-02, 
 - Certificate bundle (common set): 16742 bytes of flash in the release image
 - Upload of the same image through `POST /api/ota`: 2408592 bytes written to the other slot in 25.6 s, worker stack 3392 bytes left, restart, confirmed 40 ms after the first scheduler pass; a text file answers 422 `not_hygeia` and an image cut at 600000 bytes answers 422 `corrupt`, both with the running slot unchanged
 
-Not measured yet, because the network had no route to GitHub: the redirect host of a release asset and both TLS handshakes, the download duration, and the internal heap minimum and stack high-water mark during a full download and checksum
+Measured on firmware v0.4.0-17-gc47d4da (debug build), 2026-11-04, on a Wi-Fi network with internet access (2.4 GHz, WPA2-PSK, RSSI -74 dBm), installing release v0.4.0 with the checksum check forced to fail so the device stays up:
+
+- Check against GitHub: 2.6 to 2.8 s; internal heap minimum 81611 to 81623 bytes from about 106000 free before (about 24 KB in use at the peak); update task stack 3776 to 3780 bytes of 8192 left unused
+- Release asset: two redirects, both to `release-assets.githubusercontent.com`
+- Download of `hygeia.bin` (2227888 bytes) into the other slot: about 29 s; internal heap minimum 80447 bytes from 106291 free at idle (about 26 KB in use at the peak); update task stack 3552 bytes of 8192 left unused; a checksum mismatch is reported as `checksum` with the running slot unchanged
+- `HY_UPD_MIN_INTERNAL` is set from this: 35 KB floor plus the 26 KB download cost plus 1 KB rounding, 63488 bytes
+- A full install of v0.4.0 from the web UI on a phone restarted the device on v0.4.0 with medicines and settings unchanged, and a check afterwards reported up to date
