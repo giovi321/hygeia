@@ -129,7 +129,7 @@ Thresholds that worked on the panel (hands-on session 2026-10-29, build 5867131)
 
 ## Motion sensor
 
-QMI8658A at 0x6b, driver `components/hy_board/src/qmi8658.c`. Sources: QMI8658A datasheet Rev A (QST, 2022), section and table numbers below, and the SensorLib QMI8658 driver (`SensorQMI8658.hpp`, master, read 2026-11-03). Nothing in this section was measured on the board yet, unless it says so.
+QMI8658A at 0x6b, driver `components/hy_board/src/qmi8658.c`. Sources: QMI8658A datasheet Rev A (QST, 2022), section and table numbers below, and the SensorLib QMI8658 driver (`SensorQMI8658.hpp`, master, read 2026-11-03). Values marked as measured come from the board on firmware v0.4.1-24-g7ce90fb (debug build), 2026-11-04, device lying flat on an office desk, on USB; everything else is from the sources.
 
 Modes:
 
@@ -141,9 +141,16 @@ Wake-on-motion rule: the chip compares the absolute slope between successive sam
 
 Register sequence to arm (DS 12.5 figure 25): CTRL7 0; CTRL2 0x2D; CAL1_L 0x0B = threshold in mg (1 to 255; 0 disables WoM); CAL1_H 0x0C = pin select (bit 6: 0 INT1, 1 INT2), initial level 0 (bit 7), blanking 4 samples (bits 5..0; 190 ms at 21 Hz, past the 3 / ODR settling); CTRL9 command 0x08 with the STATUSINT 0x2D bit 7 handshake (CTRL8 bit 7 = 1, so a command never pulses INT1); CTRL1 output enable for the chosen INT pin (bit 3 INT1, bit 4 INT2, push-pull); CTRL7 0x01. Exit (DS 12.6): CTRL7 0, CAL1_L 0, command 0x08, outputs high-Z. Every mode change goes through that exit. Interrupt behaviour per DS 12.4: the line toggles on each event and stays; reading STATUS1 0x2F (bit 2) clears the WoM bit and returns the line to its initial level. The firmware arms the light-sleep GPIO wake on the level opposite the one read at arming.
 
-Interrupt pin: selectable at run time (`imu pin [1|2 [17|21]]` on the debug console). Default INT1 on GPIO 17, INT2 on GPIO 21 as the alternative. The wiring of the chip's INT pins to the ESP32-S3 is not in the BSP pin header or any other source found; unverified on the board.
+Interrupt pin: selectable at run time (`imu pin [1|2 [17|21]]` on the debug console). Default INT1 on GPIO 17, INT2 on GPIO 21 as the alternative. Measured: the chip's INT1 is wired to GPIO 17 (`imu wom 1`: GPIO 17 follows the chip's INT1 bit in STATUSINT, GPIO 21 stays low). The line toggles on each event and holds the new level: over 30 s at 1 mg, 655 level changes by 10 ms polling and 655 interrupt edges, one change every 40 to 50 ms (each 21 Hz sample over the threshold), STATUS1 0x04 at the end. Registers measured: powered down CTRL1 0x41, CTRL7 0x00, CTRL8 0x80; accel only CTRL1 0x40, CTRL2 0x26, CTRL7 0x01; armed CTRL1 0x48, CTRL2 0x2d, CTRL7 0x01.
 
-Gyro: range +-1024 dps, values in deci-dps (raw x 10 / 32). Turn-on per datasheet: t1 typical 150 ms plus 3 / ODR (27 ms at 112.1 Hz), about 177 ms (DS table 8, 7.3). The firmware masks the gyro for the first 180 ms of every sequence (`HY_CAB_GYRO_START_MS`), teach and live alike. The turn-on time on the board, the still noise and the sign of z for a clockwise turn are to be measured.
+Gyro: range +-1024 dps, values in deci-dps (raw x 10 / 32). Turn-on per datasheet: t1 typical 150 ms plus 3 / ODR (27 ms at 112.1 Hz), about 177 ms (DS table 8, 7.3). The firmware masks the gyro for the first 180 ms of every sequence (`HY_CAB_GYRO_START_MS`), teach and live alike.
+
+Gyro measured (`imu cap`, 11 runs, board still):
+
+- After `hy_board_imu_capture_on` the data registers keep their last values (not zero) until the first new sample, 100 to 140 ms later. The `imu cap` line `first gyro value off zero` therefore reads 140 ms on the first run after power-up and 20 ms on every later run; read the samples instead
+- The first new samples are disturbed on accel and gyro alike (accel up to 1.7 g, gyro up to 108 dps on a still board); the last disturbed sample was at 180 to 201 ms, settled from 220 ms on every run. This implies `HY_CAB_GYRO_START_MS` 220, and an accel mask over the same time
+- Still noise over 5 s after settling: largest absolute value 1.2, 2.3 and 1.0 dps (x, y, z), mean offset 0.8, -2.0 and -0.5 dps
+- The sign of z for a clockwise turn is not measured yet (needs the board turned by hand)
 
 Any movement trigger counts on the motion recordings (`host_tests/data/motion`, accel only, `test_cab_rec.c`), slope per 48 ms sensor sample, 2 s holdoff:
 
@@ -165,7 +172,8 @@ Any movement trigger counts on the motion recordings (`host_tests/data/motion`, 
 
 - The largest slope in a still part of any recording is 31 mg (tap_desk), under the most sensitive step, 34 mg
 - A synthetic door swing peaks at 48 mg slope when it starts smoothly and at 126 mg when it starts with a jump. The default, 40 mg, catches the smooth swing down to 0.83 of its nominal speed. Catching that door and ignoring table_knock (peak 90) cannot both hold, so the default favours the door: at the default table_knock gives 1 trigger and flat_spin 13. The trigger only wakes the CPU; the device reacts only with a due dose and at most once every 2 minutes
-- Wake-on-motion noise in low-power mode and the slope of a real cabinet door are to be measured
+- Wake-on-motion noise measured in low-power mode (`imu wom`, 30 s each, device still on a desk): 655 events at 1 mg, 534 at 4 mg, 225 at 8 mg, 10 at 16 mg, 0 at 40 mg. Live at 40 mg over about 20 minutes in an office with people at the desk: 7 interrupts. The 50 Hz stream on the same desk: largest slope between successive samples 8 mg over 60 s
+- The slope of a real cabinet door is to be measured
 
 Taught movement matcher margins at sensitivity 3 (`test_cab_rec.c`, `test_cabmatch.c`):
 
@@ -179,6 +187,8 @@ Taught movement matcher margins at sensitivity 3 (`test_cab_rec.c`, `test_cabmat
 - Threshold bounds 0.25 and 2.0; the upper bound sits a third below the nearest recording negative. The putdown_pickup model rests on 3 takes from one recording with rests padded in the replay; no held-out real positive exists yet
 - Capture: from the trigger until 400 ms of stillness (accel steps within 40 mg around the current pose, gyro under 10 dps), 220 ms minimum, 4 s maximum. The recorded taps capture as 20 to 60 ms, so a tap cannot be taught
 - rotate_cycle and tap_double give fewer than 3 captures and have no model
+
+Measured on the board: motion task stack free minimum 3736 bytes of 6144 (debug build, after reactions, test mode and a teach); the release build was not measured. DIRAM used: 114977 bytes (debug), 113921 bytes (release). At boot the motion task arms wake on motion for about 100 ms before the screen comes on (`cabinet: armed any 40 mg`, then `motion: on`).
 
 ## Splash
 
