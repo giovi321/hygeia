@@ -70,6 +70,11 @@ void    hy_board_debug_madctl(uint8_t madctl, bool swap, bool mx, bool my, int16
 /* Called from the touch interrupt (ISR context) on every touch INT edge, beside the LVGL adapter's own
    handling; NULL clears. fn must be ISR safe. */
 void      hy_board_set_touch_isr_hook(void (*fn)(void));
+#if CONFIG_HY_DEBUG_CONSOLE
+/* `touch trace`: esp_timer time of the first touch INT since the previous call (0 when none), then cleared. The
+   input layer calls it at every read that sees no finger, so a stale release edge never counts as a press. */
+int64_t   hy_board_touch_isr_take(void);
+#endif
 /* User key (GPIO 18, input with pull-up, falling edge): fn is called from its ISR; NULL clears. */
 void      hy_board_set_user_key_isr_hook(void (*fn)(void));
 /* Light-sleep GPIO wakes, low level: touch INT (GPIO 11), RTC INT (GPIO 13), user key (GPIO 18). on: each pin that

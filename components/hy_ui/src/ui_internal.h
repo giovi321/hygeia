@@ -152,6 +152,7 @@ void      ui_scroller(lv_obj_t *o);              /* vertical list with glide and
 void      input_debug_stroke(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms); /* press + release */
 void      input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t ms, bool consume);
 void      input_debug_hold(int16_t x0, int16_t y0);   /* press only */
+void      input_debug_trace(bool on);                 /* per-stroke `trace` log line (console: touch trace on|off) */
 void      input_debug_release(int16_t x1, int16_t y1); /* release a held stroke */
 #endif
 

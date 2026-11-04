@@ -221,9 +221,9 @@ Gestures:
 | Gesture | Effect |
 |---|---|
 | Swipe left / right | pager: Home ⇄ Overview ⇄ History |
-| Pull down from top edge | Quick settings, from any screen except the due card |
-| Swipe up from bottom edge | back to Home, from any screen; with unsaved changes on a medicine form it stays on the form |
-| Swipe right from left edge | close a detail page; on the medicine form, step back one page or ask "Discard changes?" |
+| Pull down from near the top edge | Quick settings, from any screen except the due card |
+| Swipe up from near the bottom edge | back to Home, from any screen; with unsaved changes on a medicine form it stays on the form |
+| Swipe right from near the left edge | close a detail page; on the medicine form, step back one page or ask "Discard changes?" |
 | Vertical swipe in the grid | scroll medicines |
 | Tap tile | log as taken, show undo toast (5 s countdown) |
 | Long press tile | medicine detail |
@@ -238,6 +238,8 @@ Gestures:
 | Shake the device while the Undo toast shows | undo, the same as tapping Undo |
 
 Swipe directions and edges are those of the screen as the person sees it: they turn with the screen.
+
+Edge zones: two zones, because with the device in a corner or a case the finger cannot always start off the glass. The hard zone (40 px, 16 px at the bottom over scrolling content) is where no widget can take a stroke, so an edge gesture from the border always works; sliders still take it. The edge gesture zone (provisional 80 px, set from the board measurement) is where hy_gesture_classify turns a swipe toward the inside into EDGE_RIGHT, EDGE_DOWN or EDGE_UP when no widget took it. Lists, the keyboard, rollers and text fields consume their strokes from 40 px inward, so over them the edge gesture needs the hard zone. A tap in either zone stays a tap. A stroke that stopped a gliding list is never an edge gesture. Debug builds have `touch trace on|off` for the measurement (design/hardware-notes.md "Gestures").
 
 Screens: Home (grid of rings, "+" tile opens the add-medicine form), Quick settings (Wi-Fi client / AP / off, sound, do-not-disturb, brightness, battery estimate, Settings, web UI QR), Overview (today count ring and 24 h timeline), History (7-day grid per medicine, double tap for 30 days), Medicine detail (name, dose, schedule, pill count, recent log, log with note, log at an earlier time, 30-day chart, Edit and Archive at the bottom), Add or edit medicine (name, dose, code, colour, schedule), Archive confirm, Dose due (full screen), Logged toast, Idle (dim clock and next dose), Settings (Wi-Fi, time zone, sound, display with rotation lock and Wake on single tap, cabinet open, about), AP on (Wi-Fi QR to join, then web UI QR), Set the time, Power off confirm, Boot splash.
 

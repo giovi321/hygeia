@@ -8,9 +8,9 @@ description: Every touch gesture, with the thresholds the firmware uses.
 | Gesture | Effect |
 |---|---|
 | Swipe left or right | pager: Home, Overview, History |
-| Pull down from the top edge | quick settings, from any screen |
-| Swipe up from the bottom edge | back to Home; closes quick settings |
-| Swipe right from the left edge | closes the current detail or settings page |
+| Pull down from near the top edge | quick settings, from any screen |
+| Swipe up from near the bottom edge | back to Home; closes quick settings |
+| Swipe right from near the left edge | closes the current detail or settings page |
 | Vertical swipe on Home | scrolls the tiles |
 | Tap a tile | logs the medicine as taken, with a 5 second undo |
 | Long press a tile | opens the medicine detail |
@@ -23,6 +23,12 @@ description: Every touch gesture, with the thresholds the firmware uses.
 | Shake the device while the Undo toast shows | undoes the dose or skip, the same as tapping Undo |
 | Double tap while the screen is dimmed or off | wakes the screen; nothing else happens |
 | Single tap while the screen is dimmed or off | does nothing, unless Wake on single tap is on; then it wakes the screen |
+
+## Edge gestures
+
+Start an edge gesture near the edge: on the border itself or a little inside the screen. When a corner mount or a case keeps your finger off the border, start the swipe on the glass as close to the edge as the case allows and swipe toward the middle. A swipe that starts in the middle of the screen is an ordinary swipe.
+
+A list, a keyboard key, a roller or a slider takes the swipe that starts on it, so an edge swipe from inside the screen only works on the parts of the screen that scroll or type nothing. From the border itself the edge gesture works everywhere, sliders included. A tap on a button near an edge is still a tap.
 
 ## Turning and shaking
 
@@ -44,9 +50,9 @@ A due card, the PWR key, the user key, plugging in USB and a [Cabinet open](../c
 
 Measured on the panel on 2026-10-29:
 
-- Edge zone: 40 px from the screen border
+- Edge zone: a stroke that starts on the border always counts as an edge gesture, and so does one that starts a little inside the screen when no widget takes it. The distance inside is provisional and is being measured on the panel
 - Swipe: movement on the dominant axis of at least 60 px and at least 1.5 times the other axis
 - Tap: at most 16 px of movement and under 500 ms. A long press has the same movement limit and lasts 500 ms or more
 - Double tap: the second press starts within 300 ms of the first release and within 40 px of it
 - A stroke that leaves the start point and returns is not a tap: the largest deviation from the start must also be 16 px or less
-- A stroke that starts in an edge zone is never taken by a widget, except sliders
+- A stroke that starts on the border is never taken by a widget, except sliders

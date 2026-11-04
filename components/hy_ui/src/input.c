@@ -15,6 +15,10 @@
 #include "hy/net.h"
 #include "hy/wake_gate.h"
 #include "ui_internal.h"
+#if CONFIG_HY_DEBUG_CONSOLE
+#include "esp_timer.h"
+#include "hy/board.h"
+#endif
 
 static const char *TAG = "ui_input";
 
@@ -48,6 +52,65 @@ static bool s_waking;      /* the stroke started on the dimmed screen: it only w
 static bool s_gated;       /* ... and "wake on single tap" is off: only a double tap of such strokes wakes (s_gate) */
 static hy_wake_gate_t s_gate;
 
+#if CONFIG_HY_DEBUG_CONSOLE
+/* `touch trace on|off`: what the touch controller reports at the start of a stroke, for setting the edge zone */
+static bool s_trace;
+static struct {
+    bool have;              /* a first point was read for the current stroke */
+    bool second;            /* ... and a second, different one */
+    int64_t isr_us;         /* touch INT before the first read, 0 unknown */
+    int64_t t1_us, t2_us;   /* time of the first and the second point */
+    int16_t x1, y1, x2, y2;
+} s_tr;
+
+void input_debug_trace(bool on)
+{
+    s_trace = on;
+    s_tr.have = false;
+}
+
+static void trace_sample(bool down, int16_t x, int16_t y, bool new_touch)
+{
+    if (!s_trace) {
+        return;
+    }
+    if (!down) {
+        (void)hy_board_touch_isr_take();   /* a release edge is not a press */
+        return;
+    }
+    int64_t now = esp_timer_get_time();
+    if (new_touch) {
+        s_tr.have = true;
+        s_tr.second = false;
+        s_tr.isr_us = hy_board_touch_isr_take();
+        s_tr.t1_us = now;
+        s_tr.x1 = x;
+        s_tr.y1 = y;
+    } else if (s_tr.have && !s_tr.second && (x != s_tr.x1 || y != s_tr.y1)) {
+        s_tr.second = true;
+        s_tr.t2_us = now;
+        s_tr.x2 = x;
+        s_tr.y2 = y;
+    }
+}
+
+static void trace_end(int32_t x, int32_t y)
+{
+    if (!s_trace || !s_tr.have) {
+        return;
+    }
+    s_tr.have = false;
+    long long lat = s_tr.isr_us ? (long long)(s_tr.t1_us - s_tr.isr_us) : -1;
+    if (s_tr.second) {
+        ESP_LOGI(TAG, "trace first %d,%d +%lld us after the press, second %d,%d +%lld us after the first, end %d,%d",
+                 s_tr.x1, s_tr.y1, lat, s_tr.x2, s_tr.y2, (long long)(s_tr.t2_us - s_tr.t1_us), (int)x, (int)y);
+    } else {
+        ESP_LOGI(TAG, "trace first %d,%d +%lld us after the press, second none, end %d,%d", s_tr.x1, s_tr.y1, lat,
+                 (int)x, (int)y);
+    }
+}
+#endif
+
 static uint16_t dev_of(int32_t x, int32_t y)
 {
     int32_t dx = x - s_st.x0, dy = y - s_st.y0;
@@ -80,6 +143,9 @@ static void read_wrap(lv_indev_t *indev, lv_indev_data_t *data)
      * in lv_indev.c), while x0/y0 come from the rotated lv_indev_get_point. They agree only because the
      * display is registered with ESP_LV_ADAPTER_ROTATE_0 (board.c; swap and mirror happen in the touch
      * driver). A rotated display must rotate a copy of the point here first. */
+#if CONFIG_HY_DEBUG_CONSOLE
+    trace_sample(down, (int16_t)data->point.x, (int16_t)data->point.y, down && !s_phys_down);
+#endif
     if (down && s_active) {
         if (s_gated) {
             hy_wake_gate_move(&s_gate, (int16_t)data->point.x, (int16_t)data->point.y);
@@ -176,6 +242,9 @@ static void indev_cb(lv_event_t *e)
 static void finish(int32_t x, int32_t y, uint32_t t)
 {
     s_active = false;
+#if CONFIG_HY_DEBUG_CONSOLE
+    trace_end(x, y);
+#endif
     hy_net_activity();
     s_st.x1 = (int16_t)x;
     s_st.y1 = (int16_t)y;
@@ -304,8 +373,11 @@ bool ui_input_waking(void)
     return s_waking;
 }
 
-/* A stroke that starts in an edge zone (the screen-edge gestures) is never a widget's: EDGE_RIGHT, EDGE_DOWN and
- * EDGE_UP navigate from any screen, also over scrolling content, the keyboard and sliders. */
+/* A stroke that starts in the hard edge zone (HY_EDGE_PX, and HY_EDGE_SCROLL_PX at the bottom over scrolling content)
+ * is never a widget's: EDGE_RIGHT, EDGE_DOWN and EDGE_UP navigate from any screen, also over scrolling content, the
+ * keyboard and sliders. A stroke that starts in the wider band up to HY_EDGE_GESTURE_PX belongs to a widget that
+ * consumes it (a list scroll, a key press, a roller turn); one that no widget consumes is classified as the edge
+ * gesture in hy_gesture_classify. */
 /* A widget that drags horizontally (a slider) owns its stroke even from an edge zone: a drag that starts at
  * x < 40 must not pop the view mid-drag. */
 void ui_input_consume_force(void)

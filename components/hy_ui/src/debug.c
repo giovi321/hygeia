@@ -1069,6 +1069,17 @@ void hy_ui_debug_madctl(const char *arg) { post(J_MADCTL, arg); }
 void hy_ui_debug_rot(const char *arg) { post(J_ROT, arg); }
 void hy_ui_debug_shake(void) { post(J_SHAKE, NULL); }
 void hy_ui_debug_net(const char *arg) { post(J_NET, arg); }
+void hy_ui_debug_touch(const char *arg)
+{
+    char cmd[8] = "", val[8] = "";
+    sscanf(arg, "%7s %7s", cmd, val);
+    if (strcmp(cmd, "trace") == 0 && (strcmp(val, "on") == 0 || strcmp(val, "off") == 0)) {
+        input_debug_trace(val[1] == 'n');
+        ESP_LOGI(TAG, "touch trace %s", val);
+    } else {
+        ESP_LOGE(TAG, "usage: touch trace <on|off>");
+    }
+}
 void hy_ui_debug_pair(const char *arg) { post(J_PAIR, arg); }
 void hy_ui_debug_hit(const char *arg) { post(J_HIT, arg); }
 void hy_ui_debug_upd(const char *arg) { post(J_UPD, arg); }

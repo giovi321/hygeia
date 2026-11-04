@@ -20,17 +20,17 @@ hy_gesture_t hy_gesture_classify(const hy_stroke_t *s)
         /* horizontal: dominant axis >= 60 and >= 1.5x the other (2*a >= 3*b in integers) */
         if (adx < HY_SWIPE_MIN_PX || 2 * adx < 3 * ady) return HY_G_NONE;
         if (dx < 0) return HY_G_SWIPE_LEFT;
-        if (s->x0 < HY_EDGE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_RIGHT;
+        if (s->x0 < HY_EDGE_GESTURE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_RIGHT;
         return HY_G_SWIPE_RIGHT;
     }
     if (ady < HY_SWIPE_MIN_PX || 2 * ady < 3 * adx) return HY_G_NONE;
     if (dy > 0) {
-        if (s->y0 < HY_EDGE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_DOWN;
+        if (s->y0 < HY_EDGE_GESTURE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_DOWN;
         return HY_G_SWIPE_DOWN;
     }
-    if (s->y0 >= HY_SCREEN_PX - (s->scroll_view ? HY_EDGE_SCROLL_PX : HY_EDGE_PX)) {
-        return s->glide_stop ? HY_G_NONE : HY_G_EDGE_UP;
-    }
+    /* over a scrolling list the same band applies: the list consumes any stroke that scrolls it (ui_input_consume
+       refuses only the thin HY_EDGE_SCROLL_PX zone), so a stroke that reaches here from the band is not a scroll */
+    if (s->y0 >= HY_SCREEN_PX - HY_EDGE_GESTURE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_UP;
     return HY_G_SWIPE_UP;
 }
 

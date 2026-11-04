@@ -924,10 +924,25 @@ bool hy_board_imu_int_armed(void)
 }
 
 /* Runs inside the LVGL adapter's touch ISR (callbacks.on_interrupt); the adapter's handling is unchanged */
+#if CONFIG_HY_DEBUG_CONSOLE
+static volatile int64_t s_touch_isr_us;   /* first touch INT since the last hy_board_touch_isr_take, 0 none */
+int64_t hy_board_touch_isr_take(void)
+{
+    int64_t v = s_touch_isr_us;
+    s_touch_isr_us = 0;
+    return v;
+}
+#endif
+
 static void IRAM_ATTR touch_isr(esp_lcd_touch_handle_t tp, void *ctx)
 {
     (void)tp;
     (void)ctx;
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (!s_touch_isr_us) {
+        s_touch_isr_us = esp_timer_get_time();
+    }
+#endif
     wake_pin_fired(BSP_LCD_TOUCH_INT);
     void (*fn)(void) = s_touch_hook;
     if (fn) {

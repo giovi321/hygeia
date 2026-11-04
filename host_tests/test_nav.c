@@ -28,30 +28,65 @@ static void test_classify_table(void)
     s = stroke(200, 200, 41, -60, 200);  TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
     s = stroke(200, 200, 0, 60, 200);    TEST_ASSERT_EQUAL(HY_G_SWIPE_DOWN, hy_gesture_classify(&s));
     s = stroke(200, 39, 0, 60, 200);     TEST_ASSERT_EQUAL(HY_G_EDGE_DOWN, hy_gesture_classify(&s));
-    s = stroke(200, 40, 0, 60, 200);     TEST_ASSERT_EQUAL(HY_G_SWIPE_DOWN, hy_gesture_classify(&s));
-    s = stroke(200, 440, 0, -60, 200);   TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
-    s = stroke(200, 439, 0, -60, 200);   TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
-    s = stroke(39, 200, 60, 0, 200);     TEST_ASSERT_EQUAL(HY_G_EDGE_RIGHT, hy_gesture_classify(&s));
-    s = stroke(40, 200, 60, 0, 200);     TEST_ASSERT_EQUAL(HY_G_SWIPE_RIGHT, hy_gesture_classify(&s));
+    s = stroke(200, 79, 0, 60, 200);     TEST_ASSERT_EQUAL(HY_G_EDGE_DOWN, hy_gesture_classify(&s));
+    s = stroke(200, 80, 0, 60, 200);     TEST_ASSERT_EQUAL(HY_G_SWIPE_DOWN, hy_gesture_classify(&s));
+    s = stroke(200, 400, 0, -60, 200);   TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
+    s = stroke(200, 399, 0, -60, 200);   TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
+    s = stroke(79, 200, 60, 0, 200);     TEST_ASSERT_EQUAL(HY_G_EDGE_RIGHT, hy_gesture_classify(&s));
+    s = stroke(80, 200, 60, 0, 200);     TEST_ASSERT_EQUAL(HY_G_SWIPE_RIGHT, hy_gesture_classify(&s));
     /* a top-edge upward swipe and a left-edge leftward swipe stay plain swipes */
     s = stroke(200, 20, 0, -60, 200);    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
     s = stroke(20, 200, -60, 0, 200);    TEST_ASSERT_EQUAL(HY_G_SWIPE_LEFT, hy_gesture_classify(&s));
 }
 
+static void test_edge_band_inside_the_screen(void)
+{
+    hy_stroke_t s;
+    /* a swipe that starts 40 to 79 px in is the edge gesture, as one from the border is */
+    static const int in_band[] = { 0, 24, 33, 40, 62, 79 };
+    for (unsigned i = 0; i < sizeof in_band / sizeof in_band[0]; i++) {
+        int d = in_band[i];
+        s = stroke(d, 200, 60, 0, 200);                TEST_ASSERT_EQUAL(HY_G_EDGE_RIGHT, hy_gesture_classify(&s));
+        s = stroke(200, d, 0, 60, 200);                TEST_ASSERT_EQUAL(HY_G_EDGE_DOWN, hy_gesture_classify(&s));
+        s = stroke(200, 479 - d, 0, -60, 200);         TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
+    }
+    /* from 80 px in it is the plain swipe */
+    s = stroke(80, 200, 60, 0, 200);                   TEST_ASSERT_EQUAL(HY_G_SWIPE_RIGHT, hy_gesture_classify(&s));
+    s = stroke(200, 80, 0, 60, 200);                   TEST_ASSERT_EQUAL(HY_G_SWIPE_DOWN, hy_gesture_classify(&s));
+    s = stroke(200, 399, 0, -60, 200);                 TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
+    /* a swipe away from the screen edge from the band stays a plain swipe */
+    s = stroke(60, 200, -60, 0, 200);                  TEST_ASSERT_EQUAL(HY_G_SWIPE_LEFT, hy_gesture_classify(&s));
+    s = stroke(200, 60, 0, -60, 200);                  TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
+    /* a weak or short stroke from the band is not an edge gesture */
+    s = stroke(60, 200, 59, 0, 200);                   TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s = stroke(60, 200, 60, 41, 200);                  TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+}
+
+static void test_taps_in_the_band_stay_taps(void)
+{
+    hy_stroke_t s;
+    s = stroke(60, 200, 0, 0, 100);                    TEST_ASSERT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+    s = stroke(200, 60, 3, 3, 100);                    TEST_ASSERT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+    s = stroke(200, 430, 16, -16, 499);                TEST_ASSERT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+    s = stroke(70, 70, 0, 0, 600);                     TEST_ASSERT_EQUAL(HY_G_LONG_PRESS, hy_gesture_classify(&s));
+    /* a drag that returns to its start is not a tap, and not an edge gesture either */
+    s = stroke(60, 200, 0, 0, 300);   s.max_dev = 70;  TEST_ASSERT_NOT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+}
+
 static void test_edge_zone_scrolling_view(void)
 {
     hy_stroke_t s;
-    /* a view that does not scroll keeps the 40 px bottom zone */
+    /* the classifier uses the same band with and without a scrolling view: a stroke that scrolls the list is
+       consumed before it is classified, so one that reaches the classifier from the band is an edge swipe */
     s = stroke(200, 447, 0, -80, 200);   TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
-    /* over scrollable content the zone is the bottom 16 px */
     s = stroke(200, 447, 0, -80, 200);   s.scroll_view = true;
-    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
+    TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
     s = stroke(200, 463, 0, -80, 200);   s.scroll_view = true;
-    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
-    s = stroke(200, 464, 0, -80, 200);   s.scroll_view = true;
     TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
     s = stroke(200, 479, 0, -80, 200);   s.scroll_view = true;
     TEST_ASSERT_EQUAL(HY_G_EDGE_UP, hy_gesture_classify(&s));
+    s = stroke(200, 399, 0, -80, 200);   s.scroll_view = true;
+    TEST_ASSERT_EQUAL(HY_G_SWIPE_UP, hy_gesture_classify(&s));
     /* the top and left zones do not change */
     s = stroke(200, 39, 0, 60, 200);     s.scroll_view = true;
     TEST_ASSERT_EQUAL(HY_G_EDGE_DOWN, hy_gesture_classify(&s));
@@ -69,6 +104,13 @@ static void test_glide_stop_is_never_edge(void)
     s = stroke(200, 20, 0, 120, 200);    s.glide_stop = true;
     TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
     s = stroke(20, 200, 120, 0, 200);    s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    /* the band that starts 40 to 79 px in is no edge either for a glide-stopping stroke */
+    s = stroke(60, 200, 120, 0, 200);    s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s = stroke(200, 60, 0, 120, 200);    s.glide_stop = true;
+    TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
+    s = stroke(252, 420, 0, -200, 200);  s.glide_stop = true;
     TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
     /* away from the edges a glide-stopping drag is the ordinary swipe */
     s = stroke(200, 300, 0, -80, 200);   s.glide_stop = true;
@@ -577,6 +619,8 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_classify_table);
+    RUN_TEST(test_edge_band_inside_the_screen);
+    RUN_TEST(test_taps_in_the_band_stay_taps);
     RUN_TEST(test_edge_zone_scrolling_view);
     RUN_TEST(test_glide_stop_is_never_edge);
     RUN_TEST(test_drag_is_not_tap);
