@@ -42,7 +42,7 @@ static const char *TAG = "update";
 #define UPD_STACK            8192                 /* internal: flash writes run from it */
 #define UPD_PRIO             4                    /* the backup worker's priority (WORKER_PRIO in hy_web h_backup.c):
                                                      below the LVGL task (6) and the httpd task */
-#define HY_UPD_MIN_INTERNAL  52224                /* 35 KB floor + 16 KB budget of a run + 1 KB rounding */
+#define HY_UPD_MIN_INTERNAL  63488                /* 35 KB floor + 26 KB measured cost of a download + 1 KB rounding */
 #define UPD_MIN_BLOCK        12288                /* largest internal block: the 8 KB stack plus the client buffers */
 #define UPD_STALE_S          600                  /* an install needs a check younger than this */
 #define UPD_MIN_BATT_PCT     30
