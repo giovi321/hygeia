@@ -566,7 +566,7 @@ static void job_shot(void)
     heap_caps_free(mem);
 }
 
-/* "gesture <name> [consumed]": the same path as a classified touch stroke. With "consumed" a real stroke of that
+/* "gesture <name> [consumed]": the same path as a classified touch stroke (the band names also without "consumed"). With "consumed" a real stroke of that
  * direction is simulated (edge strokes start in their edge zone) and a scrolling widget under the finger asks
  * for it right after the press, as SCROLL_BEGIN does: an edge stroke must still navigate, any other stays. */
 static void job_gesture(const char *arg)
@@ -604,6 +604,15 @@ static void job_gesture(const char *arg)
         ESP_LOGE(TAG, "usage: gesture <up|down|left|right|edgeup|edgedown|edgeright|bandright|banddown|bandup> consumed");
         return;
     }
+    /* the band strokes also run without "consumed": a real stroke with nothing under the finger that scrolls */
+    if (strncmp(name, "band", 4) == 0) {
+        for (size_t k = 0; k < sizeof strokes / sizeof strokes[0]; k++) {
+            if (strcmp(name, strokes[k].n) == 0) {
+                input_debug_swipe(strokes[k].x0, strokes[k].y0, strokes[k].x1, strokes[k].y1, 150, false);
+                return;
+            }
+        }
+    }
     for (int g = HY_G_TAP; g <= HY_G_EDGE_RIGHT; g++) {
         if (strcmp(name, ui_gesture_name((hy_gesture_t)g)) == 0) {
             ESP_LOGI(TAG, "gesture %s", name);
@@ -611,7 +620,8 @@ static void job_gesture(const char *arg)
             return;
         }
     }
-    ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright> [consumed]");
+    ESP_LOGE(TAG, "usage: gesture <tap|long|left|right|up|down|edgedown|edgeup|edgeright|bandright|banddown|bandup> "
+                  "[consumed]");
 }
 
 /* "due slide|skip|snooze|next|prev|flash": the same functions the knob, the Skip tap and the swipes call */

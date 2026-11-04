@@ -42,6 +42,22 @@ make -C host_tests test
 
 The default build has a serial console on the USB Serial/JTAG port with line commands. It is for development; the release build turns it off. Commands include `time <epoch> [posix_tz]`, `zone <iana> <posix_tz>`, `clock`, `tap <code>`, `undo`, `logs`, `alarm <seconds>`, `chime`, `shot`, `nav`, `idle`, `gesture`, `remindtest`, `due`, `history`, `detail`, `note`, `earlier`, `qs`, `settings`, `settz <iana>`, `perf`, `powerstat`, `seed4`, `imu`, `motion`, `rot`, `madctl`, `touch trace on|off` (logs the first reported points of each stroke, for the edge zone measurement) and `shake`. The set changes as the firmware changes; the source is `main/console.c` and `main/app_main.c`.
 
+Commands added for the Cabinet open teach view and the battery work:
+
+| Command | What it does |
+|---|---|
+| `cab ui <idle\|running\|saved\|checking\|ok\|miss\|nomove\|failed\|nostill\|teststopped>` | Shows the teach view in that phase without the runner, for screenshots. `nostill` and `teststopped` are the saved view after a check that did not start still or was stopped |
+| `cab press <start\|test\|again\|keep\|done\|cancel>` | Presses a button of the teach view without a finger, so the `cue` lines of a real teach or check can be read. Open the view first with `cab ui idle`; a button that is not shown in the current phase does nothing |
+| `gesture <bandright\|banddown\|bandup>` | A stroke that starts in the 80 px gesture band, with nothing under the finger that scrolls. With `consumed` a scrolling widget claims the stroke right after the press |
+| `sleepstat` | Flags in force, sleep counters, wakes by cause, `lsstat`, PM locks |
+| `pwrx` | Lists the battery investigation flags and `lsstat` |
+| `pwrx <touch\|nonet\|panel\|wakers\|lsvbus> on\|off` | Sets one flag (RAM only, off at every boot) |
+| `pwrx off` | Clears every flag |
+| `pwrx mv [clear]` | Prints the ring of 60 s battery readings (RTC memory), or empties it |
+| `pmu rails` | Read-only dump of the AXP2101 rail registers |
+
+What each flag does and risks is in `design/hardware-notes.md`, part "Battery investigation tools".
+
 ## Docs site
 
 The documentation is an Astro Starlight site in `docs/`.

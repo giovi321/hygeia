@@ -32,6 +32,7 @@
 #define TASK_PRIO   3          /* below the LVGL task (6) */
 #define QUEUE_LEN   16
 #define TICK_MS     1000
+#define TICK_WAKERS_MS 30000   /* pwrx wakers: the evaluation period while the radio is off on battery */
 #define SLOT_S      15         /* per network in a pass */
 #define RETRY_S     3          /* a failed attempt inside a slot is retried after this */
 #define RSSI_EVERY_S 5
@@ -775,6 +776,13 @@ static void tick(int64_t now)
     unlock();
     r.in.idle_s = HY_NET_BATT_IDLE_S;
 
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (!usb && hy_power_px(HY_PX_NONET)) {
+        /* pwrx nonet: no radio on battery, so the sleep mode is not held off by it; Keep Wi-Fi on battery is ignored */
+        r.in.started_on_battery = false;
+        r.in.keep_on_battery = false;
+    }
+#endif
     hy_net_mode_t want = hy_net_radio(&r.in);
     if (want == HY_NET_OFF && !usb && r.in.started_on_battery) {
         /* The idle rule ended the battery run: a later touch or web request does not bring the radio back, only
@@ -877,6 +885,17 @@ static void handle(const msg_t *m, int64_t now)
     }
 }
 
+/* The evaluation period. pwrx wakers (debug console): 30 s while the radio is off on battery. */
+static int64_t tick_ms(void)
+{
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (r.decided && !r.in.usb && r.applied == HY_NET_OFF && hy_power_px(HY_PX_WAKERS)) {
+        return TICK_WAKERS_MS;
+    }
+#endif
+    return TICK_MS;
+}
+
 static void net_task(void *arg)
 {
     (void)arg;
@@ -885,7 +904,7 @@ static void net_task(void *arg)
     for (;;) {
         msg_t m;
         int64_t now_ms = esp_timer_get_time() / 1000;
-        int64_t wait = TICK_MS - (now_ms - last_tick);
+        int64_t wait = tick_ms() - (now_ms - last_tick);
         if (wait < 0) {
             wait = 0;
         }
@@ -896,9 +915,12 @@ static void net_task(void *arg)
             }
         }
         now_ms = esp_timer_get_time() / 1000;
-        if (now_ms - last_tick >= TICK_MS) {
+        if (now_ms - last_tick >= tick_ms()) {
             last_tick = now_ms;
             tick(mono_s());
+#if CONFIG_HY_DEBUG_CONSOLE
+            hy_power_ls_loop(HY_LS_T_NET);
+#endif
         }
     }
 }

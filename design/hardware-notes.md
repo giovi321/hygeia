@@ -254,3 +254,28 @@ Measured on the board on firmware v0.4.0-16-ga1298af (debug build), 2026-11-02, 
 - Upload of the same image through `POST /api/ota`: 2408592 bytes written to the other slot in 25.6 s, worker stack 3392 bytes left, restart, confirmed 40 ms after the first scheduler pass; a text file answers 422 `not_hygeia` and an image cut at 600000 bytes answers 422 `corrupt`, both with the running slot unchanged
 
 Not measured yet, because the network had no route to GitHub: the redirect host of a release asset and both TLS handshakes, the download duration, and the internal heap minimum and stack high-water mark during a full download and checksum
+
+## Battery investigation tools
+
+Debug console only (the release build has none of this code). The tools split the battery draw into parts so each part can be measured on the board. No value is measured yet: every number below is owed to the owner runs, and no battery estimate is published until they exist.
+
+The AXP2101 has no battery current register and no coulomb counter. Its ADC result registers (0x34 to 0x3D) hold battery voltage, TS, VBUS voltage, VSYS voltage and die temperature, and the fuel gauge (0xA4) moves in 1% steps. The battery voltage at 1 mV resolution, one reading a minute, is the proxy: a run is read as the slope of that voltage, not as a current.
+
+Always on in the debug build, nothing to switch:
+- `lsstat` (printed by `sleepstat` and by `pwrx`): light-sleep entries, entries that slept and entries that did not (rejected or empty), the real time in light sleep, that time as a share of the screen-OFF-asleep time (residency), a histogram of the requested sleep length (under 50 ms, 50 to 200, 200 to 600, 600 to 1100, 1100 to 2100, 2100 ms and over; the bucket names the period of the waker), the hardware wake cause of each sleep that ran (timer, GPIO, other), the loops of the power, net and console tasks while a light-sleep mode is on, and the time on battery in each screen state (ON, DIM, OFF asleep, OFF held by the radio, OFF awake for another reason). The counters sit in RTC slow memory and follow the `sleepstat` rules: kept over a software, panic, watchdog or brownout reset, cleared by a power-on reset. They need `CONFIG_PM_LIGHT_SLEEP_CALLBACKS`, set in the debug build only
+- `pwrx mv`: the last 256 battery readings, one a minute (awake or asleep), in RTC memory: seconds since boot, millivolts, percent, screen state. 256 points cover 4 h 16 min. `pwrx mv clear` empties the ring. The seconds restart at each boot
+- `pmu rails`: read-only dump of the rail enable bits (0x80 DCDC1 to 5, 0x90 ALDO1 to 4, BLDO1 and 2, CPUSLDO, DLDO1, 0x91 DLDO2), the raw voltage codes (0x82 to 0x86, 0x92 to 0x9A) and the charge indicator 0x69. The bit order is from XPowersLib and is not yet checked against this board; the voltage codes are not converted
+
+Flags (`pwrx <flag> on|off`, `pwrx off`, `pwrx`): kept in RAM, all off at every boot, named in the first line of every `sleepstat`. A flag acts from the next sleep or screen off, not retroactively.
+
+| Flag | What it does | Wake-source risk |
+|---|---|---|
+| `touch` | At light-sleep entry (battery only) the touch controller is held in reset (GPIO 40 low, held through the sleep) and GPIO 11 is left out of the wake set; at the end of the sleep the controller gets its start sequence again (reset released, 50 ms, command mode write 0xD101) | No touch wake and no double tap while on. PWR key, user key, RTC alarm and the motion sensor still wake. A touch that fell inside the sleep is not seen |
+| `nonet` | On battery the radio counts as idle at once and Keep Wi-Fi on battery is ignored, so the sleep mode is entered at the first screen off | None. The web UI is unreachable on battery |
+| `panel` | After Sleep In the panel reset line (GPIO 39) is held low; at the next panel on the full board support package init runs (reset pulse, vendor table, brightness back to 0, held MADCTL resent) | None for wakes. Waking the screen takes about 1.4 s longer, and the vendor table switches the panel on at full brightness for part of that time, so a flash of old content is possible |
+| `wakers` | The net task evaluates every 30 s instead of 1 s while the radio is off on battery, the console poll without a USB host waits 30 s instead of 2 s, and the power task loop in light sleep waits 5 s instead of 1 s | A PWR press, a VBUS change or a battery low or critical crossing is noticed up to 5 s late (the PMU interrupt is not a wake pin; the AXP2101 keeps the status bits until they are read). The radio can start up to 30 s late after a USB plug. The lwIP timers (ARP, ND6, DHCP coarse, 1 s each) are not changed |
+| `lsvbus` | Light sleep is allowed with VBUS present, and the W_USB end of the sleep mode on a VBUS mismatch is skipped for that sleep mode | The USB Serial/JTAG pads are disabled in light sleep, so the PC console drops while the screen is off: use a wall charger, and wake with PWR. Charging current is part of the supply current unless the charger reports done |
+
+Left out: a `codec` flag (ES7210 power down and an ES8311 open and close cycle). The ES7210 is never initialised by the firmware and the driver call needs a device handle the firmware does not create; the change was neither cheap nor verifiable without the board.
+
+Owed to the owner runs: the screen-off floor, the touch controller scan current (slope with and without `touch`), the share of time awake in normal use, the radio tail after unplugging, the per-flag effect of `panel` and `wakers`, and whether the rail dump shows a rail that feeds only the panel, the SD slot or the codecs. The USB meter path (a wall charger, a full battery and `lsvbus` on) gives a per-flag current in minutes if a meter with 0.1 mA resolution is available.

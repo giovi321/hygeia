@@ -170,6 +170,7 @@ static void cmd_rot(const char *args) { hy_ui_debug_rot(args); }
 static void cmd_touch(const char *args) { hy_ui_debug_touch(args); }
 static void cmd_shake(const char *args) { (void)args; hy_ui_debug_shake(); }
 static void cmd_sleepstat(const char *args) { (void)args; hy_power_sleep_stats(); }
+static void cmd_pwrx(const char *args) { hy_power_debug_pwrx(args); }
 static void cmd_imu(const char *args)
 {
     /* The motion task owns the IMU: it prints the samples from its own reads. `imu regs` is a direct register read;
@@ -201,7 +202,8 @@ static void cmd_imu(const char *args)
 static void cmd_motion(const char *args) { hy_motion_debug(args); }
 static void cmd_cab(const char *args)
 {
-    if (args && (strncmp(args, "react", 5) == 0 || strncmp(args, "ui", 2) == 0)) {
+    if (args && (strncmp(args, "react", 5) == 0 || strncmp(args, "ui", 2) == 0 ||
+                 strncmp(args, "press", 5) == 0)) {
         hy_ui_debug_cab(args);
         return;
     }
@@ -690,6 +692,7 @@ void app_main(void)
     console_register("archive", cmd_archive);
     console_register("limits", cmd_limits);
     console_register("sleepstat", cmd_sleepstat);
+    console_register("pwrx", cmd_pwrx);
     console_register("imu", cmd_imu);
     console_register("motion", cmd_motion);
     console_register("cab", cmd_cab);

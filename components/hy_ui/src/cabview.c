@@ -595,8 +595,9 @@ static void teach_event(const hy_cabev_t *e)
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
-/* `cab ui <idle|running|saved|checking|ok|miss|nomove|failed>`: the teach view in that phase without the runner, for
-   screenshots. Leaving the view resets it. */
+/* `cab ui <idle|running|saved|checking|ok|miss|nomove|failed|nostill|teststopped>`: the teach view in that phase
+   without the runner, for screenshots. nostill and teststopped are the saved view after a check that did not start
+   still or was stopped. Leaving the view resets it. */
 void cab_debug_ui(const char *phase)
 {
     static const struct { const char *name; uint8_t phase, status; } k[] = {
@@ -604,6 +605,7 @@ void cab_debug_ui(const char *phase)
         {"saved", HY_CF_SAVED, HY_CF_S_NONE},     {"checking", HY_CF_CHECKING, HY_CF_S_STILL},
         {"ok", HY_CF_CHECK_OK, HY_CF_S_NONE},     {"miss", HY_CF_CHECK_MISS, HY_CF_S_NONE},
         {"nomove", HY_CF_CHECK_NOMOVE, HY_CF_S_NONE}, {"failed", HY_CF_FAILED, HY_CF_S_STOPPED},
+        {"nostill", HY_CF_SAVED, HY_CF_S_C_NOSTILL},  {"teststopped", HY_CF_SAVED, HY_CF_S_C_STOPPED},
     };
     for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) {
         if (phase && strcmp(phase, k[i].name) == 0) {
@@ -623,7 +625,36 @@ void cab_debug_ui(const char *phase)
             return;
         }
     }
-    ESP_LOGI(TAG, "usage: cab ui idle|running|saved|checking|ok|miss|nomove|failed");
+    ESP_LOGI(TAG, "usage: cab ui idle|running|saved|checking|ok|miss|nomove|failed|nostill|teststopped");
+}
+
+/* `cab press <start|test|again|keep|done|cancel>`: the teach view's button taps without a finger, so the cue lines
+   of a real teach or check can be read from the console. Only while the teach view is the current view; a button
+   that is not shown in the current phase does nothing, as a tap would. Open the view first with `cab ui idle`. */
+void cab_debug_press(const char *btn)
+{
+    static const struct { const char *name; void (*fn)(void *); } k[] = {
+        {"start", t_start_tap}, {"test", t_test_tap}, {"again", t_again_tap},
+        {"keep", t_close_tap},  {"done", t_close_tap}, {"cancel", t_cancel_tap},
+    };
+    if (ui_current_view() != HY_V_CAB_TEACH) {
+        ESP_LOGW(TAG, "cab press: the teach view is not open (cab ui idle opens it)");
+        return;
+    }
+    for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) {
+        if (btn && strcmp(btn, k[i].name) == 0) {
+            uint8_t ph = s_flow.phase;
+            /* the tap handlers of Done, Keep and Cancel do not look at the phase: only press what is shown */
+            bool shown = i == 3 ? (ph == HY_CF_CHECK_MISS || ph == HY_CF_CHECK_NOMOVE) :
+                         i == 4 ? (ph == HY_CF_SAVED || ph == HY_CF_CHECK_OK) : true;
+            ESP_LOGI(TAG, "cab press: %s (phase %u)%s", k[i].name, (unsigned)ph, shown ? "" : ", button not shown");
+            if (shown) {
+                k[i].fn(NULL);
+            }
+            return;
+        }
+    }
+    ESP_LOGI(TAG, "usage: cab press start|test|again|keep|done|cancel");
 }
 #endif
 

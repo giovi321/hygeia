@@ -112,6 +112,14 @@ void cabinet_debug(const char *arg)
         cab_debug_ui(p);
         return;
     }
-    ESP_LOGI(TAG, "usage: cab react | cab ui <phase>");
+    if (arg && strncmp(arg, "press", 5) == 0) {
+        const char *p = arg + 5;
+        while (*p == ' ') {
+            p++;
+        }
+        cab_debug_press(p);
+        return;
+    }
+    ESP_LOGI(TAG, "usage: cab react | cab ui <phase> | cab press <button>");
 }
 #endif

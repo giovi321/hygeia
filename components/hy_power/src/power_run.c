@@ -23,6 +23,7 @@
 #include "esp_lv_adapter.h"
 #include "esp_attr.h"
 #include "esp_pm.h"
+#include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -30,6 +31,7 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/clock.h"
+#include "hy/lsstat.h"
 #include "hy/wake_gate.h"
 #include "lvgl.h"
 #include "nvs.h"
@@ -39,6 +41,7 @@
 #define TASK_STACK      4096
 #define LOOP_MS         200
 #define SLEEP_LOOP_MS   1000   /* the loop timeout in the sleep mode: PMU poll */
+#define SLEEP_LOOP_WAKERS_MS 5000   /* the same with pwrx wakers on, in light sleep */
 #define WG_LOOP_MS      15     /* polling the touch controller while a touch is judged (sleep mode) */
 #define WG_REARM_MS     50     /* waiting for the finger to lift before the touch wake is armed again */
 #define READ_EVERY_S    10
@@ -117,6 +120,26 @@ typedef struct {
     uint32_t hist_up_s[BOOT_HIST];     /* the last uptime seen for that boot, up to UPTIME_SAVE_S short */
 } sleep_ctr_t;
 static RTC_NOINIT_ATTR sleep_ctr_t s_ctr;
+#if CONFIG_HY_DEBUG_CONSOLE
+/* lsstat and the battery investigation flags (debug console only). The counters sit in RTC slow memory like s_ctr and
+ * follow the same rules (kept over a software, panic, watchdog or brownout reset, cleared by a power-on reset or a
+ * wrong magic word). The light-sleep callbacks write them from the idle task with interrupts off, one writer at a time,
+ * so they take no lock; a dump may read a half-written 64-bit sum once in a very long while. */
+#define LS_MAGIC 0x4C535433u   /* "LST3": change it when the struct layout changes */
+typedef struct {
+    uint32_t magic;
+    uint32_t entered, slept_n, zero_n;               /* callback entries, sleeps that ran, sleeps that did not (0 us) */
+    uint64_t slept_us;                               /* time really spent in light sleep */
+    uint32_t req_hist[HY_LS_BUCKETS];                /* requested length of each entry */
+    uint32_t cause_timer, cause_gpio, cause_other;   /* hardware wake causes of the sleeps that ran */
+    uint32_t loops_pwr, loops_net, loops_console;    /* task loops while a light-sleep mode is on */
+    hy_scrtime_t st;                                 /* time on battery per screen state */
+} ls_ctr_t;
+static RTC_NOINIT_ATTR ls_ctr_t s_ls;
+static RTC_NOINIT_ATTR hy_mv_ring_t s_ls_mv;         /* the 60 s battery readings; valid with s_ls.magic */
+static volatile uint32_t s_px_mask;                  /* pwrx flags, bit n = hy_px_t n; RAM only, 0 at boot */
+static bool s_ls_vbus_latch;                         /* this sleep mode runs light sleep on VBUS (pwrx lsvbus); s_sleep_mu */
+#endif
 static int64_t s_stretch_t0_ms;
 static bool s_logged_noreq;                /* the missing request was logged in this OFF stretch */
 static bool s_logged_held;                 /* the radio hold was logged in this OFF stretch */
@@ -155,6 +178,15 @@ static void ctr_init(void)
     }
     s_ctr.hist_reason[0] = (uint32_t)esp_reset_reason();
     s_ctr.hist_up_s[0] = 0;
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (s_ls.magic != LS_MAGIC || esp_reset_reason() == ESP_RST_POWERON) {
+        memset(&s_ls, 0, sizeof s_ls);
+        hy_mv_ring_clear(&s_ls_mv);
+        s_ls.magic = LS_MAGIC;
+        hy_scrtime_reset(&s_ls.st);
+    }
+    s_ls.st.cur = HY_ST_NONE;   /* the stretch that ran when the last boot ended is not counted */
+#endif
 }
 
 static int64_t mono_s(void)
@@ -415,6 +447,26 @@ static int64_t mono_ms(void)
     return esp_timer_get_time() / 1000;
 }
 
+#if CONFIG_HY_DEBUG_CONSOLE
+/* Closes the stretch of the current screen state and starts the one the state is in now. Called after every change of
+ * the screen state, the sleep mode, the radio hold or VBUS, and by the dumps. Never called with s_mux held. */
+static void ls_scr_mark(void)
+{
+    int64_t now = mono_ms();
+    portENTER_CRITICAL(&s_mux);
+    int cat = hy_scrtime_category(s_vbus_real, s_scr, s_asleep, s_net_hold > 0);
+    hy_scrtime_mark(&s_ls.st, now, cat);
+    portEXIT_CRITICAL(&s_mux);
+}
+
+static bool px_on(hy_px_t f)
+{
+    return (s_px_mask & (1u << f)) != 0;
+}
+#else
+#define ls_scr_mark() ((void)0)
+#endif
+
 void hy_power_set_next_wake_fn(int64_t (*fn)(void))
 {
     s_next_wake_fn = fn;
@@ -482,6 +534,11 @@ static uint32_t loop_ms(void)
     if (s_wg_rearm && mono_ms() - s_wg_rearm_t0_ms < 3000) {
         return WG_REARM_MS;
     }
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (s_light && px_on(HY_PX_WAKERS)) {
+        return SLEEP_LOOP_WAKERS_MS;   /* pwrx wakers: the PMU poll waits longer in light sleep */
+    }
+#endif
     return SLEEP_LOOP_MS;
 }
 
@@ -591,6 +648,12 @@ static void enter_sleep(void)
     portENTER_CRITICAL(&s_mux);
     bool vbus = s_vbus_real;
     s_light = !vbus;   /* before s_asleep: the power task reads both without s_sleep_mu */
+#if CONFIG_HY_DEBUG_CONSOLE
+    s_ls_vbus_latch = vbus && px_on(HY_PX_LSVBUS);   /* pwrx lsvbus: light sleep on USB too, for this sleep mode */
+    if (s_ls_vbus_latch) {
+        s_light = true;
+    }
+#endif
     s_asleep = true;
     s_ctr.entries++;
     if (s_stretch_open && now - s_stretch_t0_ms > s_ctr.longest_awake_off_ms) {
@@ -598,11 +661,17 @@ static void enter_sleep(void)
     }
     s_stretch_open = false;
     portEXIT_CRITICAL(&s_mux);
+    ls_scr_mark();
     s_sleep_t0_ms = now;
     ESP_LOGI(TAG, "power: lvgl paused");
-    if (vbus) {
+    if (!s_light) {
         ESP_LOGI(TAG, "light sleep: not enabled (vbus)");
     } else {
+#if CONFIG_HY_DEBUG_CONSOLE
+        if (vbus) {
+            ESP_LOGW(TAG, "light sleep: on with vbus (pwrx lsvbus)");
+        }
+#endif
         ESP_LOGI(TAG, "light sleep: on");
         hy_board_sleep_wake_arm(true);
         pm_set(true);
@@ -651,6 +720,10 @@ static void exit_sleep_locked(wake_cause_t cause)
     s_stretch_open = true;
     s_stretch_t0_ms = now;
     portEXIT_CRITICAL(&s_mux);
+#if CONFIG_HY_DEBUG_CONSOLE
+    s_ls_vbus_latch = false;
+#endif
+    ls_scr_mark();
     esp_lv_adapter_resume();
     xSemaphoreGive(s_sleep_mu);
     ESP_LOGI(TAG, "power: wake (%s) at %lld ms, asleep %lld ms", k_cause[cause], (long long)now,
@@ -701,6 +774,7 @@ void hy_power_screen_off(bool off)
 void hy_power_screen_state(uint8_t scr)
 {
     s_scr = scr;
+    ls_scr_mark();
 }
 
 void hy_power_net_hold(bool on)
@@ -715,6 +789,7 @@ void hy_power_net_hold(bool on)
     }
     uint8_t n = s_net_hold;
     portEXIT_CRITICAL(&s_mux);
+    ls_scr_mark();
     ESP_LOGI(TAG, "net hold %s (%u)", on ? "on" : "off", (unsigned)n);
     /* exit_sleep checks s_asleep under s_sleep_mu: a sleep entry that passed its hold check just before the count
      * rose is ended here */
@@ -738,6 +813,23 @@ void hy_power_chime_on_battery(void)
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
+bool hy_power_px(int flag)
+{
+    return flag >= 0 && flag < HY_PX_N && px_on((hy_px_t)flag);
+}
+
+void hy_power_ls_loop(int who)
+{
+    if (!s_asleep || !s_light) {
+        return;
+    }
+    if (who == HY_LS_T_NET) {
+        s_ls.loops_net++;
+    } else if (who == HY_LS_T_CONSOLE) {
+        s_ls.loops_console++;
+    }
+}
+
 void hy_power_resume(void)
 {
     if (s_asleep) {
@@ -814,6 +906,7 @@ static uint32_t read_battery(int64_t mono, bool *refake)
     *refake = s_fake_changed;
     s_fake_changed = false;
     portEXIT_CRITICAL(&s_mux);
+    ls_scr_mark();   /* VBUS may have changed */
 
     if (fake) {
         raw.present = true;
@@ -859,15 +952,33 @@ static uint32_t read_battery(int64_t mono, bool *refake)
     return flags;
 }
 
+/* pwrx lsvbus: this sleep mode runs light sleep with VBUS present on purpose, so that is not a mismatch */
+static bool usb_light_ok(void)
+{
+#if CONFIG_HY_DEBUG_CONSOLE
+    return s_ls_vbus_latch && s_vbus_real;
+#else
+    return false;
+#endif
+}
+
 static void power_task(void *arg)
 {
     (void)arg;
     int64_t last_read = INT64_MIN / 2, last_alive = INT64_MIN / 2, last_log = INT64_MIN / 2, last_up = INT64_MIN / 2;
+#if CONFIG_HY_DEBUG_CONSOLE
+    int64_t last_mv = INT64_MIN / 2;
+#endif
     hy_power_state_t st;
     hy_power_state(&st);
     int32_t saved_rate = st.batt.rate_cph;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(loop_ms()));
+#if CONFIG_HY_DEBUG_CONSOLE
+        if (s_asleep && s_light) {
+            s_ls.loops_pwr++;
+        }
+#endif
         int64_t mono = mono_s();
         if (mono - last_up >= UPTIME_SAVE_S) {   /* RTC memory, no flash write */
             last_up = mono;
@@ -901,7 +1012,7 @@ static void power_task(void *arg)
             int64_t next = nw ? nw() : 0;
             if (irq & (HY_PMU_PKEY_SHORT | HY_PMU_PKEY_LONG)) {
                 cause = W_PWR;
-            } else if ((irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) || s_light == s_vbus_real) {
+            } else if ((irq & (HY_PMU_VBUS_IN | HY_PMU_VBUS_OUT)) || (s_light == s_vbus_real && !usb_light_ok())) {
                 /* light sleep must match the real VBUS (on: no VBUS). A lost VBUS IRQ, or a sleep entered on a VBUS
                  * reading taken before an unplug, ends the sleep mode; the UI asks again with the fresh reading */
                 cause = W_USB;
@@ -1010,6 +1121,14 @@ static void power_task(void *arg)
                 flags |= HY_BATT_CHANGED;
             }
             hy_power_state(&st);
+#if CONFIG_HY_DEBUG_CONSOLE
+            if (st.pmu_ok && mono - last_mv >= SLEEP_READ_S) {   /* pwrx mv: one point a minute, awake or asleep */
+                last_mv = mono;
+                portENTER_CRITICAL(&s_mux);
+                hy_mv_ring_push(&s_ls_mv, (uint32_t)mono, st.batt.raw.mv, st.batt.pct, s_scr);
+                portEXIT_CRITICAL(&s_mux);
+            }
+#endif
             if (flags & HY_BATT_EV_LOW) {
                 ESP_LOGW(TAG, "battery low: %d%%", st.batt.pct);
             }
@@ -1047,6 +1166,49 @@ static void power_task(void *arg)
     }
 }
 
+#if CONFIG_HY_DEBUG_CONSOLE && CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+/* Light-sleep callbacks (idle task, interrupts off): count each entry, its requested length, and how it ended. */
+static esp_err_t ls_enter_cb(int64_t sleep_time_us, void *arg)
+{
+    (void)arg;
+    s_ls.entered++;
+    s_ls.req_hist[hy_ls_bucket(sleep_time_us)]++;
+    return ESP_OK;
+}
+
+static esp_err_t ls_exit_cb(int64_t slept_us, void *arg)
+{
+    (void)arg;
+    if (slept_us <= 0) {
+        s_ls.zero_n++;   /* the sleep was rejected or too short */
+        return ESP_OK;
+    }
+    s_ls.slept_n++;
+    s_ls.slept_us += (uint64_t)slept_us;
+    uint32_t c = esp_sleep_get_wakeup_causes();
+    const uint32_t timer = 1u << ESP_SLEEP_WAKEUP_TIMER, gpio = 1u << ESP_SLEEP_WAKEUP_GPIO;
+    if (c & timer) {
+        s_ls.cause_timer++;
+    }
+    if (c & gpio) {
+        s_ls.cause_gpio++;
+    }
+    if (c & ~(timer | gpio)) {
+        s_ls.cause_other++;
+    }
+    return ESP_OK;
+}
+
+static void ls_register(void)
+{
+    esp_pm_sleep_cbs_register_config_t cbs = {.enter_cb = ls_enter_cb, .exit_cb = ls_exit_cb};
+    esp_err_t err = esp_pm_light_sleep_register_cbs(&cbs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "lsstat: light sleep callbacks: %s", esp_err_to_name(err));
+    }
+}
+#endif
+
 esp_err_t hy_power_init(void)
 {
     if (s_inited) {
@@ -1057,6 +1219,9 @@ esp_err_t hy_power_init(void)
     }
     s_sleep_mu = xSemaphoreCreateMutexStatic(&s_sleep_mu_buf);
     ctr_init();
+#if CONFIG_HY_DEBUG_CONSOLE && CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+    ls_register();
+#endif
     esp_err_t perr = esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "hy_awake", &s_pm_lock);
     if (perr == ESP_OK) {
         lock_hold(true);   /* s_vbus_real is true until the first reading: awake_lock_sync releases it on battery */
@@ -1107,7 +1272,10 @@ static void wake_task(void)
 
 void hy_power_debug_pmu(const char *args)
 {
-    (void)args;
+    if (args && strncmp(args, "rails", 5) == 0) {
+        hy_board_pmu_rails();
+        return;
+    }
     hy_board_pmu_dump();
 }
 
@@ -1178,6 +1346,152 @@ void hy_power_debug_pkey(const char *args)
     wake_task();
 }
 
+static void px_print_flags_sleepstat(void);
+
+static uint32_t pct10(uint64_t part, uint64_t whole)   /* tenths of a percent */
+{
+    return whole ? (uint32_t)(part * 1000 / whole) : 0;
+}
+
+/* lsstat: what the light-sleep callbacks, the per-state clock and the task loop counters have collected */
+static void ls_print(void)
+{
+    ls_scr_mark();
+    ls_ctr_t c;
+    do {
+        c = s_ls;   /* a 64-bit sum written while this copy ran is read again */
+    } while (c.slept_us != s_ls.slept_us || c.entered != s_ls.entered);
+    uint64_t off_asleep_ms = c.st.ms[HY_ST_OFF_ASLEEP];
+    uint32_t res = pct10(c.slept_us / 1000, off_asleep_ms);
+    ESP_LOGI(TAG, "lsstat: light-sleep entries %" PRIu32 " (slept %" PRIu32 ", rejected or empty %" PRIu32
+             "), time in light sleep %llu ms, residency %" PRIu32 ".%" PRIu32 "%% of the OFF asleep time (%llu ms)",
+             c.entered, c.slept_n, c.zero_n, (unsigned long long)(c.slept_us / 1000), res / 10, res % 10,
+             (unsigned long long)off_asleep_ms);
+    char h[160];
+    int n = snprintf(h, sizeof h, "lsstat requested sleep length:");
+    for (int b = 0; b < HY_LS_BUCKETS && n > 0 && n < (int)sizeof h; b++) {
+        n += snprintf(h + n, sizeof h - n, "%s %s %" PRIu32, b ? "," : "", hy_ls_bucket_label(b), c.req_hist[b]);
+    }
+    ESP_LOGI(TAG, "%s", h);
+    ESP_LOGI(TAG, "lsstat wake cause of the sleeps that ran: timer %" PRIu32 ", gpio %" PRIu32 ", other %" PRIu32,
+             c.cause_timer, c.cause_gpio, c.cause_other);
+    ESP_LOGI(TAG, "lsstat task loops while a light-sleep mode is on: power %" PRIu32 ", net %" PRIu32 ", console %" PRIu32,
+             c.loops_pwr, c.loops_net, c.loops_console);
+    uint64_t total_ms = 0;
+    for (int s = 0; s < HY_ST_N; s++) {
+        total_ms += c.st.ms[s];
+    }
+    n = snprintf(h, sizeof h, "lsstat time on battery %llu s:", (unsigned long long)(total_ms / 1000));
+    for (int s = 0; s < HY_ST_N && n > 0 && n < (int)sizeof h; s++) {
+        uint32_t p10 = pct10(c.st.ms[s], total_ms);
+        n += snprintf(h + n, sizeof h - n, "%s %s %llu s (%" PRIu32 ".%" PRIu32 "%%)", s ? "," : "", hy_scrstate_name(s),
+                      (unsigned long long)(c.st.ms[s] / 1000), p10 / 10, p10 % 10);
+    }
+    ESP_LOGI(TAG, "%s", h);
+}
+
+static uint32_t px_mask_get(void)
+{
+    return s_px_mask;
+}
+
+static void px_set(hy_px_t f, bool on)
+{
+    portENTER_CRITICAL(&s_mux);
+    if (on) {
+        s_px_mask |= 1u << f;
+    } else {
+        s_px_mask &= ~(1u << f);
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (f == HY_PX_TOUCH) {
+        hy_board_debug_touch_cut(on);
+    } else if (f == HY_PX_PANEL) {
+        hy_board_debug_panel_cut(on);
+    }
+    if (f == HY_PX_WAKERS) {
+        wake_task();   /* the power task takes the new wait at once */
+    }
+}
+
+static void mv_print(void)
+{
+    uint32_t total, boots;
+    portENTER_CRITICAL(&s_mux);
+    total = s_ls_mv.total;
+    boots = s_ctr.boots;
+    portEXIT_CRITICAL(&s_mux);
+    uint32_t n = total < HY_MV_RING ? total : HY_MV_RING;
+    printf("pwrx mv: %u points kept (%u since the ring was cleared), boot #%u now, t_s restarts at each boot\n",
+           (unsigned)n, (unsigned)total, (unsigned)boots);
+    printf("mv,t_s,mv,pct,scr\n");
+    static const char *const scr[3] = {"ON", "DIM", "OFF"};
+    for (uint32_t i = 0; i < n; i++) {
+        hy_mv_pt_t pt;
+        portENTER_CRITICAL(&s_mux);
+        bool ok = hy_mv_ring_get(&s_ls_mv, i, &pt);
+        portEXIT_CRITICAL(&s_mux);
+        if (ok) {
+            printf("mv,%u,%u,%d,%s\n", (unsigned)pt.t_s, (unsigned)pt.mv, (int)pt.pct, scr[pt.scr < 3 ? pt.scr : 0]);
+        }
+    }
+    fflush(stdout);
+}
+
+static void px_print_flags(void)
+{
+    char names[48];
+    hy_px_names(px_mask_get(), names, sizeof names);
+    ESP_LOGI(TAG, "pwrx flags in force: %s", names);
+}
+
+/* the first line of every sleepstat: the dump says which flags were on */
+static void px_print_flags_sleepstat(void)
+{
+    char names[48];
+    hy_px_names(px_mask_get(), names, sizeof names);
+    ESP_LOGI(TAG, "sleepstat flags in force: %s", names);
+}
+
+/* pwrx | pwrx <touch|nonet|panel|wakers|lsvbus> on|off | pwrx off | pwrx mv [clear] */
+void hy_power_debug_pwrx(const char *args)
+{
+    hy_pxc_t c = hy_px_parse(args);
+    switch (c.kind) {
+    case HY_PXC_LIST:
+        for (int f = 0; f < HY_PX_N; f++) {
+            ESP_LOGI(TAG, "pwrx %s: %s", hy_px_name(f), px_on((hy_px_t)f) ? "on" : "off");
+        }
+        px_print_flags();
+        ls_print();
+        break;
+    case HY_PXC_SET:
+        px_set((hy_px_t)c.flag, c.on);
+        ESP_LOGI(TAG, "pwrx %s %s (RAM only, off at the next boot; a flag acts from the next sleep or screen off)",
+                 hy_px_name(c.flag), c.on ? "on" : "off");
+        px_print_flags();
+        break;
+    case HY_PXC_ALL_OFF:
+        for (int f = 0; f < HY_PX_N; f++) {
+            px_set((hy_px_t)f, false);
+        }
+        px_print_flags();
+        break;
+    case HY_PXC_MV:
+        mv_print();
+        break;
+    case HY_PXC_MV_CLEAR:
+        portENTER_CRITICAL(&s_mux);
+        hy_mv_ring_clear(&s_ls_mv);
+        portEXIT_CRITICAL(&s_mux);
+        ESP_LOGI(TAG, "pwrx mv: ring cleared");
+        break;
+    default:
+        ESP_LOGE(TAG, "usage: pwrx | pwrx <touch|nonet|panel|wakers|lsvbus> on|off | pwrx off | pwrx mv [clear]");
+        break;
+    }
+}
+
 void hy_power_sleep_stats(void)
 {
     portENTER_CRITICAL(&s_mux);
@@ -1195,6 +1509,7 @@ void hy_power_sleep_stats(void)
     if (asleep) {
         ms += mono_ms() - s_sleep_t0_ms;
     }
+    px_print_flags_sleepstat();
     ESP_LOGI(TAG, "sleepstat: %s%s, entries %" PRIu32 ", asleep %lld ms total, chime moments on battery %" PRIu32
              ", longest awake stretch while off %lld ms, requested %d, vbus %d, net hold %u",
              asleep ? "asleep" : "awake", asleep ? (s_light ? " (light sleep)" : " (no light sleep)") : "", entries,
@@ -1217,6 +1532,7 @@ void hy_power_sleep_stats(void)
     ESP_LOGI(TAG, "%s", hist);
     ESP_LOGI(TAG, "key presses %" PRIu32 " (%" PRIu32 " while asleep)", keys, keys_a);
     ESP_LOGI(TAG, "touch irqs %" PRIu32 " (%" PRIu32 " while asleep)", touches, touches_a);
+    ls_print();
     /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
      * build) this also prints the measured time per mode: LIGHT_SLEEP is the light-sleep time since boot, and the
      * light-sleep counts. */

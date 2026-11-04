@@ -20,6 +20,10 @@ typedef enum { HY_TS_PASS = 0, HY_TS_CONSUME, HY_TS_CLOSE } hy_toast_act_t;
 
 hy_toast_act_t hy_toast_stroke(bool toast_showing, hy_gesture_t g, bool on_undo, bool waking, bool overlay);
 
+/* Whether the point (x, y) lies inside the area (x1, y1) to (x2, y2), edges included (the rule LVGL's own hit
+   test uses). The stroke's start point against the Undo button's coordinates. */
+bool hy_toast_point_in_area(int x, int y, int x1, int y1, int x2, int y2);
+
 #ifdef __cplusplus
 }
 #endif

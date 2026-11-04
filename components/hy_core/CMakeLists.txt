@@ -38,6 +38,7 @@ idf_component_register(
         "src/import.c"
         "src/fwupdate.c"
         "src/toast_stroke.c"
+        "src/lsstat.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

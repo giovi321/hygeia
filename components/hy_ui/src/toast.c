@@ -260,7 +260,7 @@ void toast_stroke_end(hy_gesture_t g, int x0, int y0, bool waking)
 {
     lv_area_t a;
     lv_obj_get_coords(s_undo_area, &a);
-    bool on_undo = x0 >= a.x1 && x0 <= a.x2 && y0 >= a.y1 && y0 <= a.y2;
+    bool on_undo = hy_toast_point_in_area(x0, y0, a.x1, a.y1, a.x2, a.y2);
     bool overlay = poweroff_visible() || poweroff_countdown_visible() || pair_visible();
     if (hy_toast_stroke(s_mode == MODE_LOGGED, g, on_undo, waking, overlay) == HY_TS_CLOSE) {
         ESP_LOGI(TAG, "tap outside Undo: toast closed, log %u stays", (unsigned)s_log_id);

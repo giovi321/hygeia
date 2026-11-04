@@ -421,6 +421,7 @@ void cabinet_ui_event(const hy_cabev_t *e);      /* the single dispatch point fo
 #if CONFIG_HY_DEBUG_CONSOLE
 void cabinet_debug(const char *arg);             /* `cab react`: posts a REACT as the runner would; `cab ui <phase>` */
 void cab_debug_ui(const char *phase);            /* the teach view in a phase, without the runner */
+void cab_debug_press(const char *btn);           /* `cab press <button>`: a teach view button tap */
 #endif
 
 /* toast.c */

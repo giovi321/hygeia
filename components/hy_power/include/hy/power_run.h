@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "hy/battery.h"
 #include "hy/gap.h"
+#include "hy/lsstat.h"
 #include "sdkconfig.h"
 
 #ifdef __cplusplus
@@ -73,7 +74,7 @@ void hy_power_off(void);
 bool hy_power_fake_active(void);
 
 #if CONFIG_HY_DEBUG_CONSOLE
-void hy_power_debug_pmu(const char *args);
+void hy_power_debug_pmu(const char *args);       /* "" the registers, "rails" the AXP2101 rails (read only) */
 void hy_power_debug_batt(const char *args);
 void hy_power_debug_batlog(const char *args);    /* "" prints both files, "clear" deletes them */
 void hy_power_debug_alive(const char *args);
@@ -81,7 +82,18 @@ void hy_power_debug_poweroff(const char *args);  /* heartbeat clean = true, then
 void hy_power_debug_pkey(const char *args);      /* short | long */
 void hy_power_debug_fakebatt(const char *args);  /* <pct> [mv] [usb] | off; mv default 3300 + 9 * pct */
 void hy_power_resume(void);                      /* any task: leaves the sleep mode so queued LVGL work runs */
-void hy_power_sleep_stats(void);                 /* sleepstat: entries, time asleep, wakes by cause, PM locks */
+void hy_power_sleep_stats(void);                 /* sleepstat: flags in force, entries, time asleep, wakes by cause, lsstat, PM locks */
+/* `pwrx` (battery investigation, RAM only, every flag off at boot):
+   pwrx                          the flags and lsstat
+   pwrx <flag> on|off            flag: touch, nonet, panel, wakers, lsvbus
+   pwrx off                      every flag off
+   pwrx mv [clear]               the ring of 60 s battery readings (RTC memory), or clear it */
+void hy_power_debug_pwrx(const char *args);
+/* The flag is on. A flag changes behaviour only when it is on; with none on, nothing differs from the release. */
+bool hy_power_px(int flag);
+/* lsstat: a task loop while a light-sleep mode is on. who: HY_LS_T_NET or HY_LS_T_CONSOLE (the power task counts itself) */
+enum { HY_LS_T_NET = 1, HY_LS_T_CONSOLE = 2 };
+void hy_power_ls_loop(int who);
 #endif
 
 #ifdef __cplusplus

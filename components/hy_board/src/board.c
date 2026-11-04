@@ -76,6 +76,14 @@ static portMUX_TYPE s_wake_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_wake_armed;
 static volatile uint32_t s_wake_live;
 static bool s_sleep_set;   /* between hy_board_sleep_wake_arm(true) and (false), even when no pin could be armed */
+#if CONFIG_HY_DEBUG_CONSOLE
+/* Battery investigation flags (pwrx touch, pwrx panel), RAM only. _en: the flag; applied at the next light-sleep entry
+ * (touch) or the next panel off (panel). s_touch_off: the touch controller is held in reset and its INT pin is out of the
+ * wake set, from hy_board_sleep_wake_arm(true) to (false). s_panel_held: the reset line of the panel is held low since
+ * the last Display Off, until the next Display On initialises it again. */
+static volatile bool s_touch_cut_en, s_touch_off;
+static volatile bool s_panel_cut_en, s_panel_held;
+#endif
 /* IMU interrupt (wake on motion): the GPIO while attached, else -1, and its level at attach; under s_wake_mux */
 static volatile int s_imu_pin = -1;
 static int s_imu_level;
@@ -519,6 +527,51 @@ void hy_board_pmu_dump(void)
              v[5], v[6], v[7], v[8], v[9], v[10], v[11]);
     ESP_LOGI(TAG, "pmu: charger 0x61=0x%02x 0x62=0x%02x 0x63=0x%02x 0x64=0x%02x", v[12], v[13], v[14], v[15]);
 }
+
+/* `pmu rails`: read-only. Register addresses and the enable bit order come from the XPowersLib file AXP2101Constants.h
+ * (0x80 DCDC enable bits 0..4 = DCDC1..5; 0x90 bits 0..7 = ALDO1..4, BLDO1..2, CPUSLDO, DLDO1; 0x91 bit 0 = DLDO2;
+ * voltage codes 0x82..0x86 and 0x92..0x9A; 0x69 charge indicator). Voltage codes are printed raw, not converted. */
+void hy_board_pmu_rails(void)
+{
+    if (!pmu_present()) {
+        ESP_LOGE(TAG, "pmu: no AXP2101");
+        return;
+    }
+    uint8_t dc_en = 0, ldo_en = 0, ldo_en2 = 0, led = 0, dcv[5], ldov[9];
+    esp_err_t err = axp_read(0x80, &dc_en);
+    if (err == ESP_OK) {
+        err = axp_read(0x90, &ldo_en);
+    }
+    if (err == ESP_OK) {
+        err = axp_read(0x91, &ldo_en2);
+    }
+    if (err == ESP_OK) {
+        err = axp_read(0x69, &led);
+    }
+    for (int i = 0; i < 5 && err == ESP_OK; i++) {
+        err = axp_read((uint8_t)(0x82 + i), &dcv[i]);
+    }
+    for (int i = 0; i < 9 && err == ESP_OK; i++) {
+        err = axp_read((uint8_t)(0x92 + i), &ldov[i]);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "pmu rails: read failed: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "pmu rails: 0x80=0x%02x dcdc1 %s dcdc2 %s dcdc3 %s dcdc4 %s dcdc5 %s", dc_en,
+             dc_en & 0x01 ? "on" : "off", dc_en & 0x02 ? "on" : "off", dc_en & 0x04 ? "on" : "off",
+             dc_en & 0x08 ? "on" : "off", dc_en & 0x10 ? "on" : "off");
+    ESP_LOGI(TAG, "pmu rails: 0x90=0x%02x aldo1 %s aldo2 %s aldo3 %s aldo4 %s bldo1 %s bldo2 %s cpusldo %s dldo1 %s",
+             ldo_en, ldo_en & 0x01 ? "on" : "off", ldo_en & 0x02 ? "on" : "off", ldo_en & 0x04 ? "on" : "off",
+             ldo_en & 0x08 ? "on" : "off", ldo_en & 0x10 ? "on" : "off", ldo_en & 0x20 ? "on" : "off",
+             ldo_en & 0x40 ? "on" : "off", ldo_en & 0x80 ? "on" : "off");
+    ESP_LOGI(TAG, "pmu rails: 0x91=0x%02x dldo2 %s", ldo_en2, ldo_en2 & 0x01 ? "on" : "off");
+    ESP_LOGI(TAG, "pmu rails: dcdc voltage codes 0x82..0x86 = %02x %02x %02x %02x %02x (raw)", dcv[0], dcv[1], dcv[2],
+             dcv[3], dcv[4]);
+    ESP_LOGI(TAG, "pmu rails: ldo voltage codes 0x92..0x9a = %02x %02x %02x %02x %02x %02x %02x %02x %02x (raw)",
+             ldov[0], ldov[1], ldov[2], ldov[3], ldov[4], ldov[5], ldov[6], ldov[7], ldov[8]);
+    ESP_LOGI(TAG, "pmu rails: 0x69 charge indicator 0x%02x", led);
+}
 #endif
 
 static void i2c_scan(void)
@@ -683,6 +736,18 @@ void hy_board_display_power(bool on)
         if (since < PANEL_SLEEP_GAP_US) {
             vTaskDelay(pdMS_TO_TICKS((PANEL_SLEEP_GAP_US - since) / 1000 + 1));
         }
+#if CONFIG_HY_DEBUG_CONSOLE
+        if (s_panel_held) {
+            /* pwrx panel: the full panel init of the board support package (reset pulse, vendor table with Sleep Out and
+             * Display On), then brightness 0 again; the table also resets MADCTL, so the held value is sent below */
+            s_panel_held = false;
+            esp_lcd_panel_reset(s_panel);
+            esp_lcd_panel_init(s_panel);
+            bsp_display_brightness_set(0);
+            s_madctl_pending = true;
+            ESP_LOGI(TAG, "panel initialised again after the reset hold");
+        }
+#endif
         s_bri_hold = true;   /* brightness is 0 since the off: it stays there until a frame is sent */
         s_wake_flushed = false;
         e1 = panel_cmd(PANEL_CMD_SLPOUT, NULL, 0);
@@ -717,6 +782,12 @@ void hy_board_display_power(bool on)
         e3 = panel_cmd(PANEL_CMD_SLPIN, NULL, 0);
         s_slpin_us = esp_timer_get_time();
         vTaskDelay(pdMS_TO_TICKS(10));   /* at least 5 ms after Sleep In before the bus goes quiet or the next command */
+#if CONFIG_HY_DEBUG_CONSOLE
+        if (s_panel_cut_en) {
+            gpio_set_level(BSP_LCD_RST, 0);   /* held through the sleep: the pin is excluded from the sleep GPIO switch */
+            s_panel_held = true;
+        }
+#endif
     }
     int ms = (int)((esp_timer_get_time() - t0) / 1000);
     if (e1 != ESP_OK || e2 != ESP_OK || e3 != ESP_OK) {
@@ -943,6 +1014,11 @@ static void IRAM_ATTR touch_isr(esp_lcd_touch_handle_t tp, void *ctx)
         s_touch_isr_us = esp_timer_get_time();
     }
 #endif
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (s_touch_off) {
+        return;   /* the controller is held in reset: whatever its INT pin does is not a touch */
+    }
+#endif
     wake_pin_fired(BSP_LCD_TOUCH_INT);
     void (*fn)(void) = s_touch_hook;
     if (fn) {
@@ -998,6 +1074,48 @@ static void key_and_sleep_pins_init(void)
     }
 }
 
+#if CONFIG_HY_DEBUG_CONSOLE
+void hy_board_debug_touch_cut(bool on)
+{
+    s_touch_cut_en = on;
+}
+
+void hy_board_debug_panel_cut(bool on)
+{
+    s_panel_cut_en = on;
+}
+
+/* The flag is on and a light sleep begins: the touch controller is held in reset (RST stays low through the sleep:
+ * the pin is excluded from the sleep GPIO switch). The caller leaves GPIO 11 out of the wake set. */
+static bool touch_cut_begin(void)
+{
+    if (!s_touch_cut_en || !s_tp) {
+        return false;
+    }
+    gpio_set_level(BSP_LCD_TOUCH_RST, 0);
+    s_touch_off = true;
+    ESP_LOGI(TAG, "sleep wake: touch controller in reset, gpio %d left out", (int)BSP_LCD_TOUCH_INT);
+    return true;
+}
+
+/* The light sleep ends: the start sequence of the touch driver (reset released, 50 ms, command mode write 0xD101). */
+static void touch_cut_end(void)
+{
+    if (!s_touch_off) {
+        return;
+    }
+    gpio_set_level(BSP_LCD_TOUCH_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    const uint8_t mode = 0x01;
+    esp_err_t e1 = esp_lcd_panel_io_tx_param(s_tp->io, 0xD1, &mode, 1);
+    vTaskDelay(pdMS_TO_TICKS(2));
+    esp_err_t e2 = esp_lcd_panel_io_tx_param(s_tp->io, 0xD1, &mode, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    s_touch_off = false;
+    ESP_LOGI(TAG, "touch controller released from reset (mode write %s, %s)", esp_err_to_name(e1), esp_err_to_name(e2));
+}
+#endif
+
 void hy_board_sleep_wake_arm(bool on)
 {
     static const uint32_t pins[] = {BSP_LCD_TOUCH_INT, RTC_INT_GPIO, USER_KEY_GPIO};
@@ -1010,8 +1128,16 @@ void hy_board_sleep_wake_arm(bool on)
             return;
         }
         uint32_t armed = 0;
+#if CONFIG_HY_DEBUG_CONSOLE
+        bool touch_cut = touch_cut_begin();
+#endif
         for (size_t i = 0; i < sizeof pins / sizeof pins[0]; i++) {
             uint32_t p = pins[i];
+#if CONFIG_HY_DEBUG_CONSOLE
+            if (touch_cut && p == BSP_LCD_TOUCH_INT) {
+                continue;   /* pwrx touch: no touch wake, the controller is in reset */
+            }
+#endif
             if (gpio_get_level((gpio_num_t)p) == 0) {
                 ESP_LOGW(TAG, "sleep wake: gpio %u low, not armed", (unsigned)p);
                 continue;
@@ -1052,6 +1178,9 @@ void hy_board_sleep_wake_arm(bool on)
         ESP_LOGI(TAG, "sleep wake: armed gpio%s", list[0] ? list : " none");
         return;
     }
+#if CONFIG_HY_DEBUG_CONSOLE
+    touch_cut_end();
+#endif
     portENTER_CRITICAL(&s_wake_mux);
     uint32_t was = s_wake_armed;
     s_sleep_set = false;

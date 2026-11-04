@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "hy/power_run.h"
 
 #define MAX_CMDS 64
 #define LINE_MAX_LEN 128
@@ -22,6 +23,7 @@
  * one slow poll; the host holds the bytes until the FIFO is read, so nothing is lost. */
 #define POLL_HOST_MS 20
 #define POLL_NO_HOST_MS 2000
+#define POLL_NO_HOST_WAKERS_MS 30000   /* with pwrx wakers on */
 
 static const char *TAG = "console";
 
@@ -75,7 +77,9 @@ static void console_task(void *arg)
     for (;;) {
         int c = getchar();
         if (c == EOF) {
-            vTaskDelay(pdMS_TO_TICKS(usb_serial_jtag_is_connected() ? POLL_HOST_MS : POLL_NO_HOST_MS));
+            hy_power_ls_loop(HY_LS_T_CONSOLE);
+            uint32_t slow = hy_power_px(HY_PX_WAKERS) ? POLL_NO_HOST_WAKERS_MS : POLL_NO_HOST_MS;
+            vTaskDelay(pdMS_TO_TICKS(usb_serial_jtag_is_connected() ? POLL_HOST_MS : slow));
             continue;
         }
         if (c == '\r' || c == '\n') {

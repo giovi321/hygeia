@@ -47,6 +47,35 @@ static void test_overlay_or_waking_stroke_does_not_close(void)
     TEST_ASSERT_EQUAL(HY_TS_CONSUME, hy_toast_stroke(true, HY_G_TAP, false, true, false));
 }
 
+static void test_point_in_area_includes_the_edges(void)
+{
+    /* an area 100..199 by 300..339: the corner pixels are on the button, one pixel further out is not */
+    TEST_ASSERT_TRUE(hy_toast_point_in_area(100, 300, 100, 300, 199, 339));
+    TEST_ASSERT_TRUE(hy_toast_point_in_area(199, 339, 100, 300, 199, 339));
+    TEST_ASSERT_TRUE(hy_toast_point_in_area(150, 320, 100, 300, 199, 339));
+    TEST_ASSERT_FALSE(hy_toast_point_in_area(99, 320, 100, 300, 199, 339));
+    TEST_ASSERT_FALSE(hy_toast_point_in_area(200, 320, 100, 300, 199, 339));
+    TEST_ASSERT_FALSE(hy_toast_point_in_area(150, 299, 100, 300, 199, 339));
+    TEST_ASSERT_FALSE(hy_toast_point_in_area(150, 340, 100, 300, 199, 339));
+}
+
+static void test_point_in_area_single_pixel_and_negative_coordinates(void)
+{
+    TEST_ASSERT_TRUE(hy_toast_point_in_area(5, 5, 5, 5, 5, 5));
+    TEST_ASSERT_FALSE(hy_toast_point_in_area(6, 5, 5, 5, 5, 5));
+    TEST_ASSERT_TRUE(hy_toast_point_in_area(-3, -3, -5, -5, 0, 0));
+    TEST_ASSERT_FALSE(hy_toast_point_in_area(1, -3, -5, -5, 0, 0));
+}
+
+static void test_a_near_miss_beside_undo_closes_the_toast(void)
+{
+    /* the hit test feeds the decision: just outside the button is a tap outside and closes the toast */
+    bool on = hy_toast_point_in_area(200, 320, 100, 300, 199, 339);
+    TEST_ASSERT_EQUAL(HY_TS_CLOSE, hy_toast_stroke(true, HY_G_TAP, on, false, false));
+    on = hy_toast_point_in_area(199, 339, 100, 300, 199, 339);
+    TEST_ASSERT_EQUAL(HY_TS_CONSUME, hy_toast_stroke(true, HY_G_TAP, on, false, false));
+}
+
 static void test_too_late_info_toast_is_not_the_logged_toast(void)
 {
     /* "Too late to undo" is an info toast: the logged toast is not showing, so its strokes pass */
@@ -63,6 +92,9 @@ int main(void)
     RUN_TEST(test_next_tap_after_close_is_normal);
     RUN_TEST(test_other_strokes_are_consumed_and_keep_the_toast);
     RUN_TEST(test_overlay_or_waking_stroke_does_not_close);
+    RUN_TEST(test_point_in_area_includes_the_edges);
+    RUN_TEST(test_point_in_area_single_pixel_and_negative_coordinates);
+    RUN_TEST(test_a_near_miss_beside_undo_closes_the_toast);
     RUN_TEST(test_too_late_info_toast_is_not_the_logged_toast);
     return UNITY_END();
 }
