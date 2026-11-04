@@ -13,8 +13,9 @@
 #define HY_CAB_QUIET_MS        400
 #define HY_CAB_QUIET_DDPS      100     /* 10 dps */
 #define HY_CAB_QUIET_MG         40
-#define HY_CAB_GYRO_START_MS   180     /* datasheet gyro turn-on 150 ms + 3 / ODR at 112.1 Hz, rounded up to
-                                          20 ms; the board measurement may lower it */
+#define HY_CAB_GYRO_START_MS   220     /* after the switch to accel + gyro the first samples are disturbed (accel up
+                                          to 1.7 g, gyro up to 108 dps on a still board) until 180 to 201 ms; clean from
+                                          220 ms; measured over 11 runs, rounded up to 20 ms */
 #define HY_CAB_TEACH_TRIG_MG    40
 #define HY_CAB_TRIG_MIN_MG      40
 #define HY_CAB_TRIG_MAX_MG     250
@@ -60,6 +61,12 @@ void         hy_cab_cap_start(hy_cab_cap_t *c, hy_accel_t rest, bool has_gyro, u
    start, by index at HY_CAB_RATE_HZ). Stillness is around whatever pose the device holds, not the rest vector, so
    a movement that ends in a new pose ends too; the rest vector stays the features' reference. */
 hy_cap_res_t hy_cab_cap_feed(hy_cab_cap_t *c, uint32_t t_ms, const hy_imu6_t *x);
+/* hy_cab_cap_feed for a sample read after the switch to accel + gyro: while the sample is within
+   HY_CAB_GYRO_START_MS of the capture start (t_ms - start < HY_CAB_GYRO_START_MS) its accel is replaced by hold, the
+   last good reading taken before the switch (the trigger sample, or the rest vector when only that exists), so the
+   segmenter and the features never see the start-up disturbance. The gyro of those samples is masked by the
+   features and the segmenter. x is changed in place. */
+hy_cap_res_t hy_cab_cap_feed_held(hy_cab_cap_t *c, uint32_t t_ms, hy_imu6_t *x, hy_accel_t hold);
 /* Rest tracker for the stream path: true once HY_CAB_STILL_MS of samples with every step under
    HY_CAB_STILL_STEP_MG; *rest is the mean of the last 10. */
 typedef struct { hy_accel_t last, sum_buf[10]; uint8_t idx, cnt; uint32_t still_since; bool has_last; } hy_cab_still_t;

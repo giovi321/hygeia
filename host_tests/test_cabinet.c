@@ -248,6 +248,51 @@ static void test_cap_door_done_with_lead(void)
     TEST_ASSERT_UINT16_WITHIN(2, 45, c.seq.n);
 }
 
+
+/* After the switch the sensor is disturbed until HY_CAB_GYRO_START_MS: the accel is held at the pre-switch reading */
+static void test_cap_feed_held(void)
+{
+    hy_cab_cap_t c;
+    hy_accel_t hold = {10, -20, 1000};
+    hy_cab_cap_start(&c, hold, true, 5000);
+    uint32_t held = HY_CAB_GYRO_START_MS / CAB_SYN_STEP_MS;   /* samples 0 .. held - 1 are held */
+    for (uint32_t i = 0; i < held + 2; i++) {
+        hy_imu6_t s = {{1700, -1700, 2500}, {1080, -1080, 1080}};   /* disturbed, then a real movement */
+        hy_cab_cap_feed_held(&c, 5000 + i * CAB_SYN_STEP_MS, &s, hold);
+    }
+    TEST_ASSERT_EQUAL_UINT16(held + 2, c.seq.n);
+    for (uint32_t i = 0; i < held; i++) {
+        TEST_ASSERT_EQUAL_INT16(10, c.seq.s[i].a[0]);
+        TEST_ASSERT_EQUAL_INT16(-20, c.seq.s[i].a[1]);
+        TEST_ASSERT_EQUAL_INT16(1000, c.seq.s[i].a[2]);
+        TEST_ASSERT_EQUAL_INT16(1080, c.seq.s[i].g[0]);   /* the gyro is left to the mask */
+    }
+    TEST_ASSERT_EQUAL_INT16(1700, c.seq.s[held].a[0]);    /* first sample at HY_CAB_GYRO_START_MS: real data */
+    TEST_ASSERT_EQUAL_INT16(1700, c.seq.s[held + 1].a[0]);
+}
+
+/* A still device with a disturbed start ends in DONE only from the real data, and a disturbance inside the span
+   never extends the movement */
+static void test_cap_held_disturbance_does_not_move(void)
+{
+    hy_cab_cap_t c;
+    hy_accel_t rest = {0, 0, 1000};
+    hy_cab_cap_start(&c, rest, true, 0);
+    hy_cap_res_t r = HY_CAP_MORE;
+    for (uint32_t i = 0; i < 60 && r == HY_CAP_MORE; i++) {
+        hy_imu6_t s = {{0, 0, 1000}, {0, 0, 0}};
+        if (i >= 1 && i < HY_CAB_GYRO_START_MS / CAB_SYN_STEP_MS) {
+            s.a[0] = 1700;
+            s.g[0] = 1080;
+        }
+        r = hy_cab_cap_feed_held(&c, i * CAB_SYN_STEP_MS, &s, rest);
+    }
+    TEST_ASSERT_TRUE(r != HY_CAP_MORE);
+    for (uint16_t i = 0; i < c.seq.n; i++) {
+        TEST_ASSERT_EQUAL_INT16(0, c.seq.s[i].a[0]);
+    }
+}
+
 static void test_cap_too_short(void)
 {
     cab_syn_t p = noisy(CAB_SYN_LIFT, 9);
@@ -352,6 +397,8 @@ int main(void)
     RUN_TEST(test_wom_hit_slope_not_drift);
     RUN_TEST(test_cap_door_done);
     RUN_TEST(test_cap_door_done_with_lead);
+    RUN_TEST(test_cap_feed_held);
+    RUN_TEST(test_cap_held_disturbance_does_not_move);
     RUN_TEST(test_cap_too_short);
     RUN_TEST(test_cap_too_long);
     RUN_TEST(test_cap_new_pose_done);

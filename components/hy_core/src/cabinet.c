@@ -146,6 +146,16 @@ hy_cap_res_t hy_cab_cap_feed(hy_cab_cap_t *c, uint32_t t_ms, const hy_imu6_t *x)
     return q->n >= HY_CAB_MAX_N ? HY_CAP_TOO_LONG : HY_CAP_MORE;
 }
 
+hy_cap_res_t hy_cab_cap_feed_held(hy_cab_cap_t *c, uint32_t t_ms, hy_imu6_t *x, hy_accel_t hold)
+{
+    if ((uint32_t)(t_ms - c->t0_ms) < HY_CAB_GYRO_START_MS) {
+        x->a[0] = hold.x;
+        x->a[1] = hold.y;
+        x->a[2] = hold.z;
+    }
+    return hy_cab_cap_feed(c, t_ms, x);
+}
+
 void hy_cab_still_reset(hy_cab_still_t *st)
 {
     memset(st, 0, sizeof *st);

@@ -1174,7 +1174,14 @@ static void imu_cap(int secs)
         printf("imu cap: %s\n", esp_err_to_name(err));
         return;
     }
-    int64_t first_gyro_ms = -1;
+    /* The data registers keep the values of the last run until new data arrives, so a value off zero says nothing.
+       The registers read right after the switch are the baseline; the first sample that differs from it in any of the
+       six values is the first new one. Disturbed: an accel step of 200 mg or more from the previous sample, or a gyro
+       over 10 dps; the settle time is the end of the last disturbed sample. */
+    int16_t base[6] = {0};
+    bool have_base = hy_board_imu_read6(base, base + 3) == ESP_OK;
+    int64_t first_new_ms = -1, settle_ms = -1;
+    int16_t prev[3] = {base[0], base[1], base[2]};
     int n = 0, fails = 0;
     TickType_t last = xTaskGetTickCount();
     for (int i = 0; i < secs * 50; i++) {
@@ -1185,15 +1192,31 @@ static void imu_cap(int secs)
             continue;
         }
         int64_t t_ms = (esp_timer_get_time() - t0) / 1000;
-        if (first_gyro_ms < 0 && (g[0] || g[1] || g[2])) {
-            first_gyro_ms = t_ms;
+        if (first_new_ms < 0 && have_base &&
+            (a[0] != base[0] || a[1] != base[1] || a[2] != base[2] || g[0] != base[3] || g[1] != base[4] ||
+             g[2] != base[5])) {
+            first_new_ms = t_ms;
         }
+        if (first_new_ms >= 0) {
+            int32_t step = 0;
+            for (int k = 0; k < 3; k++) {
+                int32_t d = a[k] - prev[k];
+                step = d < 0 ? (-d > step ? -d : step) : (d > step ? d : step);
+            }
+            int32_t g2 = (int32_t)g[0] * g[0] + (int32_t)g[1] * g[1] + (int32_t)g[2] * g[2];
+            if (step >= 200 || g2 > 100 * 100) {
+                settle_ms = t_ms + 20;
+            }
+        }
+        prev[0] = a[0];
+        prev[1] = a[1];
+        prev[2] = a[2];
         printf("imu6,%lld,%d,%d,%d,%d,%d,%d\n", (long long)t_ms, a[0], a[1], a[2], g[0], g[1], g[2]);
         n++;
     }
     err = hy_board_imu_power(false);
-    printf("imu cap: %d samples, %d read failures, first gyro value off zero at %lld ms, power down %s\n", n, fails,
-           (long long)first_gyro_ms, esp_err_to_name(err));
+    printf("imu cap: %d samples, %d read failures, first new sample at %lld ms, settled at %lld ms, power down %s\n", n,
+           fails, (long long)first_new_ms, (long long)settle_ms, esp_err_to_name(err));
 }
 
 static void imu_pin(const char *arg)

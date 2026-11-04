@@ -3,7 +3,7 @@
  *   on USB only, R2), USB in and out, PWR short (toggles ON <-> OFF) and the user key drive it, with the dim_s,
  *   off_bat_s and off_usb_s settings.
  * - Hold (no dim, no off; a dimmed screen comes back ON): the power-off confirmation, the critical countdown or the
- *   browser pairing code shows, or a due card shows on USB (R1). On battery a due card dims and goes off like any view.
+ *   browser pairing code shows, the Cabinet open teach or test view is open, or a due card shows on USB (R1). On battery a due card dims and goes off like any view.
  * - DIM is the idle clock: a black overlay on the top layer, above the top bar and below the power-off overlay, with
  *   the time, the next dose and the status line, brightness min(setting, 20%), moved a few pixels each minute
  *   against burn-in (hy_idle_drift).
@@ -307,9 +307,18 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
     }
 }
 
+/* The Cabinet open teach and test views keep the screen on while they are open: teaching needs it readable
+   through the three takes and a test runs up to 10 minutes. The normal timers resume when the view closes. */
+static bool cab_view_open(void)
+{
+    hy_view_t v = ui_current_view();
+    return v == HY_V_CAB_TEACH || v == HY_V_CAB_TEST;
+}
+
 static bool hold_now(void)
 {
-    return poweroff_visible() || poweroff_countdown_visible() || pair_visible() || (due_visible() && s_scr.usb);
+    return poweroff_visible() || poweroff_countdown_visible() || pair_visible() || cab_view_open() ||
+           (due_visible() && s_scr.usb);
 }
 
 static void event(hy_scr_ev_t ev, const char *why)
@@ -423,7 +432,8 @@ void screen_touch_wake(void)
  * wakes (power-off confirmation, countdown, pairing code) do not need one. */
 bool idle_double_tap_required(void)
 {
-    return !hy_settings()->wake_single_tap && !poweroff_visible() && !poweroff_countdown_visible() && !pair_visible();
+    return !hy_settings()->wake_single_tap && !poweroff_visible() && !poweroff_countdown_visible() && !pair_visible() &&
+           !cab_view_open();
 }
 
 /* The power task judged a double tap while the screen was OFF: both taps are over and LVGL never saw them, so no

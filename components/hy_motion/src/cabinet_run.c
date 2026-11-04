@@ -90,6 +90,7 @@ static struct {
     uint8_t cap_for;
     hy_cab_still_t still;
     hy_accel_t rest;
+    hy_accel_t hold;      /* the trigger sample: the accel held through the capture start */
     hy_accel_t hist[3];   /* the last three samples, [0] the newest */
     uint8_t hist_n;
     uint32_t holdoff_until;
@@ -441,7 +442,7 @@ static void sleep_capture(void)
             continue;
         }
         hy_imu6_t x = {{a[0], a[1], a[2]}, {g[0], g[1], g[2]}};
-        res = hy_cab_cap_feed(&s_cap, (uint32_t)mono_ms(), &x);
+        res = hy_cab_cap_feed_held(&s_cap, (uint32_t)mono_ms(), &x, s_sl.rest);   /* the last good reading before the switch */
     }
     capture_done(res, false);
 }
@@ -556,6 +557,7 @@ static void capture_begin(uint32_t t, hy_accel_t a, uint8_t for_what, hy_accel_t
     hy_cab_cap_feed(&s_cap, t, &x);
     s_st.capturing = true;
     s_st.cap_for = for_what;
+    s_st.hold = a;
 }
 
 void hy_cab_int_screen_off(void)
@@ -792,7 +794,7 @@ void hy_cab_int_stream_sample(uint32_t t, hy_accel_t a, const int16_t *g, bool s
     }
     if (s_st.capturing) {
         hy_imu6_t x = {{a.x, a.y, a.z}, {g ? g[0] : 0, g ? g[1] : 0, g ? g[2] : 0}};
-        hy_cap_res_t res = hy_cab_cap_feed(&s_cap, t, &x);
+        hy_cap_res_t res = hy_cab_cap_feed_held(&s_cap, t, &x, s_st.hold);
         if (res == HY_CAP_MORE) {
             return;
         }

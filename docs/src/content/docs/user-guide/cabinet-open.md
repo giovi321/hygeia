@@ -43,7 +43,7 @@ A movement must:
 - Last less than 4 seconds. A longer one shows "Too long, keep it under 4 seconds"
 - Have no pause in it. A pause of 400 ms or more ends the take, so a movement with a stop in the middle is cut at the stop
 
-If the device sees no movement for a minute after "Now", it shows "No movement, teaching stopped". If the device does not stay still for a second within 10 seconds, or the takes give nothing usable, it shows "Teaching stopped": tap Start to begin again. Leaving the page also stops teaching, and the movement taught before stays as it was.
+If the device sees no movement for a minute after "Now", it shows "No movement, teaching stopped". If the device does not stay still for a second within 10 seconds, or the takes give nothing usable, it shows "Teaching stopped": tap Start to begin again. Leaving the page also stops teaching, and the movement taught before stays as it was. The screen stays on while the teaching page is open (it neither dims nor turns off, also on battery); the normal screen timers resume when you leave it.
 
 The taught movement is kept across a restart. Settings › Cabinet open › Forget the movement removes it after the question "Forget the taught movement?". The web UI has the same button. Without a taught movement, Taught movement does nothing.
 
@@ -54,7 +54,7 @@ Settings › Cabinet open › Test, or Start under Test in the web UI, checks th
 - With Taught movement: "Matches" and "Other movements". On the device a match plays the low tone
 - With Any movement: "Movements"
 
-The device stays silent otherwise and does not remind during the test. The screen has to stay on: the test ends when the screen turns off, when you leave the page, or after 10 minutes. The web UI shows the same counters live, and for each Taught capture its distance from the taught movement and the limit.
+The device stays silent otherwise and does not remind during the test. The screen stays on while the test page is open (it neither dims nor turns off, also on battery). The test ends when you leave the page or after 10 minutes, and the normal screen timers then resume. The web UI shows the same counters live, and for each Taught capture its distance from the taught movement and the limit.
 
 A good taught movement gives a match for nearly every opening and few matches for other things, such as closing the door, knocking or tapping the screen. If other movements match too often, lower the sensitivity or teach again.
 

@@ -143,12 +143,12 @@ Register sequence to arm (DS 12.5 figure 25): CTRL7 0; CTRL2 0x2D; CAL1_L 0x0B =
 
 Interrupt pin: selectable at run time (`imu pin [1|2 [17|21]]` on the debug console). Default INT1 on GPIO 17, INT2 on GPIO 21 as the alternative. Measured: the chip's INT1 is wired to GPIO 17 (`imu wom 1`: GPIO 17 follows the chip's INT1 bit in STATUSINT, GPIO 21 stays low). The line toggles on each event and holds the new level: over 30 s at 1 mg, 655 level changes by 10 ms polling and 655 interrupt edges, one change every 40 to 50 ms (each 21 Hz sample over the threshold), STATUS1 0x04 at the end. Registers measured: powered down CTRL1 0x41, CTRL7 0x00, CTRL8 0x80; accel only CTRL1 0x40, CTRL2 0x26, CTRL7 0x01; armed CTRL1 0x48, CTRL2 0x2d, CTRL7 0x01.
 
-Gyro: range +-1024 dps, values in deci-dps (raw x 10 / 32). Turn-on per datasheet: t1 typical 150 ms plus 3 / ODR (27 ms at 112.1 Hz), about 177 ms (DS table 8, 7.3). The firmware masks the gyro for the first 180 ms of every sequence (`HY_CAB_GYRO_START_MS`), teach and live alike.
+Gyro: range +-1024 dps, values in deci-dps (raw x 10 / 32). Turn-on per datasheet: t1 typical 150 ms plus 3 / ODR (27 ms at 112.1 Hz), about 177 ms (DS table 8, 7.3). The firmware masks the gyro for the first 220 ms of every sequence (`HY_CAB_GYRO_START_MS`), teach and live alike, and holds the accel samples of the same span at the last good reading taken before the switch to accel and gyro (the trigger sample on the stream path, the rest vector on the wake-on-motion path), so the capture segmenter and the features never see the start-up disturbance (`hy_cab_cap_feed_held`).
 
 Gyro measured (`imu cap`, 11 runs, board still):
 
-- After `hy_board_imu_capture_on` the data registers keep their last values (not zero) until the first new sample, 100 to 140 ms later. The `imu cap` line `first gyro value off zero` therefore reads 140 ms on the first run after power-up and 20 ms on every later run; read the samples instead
-- The first new samples are disturbed on accel and gyro alike (accel up to 1.7 g, gyro up to 108 dps on a still board); the last disturbed sample was at 180 to 201 ms, settled from 220 ms on every run. This implies `HY_CAB_GYRO_START_MS` 220, and an accel mask over the same time
+- After `hy_board_imu_capture_on` the data registers keep their last values (not zero) until the first new sample, 100 to 140 ms later. The `imu cap` line therefore reports the first new sample (the first read that differs from the registers read right after the switch) and the settle time (end of the last sample with an accel step of 200 mg or more or a gyro over 10 dps)
+- The first new samples are disturbed on accel and gyro alike (accel up to 1.7 g, gyro up to 108 dps on a still board); the last disturbed sample was at 180 to 201 ms, settled from 220 ms on every run. `HY_CAB_GYRO_START_MS` is 220 (11 runs, rounded up to 20 ms), and the accel is held over the same time
 - Still noise over 5 s after settling: largest absolute value 1.2, 2.3 and 1.0 dps (x, y, z), mean offset 0.8, -2.0 and -0.5 dps
 - The sign of z for a clockwise turn is not measured yet (needs the board turned by hand)
 

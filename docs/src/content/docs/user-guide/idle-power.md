@@ -27,6 +27,7 @@ The one exception is [Cabinet open](../cabinet-open/) while it is live: on, with
 
 - On USB power the screen dims after 30 seconds and stays dimmed. A due card on USB keeps the screen on
 - On battery the screen turns off 2 minutes after the last activity and the CPU enters light sleep. A touch, the RTC alarm for the next dose, the PWR key, the user key, plugging in USB or, with Cabinet open live, the motion sensor wakes the CPU. A due card wakes the screen. A touch turns the screen on only as a double tap (or a single tap with Wake on single tap on); after a lone tap the CPU goes back to sleep with the screen off. A Cabinet open reminder turns the screen on when its light switch is on. A repeat chime on battery does not turn the screen on
+- The Cabinet open teach and test pages keep the screen on while they are open, on USB and on battery
 - Unplugging USB starts the 2 minute timer from the unplug
 
 ## PWR key
