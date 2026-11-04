@@ -28,10 +28,18 @@ hy_gesture_t hy_gesture_classify(const hy_stroke_t *s)
         if (s->y0 < HY_EDGE_GESTURE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_DOWN;
         return HY_G_SWIPE_DOWN;
     }
-    /* over a scrolling list the same band applies: the list consumes any stroke that scrolls it (ui_input_consume
-       refuses only the thin HY_EDGE_SCROLL_PX zone), so a stroke that reaches here from the band is not a scroll */
+    /* over a scrolling list the same band applies: the list consumes a stroke that scrolls it (ui_input_consume
+       refuses only the thin HY_EDGE_SCROLL_PX zone), but lets one pass that starts in the band and moves inward
+       while the list is already at that end (hy_edge_stroke_passes) */
     if (s->y0 >= HY_SCREEN_PX - HY_EDGE_GESTURE_PX) return s->glide_stop ? HY_G_NONE : HY_G_EDGE_UP;
     return HY_G_SWIPE_UP;
+}
+
+bool hy_edge_stroke_passes(int y0, int dy, bool at_top, bool at_bottom)
+{
+    if (dy > 0) return y0 < HY_EDGE_GESTURE_PX && at_top;
+    if (dy < 0) return y0 >= HY_SCREEN_PX - HY_EDGE_GESTURE_PX && at_bottom;
+    return false;
 }
 
 bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap)

@@ -28,7 +28,7 @@ description: Every touch gesture, with the thresholds the firmware uses.
 
 Start an edge gesture near the edge: on the border itself or a little inside the screen. When a corner mount or a case keeps your finger off the border, start the swipe on the glass as close to the edge as the case allows and swipe toward the middle. A swipe that starts in the middle of the screen is an ordinary swipe.
 
-A list, a keyboard key, a roller or a slider takes the swipe that starts on it, so an edge swipe from inside the screen only works on the parts of the screen that scroll or type nothing. From the border itself the edge gesture works everywhere, sliders included. A tap on a button near an edge is still a tap.
+A keyboard key, a roller or a slider takes the swipe that starts on it, and a list takes a swipe that scrolls it. An edge swipe from inside the screen therefore works where nothing types, turns or slides, and over a list only when the list has nothing left to scroll that way: pull down from near the top with the list at its top, or swipe up from near the bottom with the list at its bottom. The list does not stretch while the screen navigates. From the border itself the edge gesture works everywhere except on a slider. A tap on a button near an edge is still a tap.
 
 ## Turning and shaking
 
@@ -50,9 +50,10 @@ A due card, the PWR key, the user key, plugging in USB and a [Cabinet open](../c
 
 Measured on the panel on 2026-10-29:
 
-- Edge zone: a stroke that starts on the border always counts as an edge gesture, and so does one that starts a little inside the screen when no widget takes it. The distance inside is provisional and is being measured on the panel
 - Swipe: movement on the dominant axis of at least 60 px and at least 1.5 times the other axis
 - Tap: at most 16 px of movement and under 500 ms. A long press has the same movement limit and lasts 500 ms or more
 - Double tap: the second press starts within 300 ms of the first release and within 40 px of it
 - A stroke that leaves the start point and returns is not a tap: the largest deviation from the start must also be 16 px or less
 - A stroke that starts on the border is never taken by a widget, except sliders
+
+Not yet measured: a stroke that starts on the border always counts as an edge gesture, and so does one that starts a little inside the screen when no widget takes it. The distance inside is provisional and is being measured on the panel

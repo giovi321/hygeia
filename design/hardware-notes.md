@@ -122,16 +122,21 @@ Verified on the board, 2026-10-28 (serial) and 2026-10-29 (by hand, build 586713
 Thresholds that worked on the panel (hands-on session 2026-10-29, build 5867131):
 
 - Hard edge zone: 40 px (top edge down, bottom edge up from y 440, left edge right). 16 px at the bottom over scrolling content. No widget can take a stroke that starts there, except sliders
-- Edge gesture zone: 80 px (`HY_EDGE_GESTURE_PX`), provisional. `hy_gesture_classify` gives EDGE_RIGHT, EDGE_DOWN and EDGE_UP for a swipe toward the inside that starts less than 80 px from the edge (the bottom edge from y 400). Widgets that consume their strokes (lists, keyboard keys, rollers, text fields) still take them from 40 px inward, so the wider band only reaches strokes no widget took. A stroke that stopped a glide is never an edge gesture
 - Swipe: dominant axis at least 60 px and at least 1.5 times the other axis
 - Tap: at most 16 px of movement and under 500 ms; a long press is at most 16 px and 500 ms or more
 - Double tap: 300 ms between release and the next press, 40 px between the two points
 - A stroke that leaves and returns to the start is not a tap: `max_dev` (maximum deviation from the start) must also be 16 px or less, not only the end-point distance
 - A stroke that starts in the hard edge zone is never consumed by a widget, except sliders, which take it with a forced consume
 
+Not yet measured on the panel:
+
+- Edge gesture zone: 80 px (`HY_EDGE_GESTURE_PX`), provisional. `hy_gesture_classify` gives EDGE_RIGHT, EDGE_DOWN and EDGE_UP for a swipe toward the inside that starts less than 80 px from the edge (the bottom edge from y 400). Widgets that consume their strokes (lists, keyboard keys, rollers, text fields) still take them from 40 px inward, so the wider band only reaches strokes no widget took. A stroke that stopped a glide is never an edge gesture
+- Over a scrolling list the exception is a stroke that starts in the band and moves inward while the list is already at that end (top band moving down with the list at its top, bottom band moving up with the list at its bottom): the list does not consume it (`hy_edge_stroke_passes`, called from `ui_input_consume` at the scroll start), its elastic over-pull is switched off for the stroke (the `LV_OBJ_FLAG_SCROLL_ELASTIC` flag, restored at the release), and the classifier gives the edge kind. Owed on the board: that the list does not stretch on such a stroke and that a stroke at the other end of the list still scrolls it
+- Device check without a finger: `gesture bandright|banddown|bandup consumed` simulates a band stroke that a widget consumes (it stays), without `consumed` the stroke navigates
+
 ### Edge gesture zone basis and measurement
 
-Why 80 px: the logged corner touches (TL 33,28 and BL 24,460, see "Touch orientation") put the first reported point of a finger pressed against the edge 24 to 33 px in. A fingertip pad is 10 to 14 mm wide and the panel has about 12.4 px per mm (480 px over 38.8 mm), so a finger that must start fully on the glass reports its centroid 5 to 7 mm in, 62 to 87 px. 80 px covers most of that range and stays clear of the middle of the screen. The measurement replaces it.
+Why 80 px: the logged corner touches (TL 33,28 and BL 24,460, see "Touch orientation") put the first reported point of a finger pressed against the edge 13 to 33 px in (the corner log is TL 33,28; TR 466,29; BL 24,460; BR 460,466, so the bottom and right edges report 13 to 19 px in; the 16 px bottom hard zone over lists sits inside that range). A fingertip pad is 10 to 14 mm wide and the panel has about 12.4 px per mm (480 px over 38.8 mm), so a finger that must start fully on the glass reports its centroid 5 to 7 mm in, 62 to 87 px. 80 px covers most of that range and stays clear of the middle of the screen. The measurement replaces it.
 
 Measurement with `touch trace on` (debug build, console; `touch trace off` stops it; off at boot, not saved). Each stroke logs one line with the prefix `trace`: the first reported point, its time after the touch interrupt, the second reported point and its time after the first, and the end point. Procedure, done by the owner with the device in its corner or case:
 

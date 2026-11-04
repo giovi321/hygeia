@@ -577,6 +577,7 @@ static void job_gesture(const char *arg)
         {"up", 240, 300, 240, 150}, {"down", 240, 150, 240, 300}, {"left", 300, 240, 150, 240},
         {"right", 150, 240, 300, 240}, {"edgeup", 240, 460, 240, 300}, {"edgedown", 240, 10, 240, 150},
         {"edgeright", 10, 240, 150, 240},
+        {"bandright", 60, 240, 200, 240}, {"banddown", 240, 60, 240, 200}, {"bandup", 240, 420, 240, 280},
     };
     if (strcmp(name, "hold") == 0) {
         input_debug_hold(300, 240);
@@ -600,7 +601,7 @@ static void job_gesture(const char *arg)
                 return;
             }
         }
-        ESP_LOGE(TAG, "usage: gesture <up|down|left|right|edgeup|edgedown|edgeright> consumed");
+        ESP_LOGE(TAG, "usage: gesture <up|down|left|right|edgeup|edgedown|edgeright|bandright|banddown|bandup> consumed");
         return;
     }
     for (int g = HY_G_TAP; g <= HY_G_EDGE_RIGHT; g++) {

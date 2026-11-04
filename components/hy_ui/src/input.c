@@ -33,6 +33,9 @@ static const char *TAG = "ui_input";
 #define GLIDE_RECENT_MS    70
 
 static lv_obj_t *s_glide_scroller;  /* read_wrap: the list that is moving under the new touch */
+#define HY_FLAG_SCROLLER LV_OBJ_FLAG_USER_1   /* set by ui_scroller on every list it makes */
+static void restore_elastic(void);
+static lv_obj_t *s_noelastic;       /* a list whose elastic over-pull is off for the stroke in progress */
 static lv_obj_t *s_last_scroller;   /* the ui_scroller that moved last */
 static uint32_t s_scroll_ms;        /* lv_tick of that movement */
 static bool s_glide_pending;        /* read_wrap: the new touch landed on a moving list */
@@ -127,6 +130,7 @@ static void read_wrap(lv_indev_t *indev, lv_indev_data_t *data)
     if (down && !s_phys_down && s_active) {
         /* a new touch while the previous stroke never got its RELEASED (the pressed widget was deleted) */
         ESP_LOGW(TAG, "stroke dropped: no release event");
+        restore_elastic();
         s_active = false;
     }
     if (down && !s_phys_down) {
@@ -187,6 +191,15 @@ static bool glide_target(lv_obj_t *pressed)
     return false;
 }
 
+/* Give the list its elastic over-pull back after a stroke that passed an edge gesture */
+static void restore_elastic(void)
+{
+    if (s_noelastic) {
+        lv_obj_add_flag(s_noelastic, LV_OBJ_FLAG_SCROLL_ELASTIC);
+        s_noelastic = NULL;
+    }
+}
+
 /* The pressed object sits in a list whose content overflows: its view scrolls, so the bottom edge zone is thin */
 static bool pressed_in_scroller(lv_obj_t *pressed)
 {
@@ -242,6 +255,7 @@ static void indev_cb(lv_event_t *e)
 static void finish(int32_t x, int32_t y, uint32_t t)
 {
     s_active = false;
+    restore_elastic();
 #if CONFIG_HY_DEBUG_CONSOLE
     trace_end(x, y);
 #endif
@@ -337,6 +351,9 @@ static void scroller_cb(lv_event_t *e)
         if (s_glide_scroller == o) {
             s_glide_scroller = NULL;
         }
+        if (s_noelastic == o) {
+            s_noelastic = NULL;
+        }
         return;
     }
     s_last_scroller = o;
@@ -349,6 +366,7 @@ void ui_scroller(lv_obj_t *o)
 {
     lv_obj_set_scroll_momentum(o, true);
     lv_obj_set_scroll_elastic(o, true);
+    lv_obj_add_flag(o, HY_FLAG_SCROLLER);
     lv_obj_add_event_cb(o, scroller_cb, LV_EVENT_SCROLL, NULL);
     lv_obj_add_event_cb(o, scroller_cb, LV_EVENT_DELETE, NULL);
 }
@@ -390,6 +408,21 @@ void ui_input_consume(void)
     int bottom = s_st.scroll_view ? HY_EDGE_SCROLL_PX : HY_EDGE_PX;
     if (s_st.x0 < HY_EDGE_PX || s_st.y0 < HY_EDGE_PX || s_st.y0 >= HY_SCREEN_PX - bottom) {
         return;
+    }
+    /* A list that is already at the end the stroke pulls toward, in a stroke that starts in the band and moves inward,
+     * has nothing to scroll: the stroke passes to the edge gesture. The list's elastic over-pull is switched off for
+     * the stroke, so it does not stretch while the view navigates (restored at the release). */
+    lv_obj_t *list = s_indev ? lv_indev_get_scroll_obj(s_indev) : NULL;
+    if (list && lv_obj_has_flag(list, HY_FLAG_SCROLLER)) {
+        lv_point_t p;
+        lv_indev_get_point(s_indev, &p);
+        if (hy_edge_stroke_passes(s_st.y0, p.y - s_st.y0, lv_obj_get_scroll_top(list) <= 0,
+                                  lv_obj_get_scroll_bottom(list) <= 0)) {
+            restore_elastic();
+            lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLL_ELASTIC);
+            s_noelastic = list;
+            return;
+        }
     }
     s_consumed = true;
 }

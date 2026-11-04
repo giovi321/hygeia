@@ -11,7 +11,7 @@ extern "C" {
    can), so the edge gesture always wins. HY_EDGE_GESTURE_PX is the zone in which a swipe toward the inside is
    classified as an edge gesture, for strokes that start inside the glass because an obstacle (a corner mount, a
    case lip) keeps the finger off the border. Provisional: a finger pressed against the edge reports its first point
-   24 to 33 px in (logged corner touches TL 33,28 and BL 24,460); a fingertip pad of 10 to 14 mm at about 12.4 px per
+   13 to 33 px in (logged corner touches TL 33,28, TR 466,29, BL 24,460, BR 460,466); a fingertip pad of 10 to 14 mm at about 12.4 px per
    mm puts the centroid of a finger that starts fully on the glass 62 to 87 px in. The board measurement
    (`touch trace`, design/hardware-notes.md "Gestures") replaces it. */
 #define HY_EDGE_PX         40
@@ -40,6 +40,11 @@ typedef struct { int16_t x0, y0, x1, y1; uint32_t t0_ms, t1_ms; uint16_t max_dev
    downward swipe starts at y0 < 80; EDGE_UP when an upward swipe starts at y0 >= 400; EDGE_RIGHT when a
    rightward swipe starts at x0 < 80 (HY_EDGE_GESTURE_PX). A stroke that stopped a glide is NONE where it would be an edge. Screen HY_SCREEN_PX x HY_SCREEN_PX. */
 hy_gesture_t hy_gesture_classify(const hy_stroke_t *s);
+/* A scrolling list that would take a vertical stroke lets it pass to the edge gesture instead when the stroke starts
+   in the band and moves toward the inside while the list is already at that end: down from y0 < 80 with the list at
+   its top (at_top), up from y0 >= 400 with the list at its bottom (at_bottom). dy is the movement since the press.
+   A list that can still scroll that way keeps the stroke. */
+bool hy_edge_stroke_passes(int y0, int dy, bool at_top, bool at_bottom);
 /* Two taps within 300 ms (prev t1 to cur t0) and 40 px. */
 bool hy_gesture_double(const hy_stroke_t *prev_tap, const hy_stroke_t *tap);
 

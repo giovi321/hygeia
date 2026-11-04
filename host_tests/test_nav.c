@@ -70,7 +70,7 @@ static void test_taps_in_the_band_stay_taps(void)
     s = stroke(200, 430, 16, -16, 499);                TEST_ASSERT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
     s = stroke(70, 70, 0, 0, 600);                     TEST_ASSERT_EQUAL(HY_G_LONG_PRESS, hy_gesture_classify(&s));
     /* a drag that returns to its start is not a tap, and not an edge gesture either */
-    s = stroke(60, 200, 0, 0, 300);   s.max_dev = 70;  TEST_ASSERT_NOT_EQUAL(HY_G_TAP, hy_gesture_classify(&s));
+    s = stroke(60, 200, 0, 0, 300);   s.max_dev = 70;  TEST_ASSERT_EQUAL(HY_G_NONE, hy_gesture_classify(&s));
 }
 
 static void test_edge_zone_scrolling_view(void)
@@ -615,6 +615,27 @@ static void test_off_counts_as_idle(void)
     }
 }
 
+static void test_edge_stroke_passes_a_list_at_its_end(void)
+{
+    /* top band, moving down: passes only when the list is at its top */
+    TEST_ASSERT_TRUE(hy_edge_stroke_passes(60, 30, true, false));
+    TEST_ASSERT_TRUE(hy_edge_stroke_passes(79, 30, true, true));
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(60, 30, false, true));
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(80, 30, true, true));
+    /* bottom band, moving up: passes only when the list is at its bottom */
+    TEST_ASSERT_TRUE(hy_edge_stroke_passes(420, -30, false, true));
+    TEST_ASSERT_TRUE(hy_edge_stroke_passes(400, -30, true, true));
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(420, -30, true, false));
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(399, -30, false, true));
+    /* away from the inside, or no movement: the list keeps the stroke */
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(60, -30, true, true));
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(420, 30, true, true));
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(60, 0, true, true));
+    /* the middle of the screen is never a pass */
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(240, 30, true, true));
+    TEST_ASSERT_FALSE(hy_edge_stroke_passes(240, -30, true, true));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -622,6 +643,7 @@ int main(void)
     RUN_TEST(test_edge_band_inside_the_screen);
     RUN_TEST(test_taps_in_the_band_stay_taps);
     RUN_TEST(test_edge_zone_scrolling_view);
+    RUN_TEST(test_edge_stroke_passes_a_list_at_its_end);
     RUN_TEST(test_glide_stop_is_never_edge);
     RUN_TEST(test_drag_is_not_tap);
     RUN_TEST(test_double_tap);
