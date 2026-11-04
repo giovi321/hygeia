@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "hy/actions.h"
 #include "hy/motion_run.h"
+#include "hy/toast_stroke.h"
 #include "ui_internal.h"
 
 static const char *TAG = "ui_toast";
@@ -251,4 +252,19 @@ bool toast_undo_by_shake(void)
 bool toast_logged_visible(void)
 {
     return s_mode == MODE_LOGGED;
+}
+
+/* A stroke that began while the logged toast showed has ended: a tap outside Undo closes the toast (the entry stays
+ * logged and a shake no longer undoes it). The caller keeps every such stroke consumed. */
+void toast_stroke_end(hy_gesture_t g, int x0, int y0, bool waking)
+{
+    lv_area_t a;
+    lv_obj_get_coords(s_undo_area, &a);
+    bool on_undo = x0 >= a.x1 && x0 <= a.x2 && y0 >= a.y1 && y0 <= a.y2;
+    bool overlay = poweroff_visible() || poweroff_countdown_visible() || pair_visible();
+    if (hy_toast_stroke(s_mode == MODE_LOGGED, g, on_undo, waking, overlay) == HY_TS_CLOSE) {
+        ESP_LOGI(TAG, "tap outside Undo: toast closed, log %u stays", (unsigned)s_log_id);
+        hide();
+        ui_battery_toast_flush();   /* the Undo toast is gone */
+    }
 }

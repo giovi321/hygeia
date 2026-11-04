@@ -37,6 +37,7 @@ idf_component_register(
         "src/api_set.c"
         "src/import.c"
         "src/fwupdate.c"
+        "src/toast_stroke.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

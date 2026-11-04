@@ -40,7 +40,9 @@ A due tile shows a full ring and an outline in the medicine colour. A "+" tile a
 
 Tap a tile to log the medicine as taken now. A toast shows the code and the time, for example "V logged 08:31", with a countdown "Undo 5". Tap Undo within 5 seconds to remove the entry. After 5 seconds, undo is no longer possible on the device ("Too late to undo").
 
-- While the toast is showing, taps on other tiles do not log
+A tap anywhere outside the Undo button closes the toast at once. The entry stays logged, and that tap does nothing else: it does not log a tile and does not open anything. The next tap works as usual. Closing the toast also ends the shake to undo, because the shake only works while the toast shows. Swipes and long presses while the toast shows do nothing and leave it open.
+
+- While the toast is showing, taps on other tiles do not log. The first such tap closes the toast
 - Logging needs a valid clock. With an invalid clock, a tap shows "Set the time first"
 - For an as-needed medicine with a minimum interval, a tap sooner than the interval shows "Last dose 2 h ago, minimum 4 h. Tap again to log". A second tap within 5 seconds logs the dose
 - A dose logged for a fixed medicine near a scheduled time satisfies that occurrence; see [Scheduling rules](../../reference/scheduling/)
