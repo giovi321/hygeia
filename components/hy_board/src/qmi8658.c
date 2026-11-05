@@ -242,7 +242,9 @@ static esp_err_t chip_reset_config(bool require_confirm)
 /* CTRL9 command with bounded recovery. A timeout is retried QMI_CTRL9_RETRIES times, each after an acknowledge to
  * finish a half done handshake. If the handshake stays stuck the chip is soft reset and configured again (which
  * drops any WoM setting, so a WoM exit is done by it and a WoM arm is not): s_ctrl9_reset is set and ESP_FAIL is
- * returned, and the caller decides whether the command's effect is reached. */
+ * returned, and the caller decides whether the command's effect is reached. If the reset is not confirmed either,
+ * the error is returned, with a final ESP_ERR_TIMEOUT mapped to ESP_ERR_INVALID_RESPONSE: ESP_ERR_TIMEOUT is kept for
+ * the settle wait (a moving device), so a stuck handshake is never taken for motion. */
 static esp_err_t ctrl9(uint8_t cmd)
 {
     s_ctrl9_reset = false;
@@ -270,7 +272,7 @@ static esp_err_t ctrl9(uint8_t cmd)
         return ESP_FAIL;
     }
     ESP_LOGE(TAG, "ctrl9 0x%02x: reset and configure: %s", cmd, esp_err_to_name(rerr));
-    return err;
+    return err == ESP_ERR_TIMEOUT ? ESP_ERR_INVALID_RESPONSE : err;
 }
 
 /* Out of wake on motion or the capture mode: sensors off, WoM threshold 0 (pins back to normal), outputs high-Z.
