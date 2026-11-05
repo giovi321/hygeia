@@ -260,6 +260,8 @@ The maintainer's intent, in their words:
 
 What the device edits: code, name, dose, colour, schedule type, and the daily times (`fixed`) or the minimum interval (`as_needed`). Dose is optional free text of at most 16 bytes. Weekdays, the early, late and missed windows, active dates, pill count and order are set in the web UI. When the device edits a medicine it keeps their current values. A new medicine gets the defaults: every day, windows of 60 / 30 / 120 min, no pill count, no active dates, placed after the last tile.
 
+Times page of the medicine form: one row per time with a Remove button (hidden for the last time) and an "Add a time" button. "Add a time" opens an hour and minute roller page (minutes in 5-minute steps) with the Next button "Add HH:MM". Tapping a time row opens the same page titled "Change time", set to that time, with the Next button "Change to HH:MM"; the Remove button does not open it. Committing replaces that time and keeps the list ascending; the same time is a no-op and a time already in the list shows "HH:MM is already in the list" and changes nothing. A time that is not on a 5-minute step (set in the web UI) starts on the nearest lower step. The quick settings closing keeps the page and the index being changed.
+
 Archiving: the device archives a medicine; unarchiving is in the web UI. Archiving asks for confirmation, writes no log entry, removes any due card for that medicine and stops its reminders. Its history stays.
 
 Design rules:

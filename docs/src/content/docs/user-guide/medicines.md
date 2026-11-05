@@ -20,6 +20,8 @@ Then a review page shows the values with a Save button. A new medicine gets thes
 
 Nothing is stored before Save. Back leaves a step, and leaving with unsaved changes asks "Discard changes?" with Keep editing and Discard.
 
+On the times page, "Add a time" opens an hour and minute picker in 5-minute steps, and its button reads "Add 08:00". Tap a time in the list to change it: the same picker opens on that time, titled "Change time", and the button reads "Change to 08:30". The list stays in order. Choosing the same time changes nothing, and choosing a time that is already in the list shows "08:30 is already in the list" and leaves the list as it was. Cancel returns to the times page without a change. Remove deletes a time and does not open the picker. A time set in the web UI that is not on a 5-minute step, for example 08:07, opens on the nearest lower step (08:05); the time stays 08:07 until you tap the button.
+
 A time that is added so that today's dose is already inside its window becomes due right away, with the chime. The review page says so before you save.
 
 ## Keyboard

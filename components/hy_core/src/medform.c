@@ -238,6 +238,25 @@ hy_err_t hy_mf_add_time(hy_medform_t *f, uint16_t min)
     return HY_OK;
 }
 
+hy_err_t hy_mf_change_time(hy_medform_t *f, size_t idx, uint16_t min)
+{
+    hy_med_t *d = &f->draft;
+    if (idx >= d->n_times || min >= 1440) return HY_E_TIMES;
+    if (d->times[idx] == min) return HY_OK;   /* the same time: nothing to do */
+    for (size_t i = 0; i < d->n_times; i++) {
+        if (d->times[i] == min) return HY_E_TIMES;   /* already another entry: the list stays as it was */
+    }
+    /* drop the old entry, then insert at the sorted place; both steps are in memory and cannot fail */
+    for (size_t i = idx; i + 1 < d->n_times; i++) d->times[i] = d->times[i + 1];
+    size_t n = d->n_times - 1;
+    size_t pos = 0;
+    while (pos < n && d->times[pos] < min) pos++;
+    for (size_t i = n; i > pos; i--) d->times[i] = d->times[i - 1];
+    d->times[pos] = min;
+    f->dirty = true;
+    return HY_OK;
+}
+
 hy_err_t hy_mf_remove_time(hy_medform_t *f, size_t idx)
 {
     hy_med_t *d = &f->draft;

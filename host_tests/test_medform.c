@@ -193,6 +193,44 @@ static void test_times_rules(void)
     TEST_ASSERT_EQUAL_UINT16(600, f.draft.times[0]);
 }
 
+static void test_change_time(void)
+{
+    fixture();
+    hy_medform_t f;
+    hy_mf_new(&f, s_meds, s_n);   /* 08:00 */
+    hy_mf_add_time(&f, 720);
+    hy_mf_add_time(&f, 1200);
+    f.dirty = false;
+    /* to a new time: sorted */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_mf_change_time(&f, 0, 1300));
+    TEST_ASSERT_EQUAL_UINT8(3, f.draft.n_times);
+    TEST_ASSERT_EQUAL_UINT16(720, f.draft.times[0]);
+    TEST_ASSERT_EQUAL_UINT16(1200, f.draft.times[1]);
+    TEST_ASSERT_EQUAL_UINT16(1300, f.draft.times[2]);
+    TEST_ASSERT_TRUE(f.dirty);
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_mf_change_time(&f, 2, 60));
+    TEST_ASSERT_EQUAL_UINT16(60, f.draft.times[0]);
+    TEST_ASSERT_EQUAL_UINT16(720, f.draft.times[1]);
+    TEST_ASSERT_EQUAL_UINT16(1200, f.draft.times[2]);
+    /* the same time: OK, no change */
+    f.dirty = false;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_mf_change_time(&f, 1, 720));
+    TEST_ASSERT_FALSE(f.dirty);
+    TEST_ASSERT_EQUAL_UINT16(720, f.draft.times[1]);
+    /* a duplicate of another entry: rejected, list unchanged */
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_mf_change_time(&f, 0, 1200));
+    TEST_ASSERT_EQUAL_UINT8(3, f.draft.n_times);
+    TEST_ASSERT_EQUAL_UINT16(60, f.draft.times[0]);
+    TEST_ASSERT_EQUAL_UINT16(720, f.draft.times[1]);
+    TEST_ASSERT_EQUAL_UINT16(1200, f.draft.times[2]);
+    TEST_ASSERT_FALSE(f.dirty);
+    /* out of range */
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_mf_change_time(&f, 3, 100));
+    TEST_ASSERT_EQUAL_INT(HY_E_TIMES, hy_mf_change_time(&f, 0, 1440));
+    TEST_ASSERT_EQUAL_UINT8(3, f.draft.n_times);
+    TEST_ASSERT_EQUAL_UINT16(60, f.draft.times[0]);
+}
+
 static void test_next_time_default(void)
 {
     fixture();
@@ -531,6 +569,7 @@ int main(void)
     RUN_TEST(test_code_check);
     RUN_TEST(test_suggest_code);
     RUN_TEST(test_times_rules);
+    RUN_TEST(test_change_time);
     RUN_TEST(test_next_time_default);
     RUN_TEST(test_interval_options);
     RUN_TEST(test_step_flow);

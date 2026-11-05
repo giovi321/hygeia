@@ -66,6 +66,9 @@ void     hy_mf_set_type(hy_medform_t *f, hy_sched_type_t t);
    already 8. remove: HY_E_TIMES when idx is out of range or it is the last time. */
 hy_err_t hy_mf_add_time(hy_medform_t *f, uint16_t min);
 hy_err_t hy_mf_remove_time(hy_medform_t *f, size_t idx);
+/* Replaces times[idx] with min and keeps the list ascending, in one step. HY_E_TIMES when idx is out of range,
+   min >= 1440, or min is already another entry (the list is then unchanged). The same time is HY_OK and a no-op. */
+hy_err_t hy_mf_change_time(hy_medform_t *f, size_t idx, uint16_t min);
 /* Default for "Add a time": the first of 480, 720, 1080, 1320 (08:00, 12:00, 18:00, 22:00) not in the list,
    else 480. */
 uint16_t hy_mf_next_time_default(const hy_medform_t *f);

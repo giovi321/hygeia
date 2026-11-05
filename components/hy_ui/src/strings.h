@@ -278,6 +278,8 @@
 #define HY_S_MF_REMOVE     "Remove"
 #define HY_S_MF_ADD_TIME   "Add a time"
 #define HY_S_MF_ADD_AT     "Add %s"                 /* HH:MM */
+#define HY_S_MF_CHANGE_TIME "Change time"
+#define HY_S_MF_CHANGE_TO  "Change to %s"           /* HH:MM */
 #define HY_S_MF_ERR_TIME_DUP "%s is already in the list" /* HH:MM */
 #define HY_S_MF_INTERVAL   "Minimum time between doses"
 #define HY_S_MF_NO_MIN     "No minimum"

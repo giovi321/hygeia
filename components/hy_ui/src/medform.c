@@ -509,10 +509,24 @@ static void remove_time_cb(void *ud)
     }
 }
 
+/* The roller page serves both "Add a time" (s_chg_idx -1) and a tap on an existing time (the index being changed).
+ * medform_show keeps the page as it was after the quick settings closed, so this index survives with the rollers. */
+static int s_chg_idx = -1;
+
 static void add_time_open_cb(void *ud)
 {
     (void)ud;
     if (form_open() && s_page == PG_TIMES) {
+        s_chg_idx = -1;
+        show_page(PG_ADD_TIME);
+    }
+}
+
+static void change_time_open_cb(void *ud)
+{
+    size_t i = (size_t)(uintptr_t)ud;
+    if (form_open() && s_page == PG_TIMES && i < s_f.draft.n_times) {
+        s_chg_idx = (int)i;
         show_page(PG_ADD_TIME);
     }
 }
@@ -526,8 +540,8 @@ static void add_label_update(void)
 {
     char t[8], b[24];
     fmt_hhmm(add_sel(), t, sizeof t);
-    snprintf(b, sizeof b, HY_S_MF_ADD_AT, t);
-    lv_label_set_text(s_next_l, b);   /* the Add time page labels the Next button "Add 08:00" */
+    snprintf(b, sizeof b, s_chg_idx >= 0 ? HY_S_MF_CHANGE_TO : HY_S_MF_ADD_AT, t);
+    lv_label_set_text(s_next_l, b);   /* the roller page labels the Next button "Add 08:00", or "Change to 08:30" */
 }
 
 static void roller_changed_cb(lv_event_t *e)
@@ -541,7 +555,10 @@ static void roller_changed_cb(lv_event_t *e)
 
 static void render_add_time(void)
 {
-    uint16_t d = hy_mf_next_time_default(&s_f);
+    /* Changing a time starts on it. The minute roller has 5-minute steps: a time set elsewhere (the web page: 08:07)
+     * starts on the nearest lower step (08:05); committing then changes it to what the rollers show. */
+    uint16_t d = s_chg_idx >= 0 && (size_t)s_chg_idx < s_f.draft.n_times ? s_f.draft.times[s_chg_idx]
+                                                                         : hy_mf_next_time_default(&s_f);
     lv_roller_set_selected(s_hour, d / 60, LV_ANIM_OFF);
     lv_roller_set_selected(s_min, (d % 60) / 5, LV_ANIM_OFF);
     add_label_update();
@@ -550,7 +567,7 @@ static void render_add_time(void)
 static void add_time_commit(void)
 {
     uint16_t t = add_sel();
-    hy_err_t e = hy_mf_add_time(&s_f, t);
+    hy_err_t e = s_chg_idx >= 0 ? hy_mf_change_time(&s_f, (size_t)s_chg_idx, t) : hy_mf_add_time(&s_f, t);
     if (e != HY_OK) {
         char hhmm[8], b[48];
         fmt_hhmm(t, hhmm, sizeof hhmm);
@@ -964,7 +981,7 @@ static void show_page(page_t pg)
         render_times();
         break;
     case PG_ADD_TIME:
-        set_title(HY_S_MF_ADD_TIME, false);
+        set_title(s_chg_idx >= 0 ? HY_S_MF_CHANGE_TIME : HY_S_MF_ADD_TIME, false);
         bottom_row(HY_S_CANCEL, "", true, true);
         render_add_time();
         break;
@@ -1141,14 +1158,18 @@ void medform_debug(const char *arg)
             dbg_done(hy_mf_add_time(&s_f, (uint16_t)(h * 60 + m)), HY_MF_TIMES, 0);
         } else if (strncmp(rest, "del ", 4) == 0 && sscanf(rest + 4, "%d", &idx) == 1) {
             dbg_done(hy_mf_remove_time(&s_f, (size_t)idx), HY_MF_TIMES, 0);
+        } else if (strncmp(rest, "set ", 4) == 0 && sscanf(rest + 4, "%d %d:%d", &idx, &h, &m) == 3 && idx >= 0) {
+            dbg_done(hy_mf_change_time(&s_f, (size_t)idx, (uint16_t)(h * 60 + m)), HY_MF_TIMES, 0);
+        } else if (strncmp(rest, "tap ", 4) == 0 && sscanf(rest + 4, "%d", &idx) == 1 && idx >= 0) {
+            change_time_open_cb((void *)(uintptr_t)idx);   /* a tap on the row: the Times page must be showing */
         } else {
-            ESP_LOGE(TAG, "usage: mf time add HH:MM | mf time del <idx>");
+            ESP_LOGE(TAG, "usage: mf time add HH:MM | mf time del <idx> | mf time set <idx> HH:MM | mf time tap <idx>");
         }
     } else if (strcmp(cmd, "interval") == 0) {
         dbg_done(hy_mf_set_interval(&s_f, (uint16_t)atoi(rest)), HY_MF_INTERVAL, 0);
     } else {
         ESP_LOGE(TAG, "usage: mf new|edit <code>|name <text>|dose [text]|code <xy>|color <0-9>|type fixed|asneeded|"
-                      "time add HH:MM|time del <idx>|interval <min>|next|back|save|state");
+                      "time add HH:MM|time del <idx>|time set <idx> HH:MM|time tap <idx>|interval <min>|next|back|save|state");
     }
 }
 #endif
@@ -1328,6 +1349,8 @@ static void create_times(void)
         lv_obj_t *r = ui_plain(s_list);
         lv_obj_set_size(r, FULL_W, 60);
         style_surface(r, 18);
+        lv_obj_set_style_bg_color(r, lv_color_hex(HY_C_SURFACE2), LV_STATE_PRESSED);   /* tappable like the Review rows */
+        ui_on_tap(r, change_time_open_cb, (void *)(uintptr_t)i);
         s_rows[i].row = r;
         s_rows[i].time = ui_label(r, hy_type.title, HY_C_TEXT, "");
         lv_obj_align(s_rows[i].time, LV_ALIGN_LEFT_MID, 20, 0);
