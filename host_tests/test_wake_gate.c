@@ -178,6 +178,36 @@ static void test_sample_cap(void)
     TEST_FAIL_MESSAGE("the cap never ended the judgment");
 }
 
+static void test_tap_pair(void)
+{
+    hy_tap_pair_t p;
+    hy_tap_pair_reset(&p);
+    /* two taps 150 ms apart at the same place: wake */
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 1000, true, 100, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAKE, hy_tap_pair_feed(&p, false, 1150, true, 110, 95));
+    TEST_ASSERT_FALSE(p.have);
+    /* the limits: HY_WG_TAP_PAIR_MS and HY_DOUBLE_TAP_PX are in, one more is out */
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 2000, true, 100, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAKE, hy_tap_pair_feed(&p, false, 2000 + HY_WG_TAP_PAIR_MS, true, 100 + HY_DOUBLE_TAP_PX, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 3000, true, 100, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 3001 + HY_WG_TAP_PAIR_MS, true, 100, 100));   /* too late: held anew */
+    TEST_ASSERT_EQUAL(HY_WG_WAKE, hy_tap_pair_feed(&p, false, 3101 + HY_WG_TAP_PAIR_MS, true, 100, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 4000, true, 100, 100));
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 4100, true, 100, 101 + HY_DOUBLE_TAP_PX));   /* too far */
+    /* a report that is not a tap drops the held tap */
+    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_tap_pair_feed(&p, false, 4150, false, 100, 100));
+    TEST_ASSERT_FALSE(p.have);
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 4200, true, 100, 100));
+    /* single tap on: a tap wakes at once, a swipe does not */
+    hy_tap_pair_reset(&p);
+    TEST_ASSERT_EQUAL(HY_WG_WAKE, hy_tap_pair_feed(&p, true, 5000, true, 10, 10));
+    TEST_ASSERT_EQUAL(HY_WG_SLEEP, hy_tap_pair_feed(&p, true, 5100, false, 10, 10));
+    /* the clock wraps */
+    hy_tap_pair_reset(&p);
+    TEST_ASSERT_EQUAL(HY_WG_WAIT, hy_tap_pair_feed(&p, false, 0xFFFFFF00u, true, 50, 50));
+    TEST_ASSERT_EQUAL(HY_WG_WAKE, hy_tap_pair_feed(&p, false, 0x00000040u, true, 50, 50));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -191,5 +221,6 @@ int main(void)
     RUN_TEST(test_sample_double_tap);
     RUN_TEST(test_sample_noise_and_failures);
     RUN_TEST(test_sample_cap);
+    RUN_TEST(test_tap_pair);
     return UNITY_END();
 }

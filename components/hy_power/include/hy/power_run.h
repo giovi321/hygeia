@@ -85,7 +85,7 @@ void hy_power_resume(void);                      /* any task: leaves the sleep m
 void hy_power_sleep_stats(void);                 /* sleepstat: flags in force, entries, time asleep, wakes by cause, lsstat, PM locks */
 /* `pwrx` (battery investigation, RAM only, every flag off at boot):
    pwrx                          the flags and lsstat
-   pwrx <flag> on|off            flag: touch, nonet, panel, wakers, lsvbus
+   pwrx <flag> on|off            flag: touch, nonet, panel, wakers, lsvbus, gesture
    pwrx off                      every flag off
    pwrx mv [clear]               the ring of 60 s battery readings (RTC memory), or clear it */
 void hy_power_debug_pwrx(const char *args);

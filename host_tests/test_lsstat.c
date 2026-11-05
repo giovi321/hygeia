@@ -237,7 +237,7 @@ static void test_flag_names(void)
     hy_px_names((1u << HY_PX_PANEL) | (1u << HY_PX_LSVBUS), out, sizeof out);
     TEST_ASSERT_EQUAL_STRING("panel lsvbus", out);
     hy_px_names((1u << HY_PX_N) - 1, out, sizeof out);
-    TEST_ASSERT_EQUAL_STRING("touch nonet panel wakers lsvbus", out);
+    TEST_ASSERT_EQUAL_STRING("touch nonet panel wakers lsvbus gesture", out);
 }
 
 static void test_flag_names_truncate_safely(void)

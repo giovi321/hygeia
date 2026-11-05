@@ -82,6 +82,9 @@ static bool s_sleep_set;   /* between hy_board_sleep_wake_arm(true) and (false),
  * wake set, from hy_board_sleep_wake_arm(true) to (false). s_panel_held: the reset line of the panel is held low since
  * the last Display Off, until the next Display On initialises it again. */
 static volatile bool s_touch_cut_en, s_touch_off;
+/* pwrx gesture: _en the flag; s_touch_gst: the controller runs in its gesture wake mode, from
+ * hy_board_sleep_wake_arm(true) to (false) */
+static volatile bool s_touch_gst_en, s_touch_gst;
 static volatile uint32_t s_touch_rel_n;   /* times the touch driver released the reset line during a pwrx touch sleep mode */
 static volatile bool s_panel_cut_en, s_panel_held;
 #endif
@@ -1121,9 +1124,16 @@ static bool touch_cut_begin(void)
     return true;
 }
 
-/* The light sleep ends: the start sequence of the touch driver (reset released, 50 ms, command mode write 0xD101). */
+/* The light sleep ends: the start sequence of the touch driver (reset released, 50 ms, command mode write 0xD101).
+ * Also leaves the gesture wake mode, which only a reset leaves. */
 static void touch_cut_end(void)
 {
+    if (s_touch_gst) {
+        s_touch_off = true;   /* the ISR ignores the INT edges of the reset */
+        s_touch_gst = false;
+        gpio_set_level(BSP_LCD_TOUCH_RST, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
     if (!s_touch_off) {
         return;
     }
@@ -1137,6 +1147,79 @@ static void touch_cut_end(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     s_touch_off = false;
     ESP_LOGI(TAG, "touch controller released from reset (mode write %s, %s)", esp_err_to_name(e1), esp_err_to_name(e2));
+}
+
+void hy_board_debug_touch_gesture(bool on)
+{
+    s_touch_gst_en = on;
+}
+
+bool hy_board_touch_gesture_active(void)
+{
+    return s_touch_gst;
+}
+
+/* Hynitron's CST92xx work-mode handshake: write 0xD11E, wait 1 ms, read 2 bytes at 0x0002, byte 1 must read 0x1E;
+ * up to 3 tries. Returns the last byte 1 read, or -1 when every read failed. */
+static int touch_handshake(void)
+{
+    int got = -1;
+    for (int i = 0; i < 3; i++) {
+        const uint8_t hs = 0x1E, reg_lo = 0x02;
+        uint8_t b[2] = {0};
+        if (esp_lcd_panel_io_tx_param(s_tp->io, 0xD1, &hs, 1) != ESP_OK) {
+            continue;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+        if (esp_lcd_panel_io_tx_param(s_tp->io, 0x00, &reg_lo, 1) != ESP_OK) {
+            continue;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+        if (esp_lcd_panel_io_rx_param(s_tp->io, -1, b, 2) != ESP_OK) {
+            continue;
+        }
+        got = b[1];
+        if (got == 0x1E) {
+            break;
+        }
+    }
+    return got;
+}
+
+/* pwrx gesture, a light sleep begins: reset the controller (out of the driver's command mode 0xD101 into its own
+ * normal mode), then the handshake and the gesture wake command 0xD104. GPIO 11 stays in the wake set: the controller
+ * pulses INT once per gesture. */
+static void touch_gesture_begin(void)
+{
+    if (!s_touch_gst_en || !s_tp || s_touch_off) {
+        return;
+    }
+    s_touch_off = true;   /* the ISR ignores the INT edges of the reset */
+    gpio_set_level(BSP_LCD_TOUCH_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(BSP_LCD_TOUCH_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    int hs = touch_handshake();
+    const uint8_t mode = 0x04;
+    esp_err_t e = esp_lcd_panel_io_tx_param(s_tp->io, 0xD1, &mode, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    s_touch_off = false;
+    s_touch_gst = true;
+    ESP_LOGI(TAG, "touch gesture mode: handshake 0x%02x (want 0x1e), mode write 0xD104 %s, int %d", hs & 0xFF,
+             esp_err_to_name(e), gpio_get_level(BSP_LCD_TOUCH_INT));
+}
+
+bool hy_board_touch_gesture_read(uint8_t raw[HY_TOUCH_RAW_LEN])
+{
+    if (!s_tp || !s_touch_gst) {
+        return false;
+    }
+    const uint8_t lo = 0x00;
+    if (esp_lcd_panel_io_tx_param(s_tp->io, 0xD0, &lo, 1) != ESP_OK) {
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+    return esp_lcd_panel_io_rx_param(s_tp->io, -1, raw, HY_TOUCH_RAW_LEN) == ESP_OK;
 }
 #endif
 
@@ -1154,6 +1237,9 @@ void hy_board_sleep_wake_arm(bool on)
         uint32_t armed = 0;
 #if CONFIG_HY_DEBUG_CONSOLE
         bool touch_cut = touch_cut_begin();
+        if (!touch_cut) {
+            touch_gesture_begin();
+        }
 #endif
         for (size_t i = 0; i < sizeof pins / sizeof pins[0]; i++) {
             uint32_t p = pins[i];

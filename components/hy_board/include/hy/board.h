@@ -171,6 +171,16 @@ uint32_t hy_board_debug_touch_cut_poll(void);
 /* `pwrx panel`: after the next panel off, the reset line of the panel is held low; the next panel on initialises it
    again (about 1.4 s). RAM only. */
 void hy_board_debug_panel_cut(bool on);
+/* `pwrx gesture`: from the next light-sleep entry on (unless `pwrx touch` holds the controller in reset), the touch
+   controller is reset and put in its gesture wake mode (handshake 0xD11E, then 0xD104), in which it reports each
+   finished gesture once; the end of that sleep mode resets it back to the driver's command mode. RAM only. */
+void hy_board_debug_touch_gesture(bool on);
+/* The controller is in the gesture wake mode now (power task, while asleep). */
+bool hy_board_touch_gesture_active(void);
+/* Reads one raw report at 0xD000 in the gesture wake mode, without the driver (whose failed read resets the
+   controller, which would leave the mode). false when the mode is off or the read failed. */
+#define HY_TOUCH_RAW_LEN 10
+bool hy_board_touch_gesture_read(uint8_t raw[HY_TOUCH_RAW_LEN]);
 #endif
 
 /* Test screen: four 40 px corner squares and a centred label; touching a square turns it white.

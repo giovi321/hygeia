@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "hy/nav.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -52,6 +54,24 @@ hy_wg_act_t hy_wake_gate_up(hy_wake_gate_t *g, uint32_t t_ms, int16_t x, int16_t
 /* Time passing. SLEEP when no second tap came within HY_DOUBLE_TAP_MS of the first tap's release, or when a finger
  * has been down for HY_LONG_PRESS_MS (not a tap, no need to wait for the release). Otherwise WAIT or NONE. */
 hy_wg_act_t hy_wake_gate_tick(hy_wake_gate_t *g, uint32_t t_ms);
+
+/* Gesture wake mode of the touch controller (`pwrx gesture`): the controller reports each finished gesture once, a tap
+ * as a tap report with its position, instead of every contact. A double tap is two tap reports. The gap is counted
+ * between the two reports (each is sent at a lift), so it is HY_DOUBLE_TAP_MS plus up to 200 ms for the second contact;
+ * the two positions follow HY_DOUBLE_TAP_PX. */
+#define HY_WG_TAP_PAIR_MS (HY_DOUBLE_TAP_MS + 200)
+
+typedef struct {
+    bool     have;    /* a first tap is held */
+    uint32_t t;       /* its report time */
+    int16_t  x, y;    /* its position */
+} hy_tap_pair_t;
+
+void        hy_tap_pair_reset(hy_tap_pair_t *p);
+/* One gesture report at t_ms. tap: the report is a tap. single_tap_wakes: a tap gives WAKE at once. Otherwise a tap
+ * that follows a held tap within HY_WG_TAP_PAIR_MS and HY_DOUBLE_TAP_PX gives WAKE; any other tap is held and gives
+ * WAIT; a report that is not a tap drops the held tap and gives SLEEP. WAKE clears the held tap. */
+hy_wg_act_t hy_tap_pair_feed(hy_tap_pair_t *p, bool single_tap_wakes, uint32_t t_ms, bool tap, int16_t x, int16_t y);
 
 #ifdef __cplusplus
 }

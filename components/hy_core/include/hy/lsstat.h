@@ -80,7 +80,7 @@ bool     hy_mv_ring_get(const hy_mv_ring_t *r, uint32_t i, hy_mv_pt_t *out);    
 /* ---- pwrx ---- */
 
 /* Debug flags, RAM only, off at boot. */
-typedef enum { HY_PX_TOUCH = 0, HY_PX_NONET, HY_PX_PANEL, HY_PX_WAKERS, HY_PX_LSVBUS, HY_PX_N } hy_px_t;
+typedef enum { HY_PX_TOUCH = 0, HY_PX_NONET, HY_PX_PANEL, HY_PX_WAKERS, HY_PX_LSVBUS, HY_PX_GESTURE, HY_PX_N } hy_px_t;
 const char *hy_px_name(int flag);   /* "?" outside 0..HY_PX_N-1 */
 
 typedef enum {

@@ -1,5 +1,7 @@
 #include "hy/wake_gate.h"
 
+#include <stdlib.h>
+
 #include "hy/nav.h"
 
 enum { ST_IDLE = 0, ST_DOWN1, ST_GAP, ST_DOWN2 };
@@ -139,4 +141,36 @@ hy_wg_act_t hy_wake_gate_sample(hy_wake_gate_t *g, uint32_t t, bool ok, bool dow
     if (act == HY_WG_WAKE || act == HY_WG_SLEEP) return act;
     hy_wg_act_t tk = hy_wake_gate_tick(g, t);
     return tk != HY_WG_NONE ? tk : act;
+}
+
+void hy_tap_pair_reset(hy_tap_pair_t *p)
+{
+    p->have = false;
+    p->t = 0;
+    p->x = p->y = 0;
+}
+
+hy_wg_act_t hy_tap_pair_feed(hy_tap_pair_t *p, bool single_tap_wakes, uint32_t t, bool tap, int16_t x, int16_t y)
+{
+    if (!tap) {
+        hy_tap_pair_reset(p);
+        return HY_WG_SLEEP;
+    }
+    if (single_tap_wakes) {
+        hy_tap_pair_reset(p);
+        return HY_WG_WAKE;
+    }
+    if (p->have) {
+        int32_t dt = (int32_t)(t - p->t);
+        int dx = x - p->x, dy = y - p->y;
+        if (dt >= 0 && dt <= HY_WG_TAP_PAIR_MS && abs(dx) <= HY_DOUBLE_TAP_PX && abs(dy) <= HY_DOUBLE_TAP_PX) {
+            hy_tap_pair_reset(p);
+            return HY_WG_WAKE;
+        }
+    }
+    p->have = true;
+    p->t = t;
+    p->x = x;
+    p->y = y;
+    return HY_WG_WAIT;
 }

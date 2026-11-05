@@ -89,6 +89,11 @@ static bool (*volatile s_wake_single_fn)(void);
  * except that exit_sleep clears the flags). s_wg_rearm: the touch INT wake is still disarmed, re-armed once the finger
  * is up and the pin reads high. */
 static hy_wake_gate_t s_wg;
+#if CONFIG_HY_DEBUG_CONSOLE
+/* pwrx gesture: the held tap and the report counts (power task; RAM, since boot) */
+static hy_tap_pair_t s_tp2;
+static uint32_t s_gst_reads, s_gst_taps, s_gst_other, s_gst_fail, s_gst_wakes;
+#endif
 static volatile bool s_wg_active, s_wg_rearm;
 static uint8_t s_exit_pending;   /* exit_sleep calls in progress; s_mux */
 static int64_t s_wg_rearm_t0_ms;
@@ -521,6 +526,47 @@ static hy_wg_act_t wg_step(void)
     bool ok = hy_board_touch_poll(&down, &x, &y);
     return hy_wake_gate_sample(&s_wg, (uint32_t)mono_ms(), ok, down, x, y);
 }
+
+#if CONFIG_HY_DEBUG_CONSOLE
+/* pwrx gesture, power task under s_sleep_mu, asleep: the controller pulsed INT for one gesture report. Reads it, logs
+ * the raw bytes, feeds a tap to the tap pair and arms the touch wake again. Byte 4, bits 0x70, is the gesture code
+ * (0x10 a tap); bit 0x80 a palm. Position as in a contact report. true: wake the screen. */
+static bool gst_step(bool single)
+{
+    uint8_t r[HY_TOUCH_RAW_LEN] = {0};
+    bool ok = hy_board_touch_gesture_read(r);
+    bool wake = false;
+    if (!ok) {
+        s_gst_fail++;
+        ESP_LOGW(TAG, "touch gesture: read failed");
+    } else {
+        s_gst_reads++;
+        uint8_t code = r[4] & 0xF0;
+        bool tap = code == 0x10;
+        int16_t x = (int16_t)((r[1] << 4) | (r[3] >> 4)), y = (int16_t)((r[2] << 4) | (r[3] & 0x0F));
+        if (tap) {
+            s_gst_taps++;
+        } else {
+            s_gst_other++;
+        }
+        hy_wg_act_t act = hy_tap_pair_feed(&s_tp2, single, (uint32_t)mono_ms(), tap, x, y);
+        wake = act == HY_WG_WAKE;
+        if (wake) {
+            s_gst_wakes++;
+        }
+        ESP_LOGI(TAG, "touch gesture: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x code 0x%02x x %d y %d: %s",
+                 r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], code, x, y,
+                 wake ? "wake" : act == HY_WG_WAIT ? "first tap held" : "not a tap");
+    }
+    if (!wake) {
+        hy_board_touch_wake_rearm();   /* the INT pulse is about 2 ms: the pin is high again by now */
+    }
+    portENTER_CRITICAL(&s_mux);
+    s_touch_isr = false;   /* the edge just handled */
+    portEXIT_CRITICAL(&s_mux);
+    return wake;
+}
+#endif
 
 /* The wait of the sleep-mode loop: the touch is judged often, a disarmed touch wake is retried every 50 ms for 3 s
  * and then once a second for as long as it takes (the finger may rest on the glass). */
@@ -1042,6 +1088,16 @@ static void power_task(void *arg)
                 /* A touch only wakes the CPU: LVGL stays paused and the screen OFF while it is judged. s_sleep_mu keeps
                  * every other task's exit_sleep (net hold, cabinet reaction) out while the controller is read. */
                 xSemaphoreTake(s_sleep_mu, portMAX_DELAY);
+#if CONFIG_HY_DEBUG_CONSOLE
+                if (s_asleep && touch && hy_board_touch_gesture_active()) {
+                    if (gst_step(single)) {
+                        cause = W_TOUCH;
+                        double_tap = !single;
+                    } else {
+                        judging = true;   /* not a timer-only wake */
+                    }
+                } else
+#endif
                 if (s_asleep) {
                     if (s_wg_active && single) {
                         wg_end("setting changed");
@@ -1430,6 +1486,8 @@ static void px_set(hy_px_t f, bool on)
     portEXIT_CRITICAL(&s_mux);
     if (f == HY_PX_TOUCH) {
         hy_board_debug_touch_cut(on);
+    } else if (f == HY_PX_GESTURE) {
+        hy_board_debug_touch_gesture(on);
     } else if (f == HY_PX_PANEL) {
         hy_board_debug_panel_cut(on);
     }
@@ -1488,7 +1546,7 @@ static void px_print_flags_sleepstat(void)
     px_print_touch_invalid();
 }
 
-/* pwrx | pwrx <touch|nonet|panel|wakers|lsvbus> on|off | pwrx off | pwrx mv [clear] */
+/* pwrx | pwrx <touch|nonet|panel|wakers|lsvbus|gesture> on|off | pwrx off | pwrx mv [clear] */
 void hy_power_debug_pwrx(const char *args)
 {
     hy_pxc_t c = hy_px_parse(args);
@@ -1522,7 +1580,7 @@ void hy_power_debug_pwrx(const char *args)
         ESP_LOGI(TAG, "pwrx mv: ring cleared");
         break;
     default:
-        ESP_LOGE(TAG, "usage: pwrx | pwrx <touch|nonet|panel|wakers|lsvbus> on|off | pwrx off | pwrx mv [clear]");
+        ESP_LOGE(TAG, "usage: pwrx | pwrx <touch|nonet|panel|wakers|lsvbus|gesture> on|off | pwrx off | pwrx mv [clear]");
         break;
     }
 }
@@ -1567,6 +1625,9 @@ void hy_power_sleep_stats(void)
     ESP_LOGI(TAG, "%s", hist);
     ESP_LOGI(TAG, "key presses %" PRIu32 " (%" PRIu32 " while asleep)", keys, keys_a);
     ESP_LOGI(TAG, "touch irqs %" PRIu32 " (%" PRIu32 " while asleep)", touches, touches_a);
+    ESP_LOGI(TAG, "touch gesture reports since boot: %" PRIu32 " read (%" PRIu32 " taps, %" PRIu32 " other), %" PRIu32
+             " failed reads, %" PRIu32 " wakes; gesture mode now %s",
+             s_gst_reads, s_gst_taps, s_gst_other, s_gst_fail, s_gst_wakes, hy_board_touch_gesture_active() ? "on" : "off");
     ls_print();
     /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
      * build) this also prints the measured time per mode: LIGHT_SLEEP is the light-sleep time since boot, and the

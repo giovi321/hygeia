@@ -117,7 +117,7 @@ bool hy_mv_ring_get(const hy_mv_ring_t *r, uint32_t i, hy_mv_pt_t *out)
 
 const char *hy_px_name(int flag)
 {
-    static const char *const k[HY_PX_N] = {"touch", "nonet", "panel", "wakers", "lsvbus"};
+    static const char *const k[HY_PX_N] = {"touch", "nonet", "panel", "wakers", "lsvbus", "gesture"};
     return flag >= 0 && flag < HY_PX_N ? k[flag] : "?";
 }
 
