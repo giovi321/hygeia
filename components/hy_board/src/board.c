@@ -78,9 +78,13 @@ static volatile uint32_t s_wake_live;
 static bool s_sleep_set;   /* between hy_board_sleep_wake_arm(true) and (false), even when no pin could be armed */
 /* Touch cut: the touch controller is held in reset while the screen is off in light sleep. s_touch_cut_en: the debug
  * flag `pwrx touch`; s_touch_cut_fn: the setting "Double tap to wake" (cut when it returns false). Either one cuts, applied
- * at the next light-sleep entry. s_touch_off: the controller is held in reset and its INT pin is out of the wake set, from
- * hy_board_sleep_wake_arm(true) to (false). */
-static volatile bool s_touch_cut_en, s_touch_off;
+ * at the next light-sleep entry. s_touch_off: the controller is in reset (touch cut or gesture mode change), so the touch
+ * ISR ignores the INT edges; set before the reset line moves and cleared after the controller is back in command mode.
+ * s_touch_hold: the touch cut wants the reset line low, and hy_board_touch_cut_poll pulls it low again if the driver
+ * released it. Both flags and the line are changed under s_touch_mux, so the poll can never pull the line low after
+ * touch_cut_end released it. */
+static volatile bool s_touch_cut_en, s_touch_off, s_touch_hold;
+static portMUX_TYPE s_touch_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool (*volatile s_touch_cut_fn)(void);
 static volatile uint32_t s_touch_rel_n;   /* times the touch driver released the reset line while the controller was held in reset */
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -1103,12 +1107,20 @@ static bool touch_rst_out_high(void)
  * That brings the scan current back and invalidates a touch run. Counted, logged, and the line pulled low again. */
 uint32_t hy_board_touch_cut_poll(void)
 {
-    if (s_touch_off && touch_rst_out_high()) {
+    bool pulled = false;
+    uint32_t n;
+    portENTER_CRITICAL(&s_touch_mux);
+    if (s_touch_hold && touch_rst_out_high()) {
         s_touch_rel_n++;
         gpio_set_level(BSP_LCD_TOUCH_RST, 0);
-        ESP_LOGW(TAG, "pwrx touch: the touch driver released the controller reset during the sleep mode (%u times): the touch current is back on", (unsigned)s_touch_rel_n);
+        pulled = true;
     }
-    return s_touch_rel_n;
+    n = s_touch_rel_n;
+    portEXIT_CRITICAL(&s_touch_mux);
+    if (pulled) {
+        ESP_LOGW(TAG, "pwrx touch: the touch driver released the controller reset during the sleep mode (%u times): the touch current is back on", (unsigned)n);
+    }
+    return n;
 }
 
 /* The debug flag is on, or the setting "Double tap to wake" is off, and a light sleep begins: the touch controller is
@@ -1120,8 +1132,11 @@ static bool touch_cut_begin(void)
     if (!(s_touch_cut_en || (fn && fn())) || !s_tp) {
         return false;
     }
+    s_touch_off = true;   /* first, so the ISR ignores the INT edges of the reset */
+    portENTER_CRITICAL(&s_touch_mux);
+    s_touch_hold = true;
     gpio_set_level(BSP_LCD_TOUCH_RST, 0);
-    s_touch_off = true;
+    portEXIT_CRITICAL(&s_touch_mux);
     ESP_LOGI(TAG, "sleep wake: touch controller in reset, gpio %d left out", (int)BSP_LCD_TOUCH_INT);
     return true;
 }
@@ -1141,8 +1156,11 @@ static void touch_cut_end(void)
     if (!s_touch_off) {
         return;
     }
-    hy_board_touch_cut_poll();
+    hy_board_touch_cut_poll();   /* counts a release by the driver that happened before this end */
+    portENTER_CRITICAL(&s_touch_mux);
+    s_touch_hold = false;   /* from here the poll leaves the line alone */
     gpio_set_level(BSP_LCD_TOUCH_RST, 1);
+    portEXIT_CRITICAL(&s_touch_mux);
     vTaskDelay(pdMS_TO_TICKS(50));
     const uint8_t mode = 0x01;
     esp_err_t e1 = esp_lcd_panel_io_tx_param(s_tp->io, 0xD1, &mode, 1);
