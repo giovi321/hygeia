@@ -19,6 +19,7 @@ static const char *TAG = "ui_cabview";
 #define ROW_H    66
 #define BTN      56
 #define EDGE_X   28   /* side margin of full-width buttons near the bottom corners (HY_CORNER_R) */
+#define BTN_Y    336  /* bottom button row, as on the medicine form: its lower corners keep clear of the glass arc */
 
 /* page rows */
 enum { P_ON, P_TRIGGER, P_SENS, P_WINDOW, P_CHIME, P_LIGHT, P_TEACH, P_TEST, P_FORGET, P_N };
@@ -394,7 +395,7 @@ static void t_status_flow(void)
     }
 }
 
-/* Button placement: bottom row at y 346; two half buttons, or one full width */
+/* Button placement: bottom row at BTN_Y; two half buttons, or one full width */
 static void t_btn(lv_obj_t *b, bool show, int slot)   /* slot 0 left half, 1 right half, 2 full width */
 {
     lv_obj_set_hidden(b, !show);
@@ -403,7 +404,7 @@ static void t_btn(lv_obj_t *b, bool show, int slot)   /* slot 0 left half, 1 rig
     }
     int32_t half = (HY_SCREEN - 2 * EDGE_X - 12) / 2;
     lv_obj_set_width(b, slot == 2 ? HY_SCREEN - 2 * EDGE_X : half);
-    lv_obj_set_pos(b, slot == 1 ? EDGE_X + half + 12 : EDGE_X, 346);
+    lv_obj_set_pos(b, slot == 1 ? EDGE_X + half + 12 : EDGE_X, BTN_Y);
 }
 
 static void t_draw(void)
@@ -668,7 +669,7 @@ static lv_obj_t *wide_button(lv_obj_t *parent, const char *text, ui_action_cb cb
 {
     int32_t w = (HY_SCREEN - 2 * EDGE_X - 12) / 2;
     lv_obj_t *b = ui_button(parent, w, ROW_H, hy_type.body_bold, text, cb, NULL);
-    lv_obj_set_pos(b, EDGE_X, 346);
+    lv_obj_set_pos(b, EDGE_X, BTN_Y);
     return b;
 }
 
