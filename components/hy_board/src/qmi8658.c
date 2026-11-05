@@ -190,10 +190,14 @@ static esp_err_t ctrl9_once(uint8_t cmd)
 #define QMI_RESET_SENTINEL 0x5A
 
 /* Soft reset and the powered down configuration of init, without the device handle and WHO_AM_I steps. The reset is
- * confirmed before it is recorded: the sentinel in CTRL3 is gone, RST_RESULT reads 0x80 and STATUSINT bit 7 (CmdDone)
- * is clear. The chip may NACK while it resets, so the reset write itself is not checked. s_mode becomes M_OFF only when
- * the reset and every configuration write succeeded, so a failed recovery leaves a recorded WoM exit to be repeated. */
-static esp_err_t chip_reset_config(void)
+ * checked: the sentinel in CTRL3 is gone, RST_RESULT reads 0x80 and STATUSINT bit 7 (CmdDone) is clear. The chip may
+ * NACK while it resets, so the reset write itself is not checked. CTRL3 is rewritten with the value the configuration
+ * expects when the reset is not confirmed, so the sentinel never stays in it. What an unconfirmed reset means depends on
+ * the caller: at boot (require_confirm false) it is a warning and the configuration goes on (the chip worked that way
+ * on every board run before the check existed); in the recovery after a stuck command (require_confirm true) it is an
+ * error, because the WoM setting may still be armed. s_mode becomes M_OFF only when the reset was accepted and every
+ * configuration write succeeded, so a failed recovery leaves a recorded WoM exit to be repeated. */
+static esp_err_t chip_reset_config(bool require_confirm)
 {
     esp_err_t err = reg_write(QMI_REG_CTRL3, QMI_RESET_SENTINEL);
     if (err != ESP_OK) {
@@ -214,8 +218,15 @@ static esp_err_t chip_reset_config(void)
     }
     if (!ok) {
         ESP_LOGW(TAG, "reset not confirmed: RST_RESULT 0x%02x (expected 0x%02x), CTRL3 0x%02x (sentinel 0x%02x), "
-                 "STATUSINT 0x%02x (bit 7 must be clear)", rr, QMI_RST_RES_OK, c3, QMI_RESET_SENTINEL, st);
-        return ESP_ERR_INVALID_RESPONSE;
+                 "STATUSINT 0x%02x (bit 7 must be clear)%s", rr, QMI_RST_RES_OK, c3, QMI_RESET_SENTINEL, st,
+                 require_confirm ? "" : ", configuring anyway");
+        esp_err_t e3 = reg_write(QMI_REG_CTRL3, QMI_CTRL3_1024_112);   /* no sentinel left behind */
+        if (require_confirm) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        if (e3 != ESP_OK) {
+            return e3;
+        }
     }
     if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_125)) == ESP_OK &&
@@ -252,7 +263,7 @@ static esp_err_t ctrl9(uint8_t cmd)
     ESP_LOGE(TAG, "ctrl9 0x%02x: %s after %d retries, soft reset and configure again", cmd, esp_err_to_name(err),
              QMI_CTRL9_RETRIES);
     board_imu_int_detach();   /* WoM is gone with the reset */
-    esp_err_t rerr = chip_reset_config();
+    esp_err_t rerr = chip_reset_config(true);
     if (rerr == ESP_OK) {
         s_ctrl9_reset = true;
         ESP_LOGW(TAG, "ctrl9 0x%02x: chip reset and configured, powered down", cmd);
@@ -316,7 +327,7 @@ esp_err_t hy_board_imu_init(void)
     }
     ESP_LOGI(TAG, "who_am_i 0x%02x", id);
 
-    if ((err = chip_reset_config()) == ESP_OK) {
+    if ((err = chip_reset_config(false)) == ESP_OK) {
         s_state = ESP_OK;
         ESP_LOGI(TAG, "ready: accel +-8 g, 125 Hz, powered down");
         return ESP_OK;
