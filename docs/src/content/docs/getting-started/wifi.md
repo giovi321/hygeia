@@ -65,3 +65,7 @@ In Wi-Fi client mode the device sets its clock over NTP, and the web UI can set 
 - The Wi-Fi tile reads "Can't connect" when a saved network does not answer. The device keeps trying that mode and never falls back to the access point on its own. Tap the Access point tile to get back in
 - A wrong password is only visible as "Can't connect". Save the network again with the right password under Settings, Wi-Fi in the web UI
 - To start over, forget the saved networks in the web UI or run the access point again
+- The network name is case sensitive and must match exactly. A name with a typo stays on "Connecting", because the device never finds that network
+- The device joins 2.4 GHz networks only. A network that broadcasts on 5 GHz only is never found. On a phone hotspot, choose the 2.4 GHz band (on an iPhone, turn on Maximize Compatibility)
+- Networks with a shared password (open, WPA2 personal or WPA3 personal) work. Networks that ask each user for a username and password (WPA2 or WPA3 enterprise) and networks with a sign-in page in the browser do not
+- Firmware updates from GitHub need a network with internet access. A network that only reaches the local devices, for example a separate network for home automation, shows "Can't reach GitHub" on the device
