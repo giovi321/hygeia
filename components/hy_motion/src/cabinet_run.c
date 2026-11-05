@@ -72,7 +72,8 @@ static HY_EXT_BSS hy_cab_seq_t s_takes[HY_CAB_TAKES];
 static HY_EXT_BSS hy_cab_model_t s_tmodel;
 static int s_ioerr;
 static hy_cabretry_t s_retry;     /* retries of a paused feature at screen wakes; the motion task only */
-static int64_t s_last_react_ms = INT64_MIN / 2;
+static int64_t s_last_react_ms = INT64_MIN / 2;   /* under s_cmux: hy_cab_run_react_undo writes it from the LVGL task */
+static int64_t s_prev_react_ms = INT64_MIN / 2;   /* the value before the last reaction, for the undo */
 
 /* Screen-off path */
 static struct {
@@ -316,20 +317,40 @@ static void react_check(float dist, float thr)
         why = "not due";
     } else if (!c.chime && !c.light) {
         why = "no switch";
-    } else if (mono - s_last_react_ms < (int64_t)HY_CAB_REACT_COOLDOWN_S * 1000) {
-        why = "cooldown";
+    } else {
+        portENTER_CRITICAL(&s_cmux);
+        bool cool = mono - s_last_react_ms < (int64_t)HY_CAB_REACT_COOLDOWN_S * 1000;
+        portEXIT_CRITICAL(&s_cmux);
+        if (cool) {
+            why = "cooldown";
+        }
     }
     if (why) {
         ESP_LOGI(TAG, "cabinet: no reaction (%s)", why);
         return;
     }
-    s_last_react_ms = mono;
     portENTER_CRITICAL(&s_cmux);
+    s_prev_react_ms = s_last_react_ms;
+    s_last_react_ms = mono;
     s_ctr.reactions++;
     portEXIT_CRITICAL(&s_cmux);
     ESP_LOGI(TAG, "cabinet: react (attention since %lld)", (long long)att);
     post_ev(HY_CABEV_REACT, 0, dist, thr);   /* queued first: LVGL runs it in its first pass after the wake */
     hy_power_motion_wake();
+}
+
+/* The screen state lives in the LVGL task and the motion task only knows "on or dimmed" (hy_motion_int_on), so the
+   runner cannot tell a lit screen from a dimmed one without a race. The UI declines a reaction while the screen is ON
+   and calls this to give the pause and the counter back, as if the reaction had not come. Only one reaction can be
+   pending (the pause blocks a second), so restoring the value before it is exact. */
+void hy_cab_run_react_undo(void)
+{
+    portENTER_CRITICAL(&s_cmux);
+    s_last_react_ms = s_prev_react_ms;
+    if (s_ctr.reactions > 0) {
+        s_ctr.reactions--;
+    }
+    portEXIT_CRITICAL(&s_cmux);
 }
 
 /* A finished Taught capture in s_cap (live or test): match, recent ring, counters, then the reaction or the

@@ -29,6 +29,46 @@ static const char *react_blocked(void)
     return NULL;
 }
 
+/* A cabinet chime that did not light the screen (Light off, screen DIM or OFF) leaves its reason here until the next
+   wake shows it. LVGL task only. */
+static struct {
+    bool set;
+    int64_t slot;   /* the dose time the note names; the text is rebuilt at the wake */
+} s_pending;
+
+/* Home with the "Next: A at 14:00" toast, unless a dose is open (the due card explains the wake), a form has unsaved
+   edits or an overlay is up. */
+static void show_next(const char *name, const char *hhmm)
+{
+    if (hy_sched_snapshot()->out.n_open != 0 || ui_nav_form_dirty() || poweroff_visible() || pair_visible()) {
+        return;
+    }
+    char b[80];
+    ui_nav_home();
+    snprintf(b, sizeof b, HY_S_CAB_NEXT, name, hhmm);
+    toast_show_info(b);
+}
+
+/* idle.c, when the screen comes to ON from DIM or OFF by any cause. Shows the remembered reason once. It is dropped
+   instead when a dose is open (the due card takes over), when its dose time has come or when that dose no longer is
+   the next one (logged early). */
+void cabinet_ui_screen_woke(void)
+{
+    if (!s_pending.set) {
+        return;
+    }
+    s_pending.set = false;
+    const hy_clock_port_t *ck = hy_clock_port();
+    char name[33], hhmm[8];
+    int64_t slot = 0;
+    if (!ck->valid(NULL) || ck->now(NULL) >= s_pending.slot || !idle_next_dose(name, sizeof name, hhmm, sizeof hhmm, &slot) ||
+        slot != s_pending.slot) {
+        return;
+    }
+    ESP_LOGI(TAG, "cabinet: reason shown at the wake");
+    show_next(name, hhmm);
+}
+
 static void react(void)
 {
     const char *why = react_blocked();
@@ -42,26 +82,38 @@ static void react(void)
         ESP_LOGI(TAG, "cabinet: no reaction (both switches off)");
         return;
     }
+    /* The screen state is read here, in the LVGL task that owns it. The runner only knows "on or dimmed", and a
+       check there could race with a wake, so it reacts, starts its pause and counts, and this gives all of it back
+       when the screen is on: you are already looking at it. DIM and OFF react as before. */
+    if (screen_state() == HY_SCR_ON) {
+        hy_cab_run_react_undo();
+        ESP_LOGI(TAG, "cabinet: no reaction (screen on)");
+        return;
+    }
+    s_pending.set = false;   /* this reaction replaces an older note */
     /* the chime is gated by sound, do-not-disturb and quiet hours; the light is not */
     if (chime) {
         hy_sched_chime_once("cabinet");
     }
     bool woke = false;
-    if (light && screen_state() != HY_SCR_ON) {   /* ON: the chime alone; DIM and OFF wake to ON */
+    if (light) {   /* the screen is DIM or OFF here: wake to ON */
         screen_wake("cabinet");
         woke = true;
     }
     ESP_LOGI(TAG, "cabinet: react chime %d light %d", chime ? 1 : 0, light ? 1 : 0);
-    /* No dose open (a snoozed one counts as open): the due card is not what the wake shows, so Home shows the next
-       dose for 5 s */
-    if (woke && hy_sched_snapshot()->out.n_open == 0 && !ui_nav_form_dirty() && !poweroff_visible() &&
-        !pair_visible()) {
-        char name[33], hhmm[8], b[80];
-        if (idle_next_dose(name, sizeof name, hhmm, sizeof hhmm)) {
-            ui_nav_home();
-            snprintf(b, sizeof b, HY_S_CAB_NEXT, name, hhmm);
-            toast_show_info(b);
+    char name[33], hhmm[8];
+    int64_t slot = 0;
+    bool have = idle_next_dose(name, sizeof name, hhmm, sizeof hhmm, &slot);
+    if (woke) {
+        /* No dose open (a snoozed one counts as open): the due card is not what the wake shows, so Home shows the next
+           dose for 5 s */
+        if (have) {
+            show_next(name, hhmm);
         }
+    } else if (chime && have && hy_sched_snapshot()->out.n_open == 0) {
+        /* The chime came with a dark or dim screen: keep the reason for the next wake */
+        s_pending.set = true;
+        s_pending.slot = slot;
     }
 }
 

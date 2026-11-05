@@ -50,6 +50,9 @@ esp_err_t hy_cab_run_forget(void);
    runner configured). One path for the device and the web UI; call it from the LVGL task (it writes the settings).
    Returns the forget result; a settings save failure is only logged. */
 esp_err_t hy_cab_run_forget_apply(void);
+/* LVGL task, when it declines a HY_CABEV_REACT (screen on): the 2-minute pause and the reaction counter go back to
+   what they were before that reaction. */
+void      hy_cab_run_react_undo(void);
 void      hy_cab_run_status(hy_cab_status_t *out);
 /* Copies the template takes (model_out->valid false when not taught) and up to max_recent recent captures, oldest
    first, under the runner mutex. Returns the number of recent captures copied. Either pointer may be NULL. */

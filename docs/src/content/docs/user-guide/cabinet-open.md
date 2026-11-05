@@ -96,10 +96,14 @@ The device reacts when the trigger fires and a dose is:
 
 The reaction has two switches, both on by default:
 
-- Chime: one chime, as for a due dose. The Sound switch, do not disturb and quiet hours silence it
-- Light the screen: the screen turns on as for a touch. Do not disturb and quiet hours do not block it
+- Chime: one chime, as for a due dose. The Sound switch, do not disturb and quiet hours silence it. With Light the screen off, the reason shows at the next wake of the screen
+- Light the screen: the screen turns on as for a touch. Do not disturb and quiet hours do not block it. When the screen is already on, nothing happens
 
 When the screen lights and a dose is open, the due card shows. When the dose is not due yet, the device shows Home with the note "Next: Vitamin D at 08:00" for 5 seconds, naming the medicine and its time. The due card itself appears at the dose time.
+
+Nothing happens while the screen is on: you are already looking at it, so there is no chime, and the 2-minute pause below does not start. A dimmed or dark screen reacts as described here.
+
+With Light the screen off, the chime comes with a dark or dimmed screen. The device keeps the reason and shows it the next time the screen wakes, by a double tap, the power button or USB: when a dose is open the due card shows, and otherwise Home shows the "Next" note for 5 seconds. The note is dropped once it has been shown, when the dose is logged or becomes open, or when the dose time has passed.
 
 The device reacts at most once every 2 minutes, however often the door opens. It does not react while the Undo toast shows, so closing the cabinet right after you log a dose changes nothing, and a shake still undoes it. Tapping outside the toast closes it early, and the device reacts again from then on.
 

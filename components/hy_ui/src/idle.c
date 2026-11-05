@@ -127,8 +127,8 @@ static int64_t next_slot(const hy_snapshot_t *sn, const char **code)
 }
 
 /* the next upcoming dose for the cabinet toast: display name and local time; false when the clock is invalid or
-   nothing is scheduled */
-bool idle_next_dose(char *name, size_t name_len, char *hhmm, size_t hhmm_len)
+   nothing is scheduled; slot (may be NULL) gets the dose time */
+bool idle_next_dose(char *name, size_t name_len, char *hhmm, size_t hhmm_len, int64_t *slot)
 {
     if (!hy_clock_port()->valid(NULL)) {
         return false;
@@ -143,6 +143,9 @@ bool idle_next_dose(char *name, size_t name_len, char *hhmm, size_t hhmm_len)
     hy_clock_tz_copy(tz, sizeof tz);
     ui_fmt_hhmm(nx, tz, hhmm, hhmm_len);
     snprintf(name, name_len, "%s", m->name[0] ? m->name : m->code);
+    if (slot) {
+        *slot = nx;
+    }
     return true;
 }
 
@@ -286,6 +289,9 @@ static void apply(hy_scr_t prev, hy_scr_t st, const char *why)
         bri_to(s_bri, set);
         ESP_LOGI(TAG, "screen: wake (%s) at %lld ms", why, (long long)now_ms64());
         ui_battery_toast_flush();   /* a low-battery toast held while the screen was not on (R13) */
+        if (prev != HY_SCR_ON) {
+            cabinet_ui_screen_woke();   /* a cabinet chime that did not light the screen explains itself now */
+        }
         break;
     case HY_SCR_DIM: {
         overlay_show();
