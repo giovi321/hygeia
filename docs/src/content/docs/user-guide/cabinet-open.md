@@ -42,7 +42,7 @@ The device always signals with sound as well as the screen, so you do not need t
 | One high tone | Now: do the movement |
 | Two low tones | Got it: go back to where you started and wait |
 | One long low tone | Too small, too long or looked different: wait for the next high tone and do it again |
-| Three rising tones | Saved. The test recognised the movement |
+| Three rising tones | Saved. The test recognised the movement. In the counting test (see Test mode) also: a movement was seen |
 | Two falling tones | Teaching stopped. The test did not recognise the movement, saw none, did not get a still device, or stopped |
 
 The tones play at the set volume, also when the sound is off or do not disturb is on. Two sounds in a row both play.
@@ -75,12 +75,13 @@ After a miss, Teach again starts teaching at once, with the 5 seconds to get rea
 
 ## Test mode
 
-Settings › Cabinet open › Test, or Start under Test in the web UI, checks the trigger without reminding. When started on the device, the screen shows "Do the movement." and counts (a test started from the web UI does not open this page on the device):
+Settings › Cabinet open › Test, or Start under Test in the web UI, checks the trigger without reminding.
 
-- With Taught movement: "Matches" and "Other movements". On the device a match plays the low tone
-- With Any movement: "Movements"
+With a taught movement, Test on the device runs the same guided test as after teaching: see Checking the movement above, with the same tones, status lines, result screens and buttons. You can run it with the cabinet closed and listen for the tones.
 
-The device stays silent otherwise and does not remind during the test. The screen stays on while the test runs, also when it was started from the web UI (it neither dims nor turns off, also on battery). The test ends when you leave the Test page on the device, when you press Stop in the web UI, when the screen is turned off (for example with the PWR key), when the taught movement is forgotten or after 10 minutes, and the normal screen timers then resume. Leaving the web page does not stop a test. When a test ends while the device shows the Test page, the page shows "Test ended. Open Test again to run it." and the counters stop. The web UI shows the same counters live, and for each Taught capture its distance from the taught movement and the limit.
+Without a taught movement (trigger Any movement), Test on the device shows "Do the movement." and counts "Movements" (a test started from the web UI does not open this page on the device). Each movement seen plays the rising tones. In the rare case of a Taught movement trigger on this page, a match plays the rising tones and another movement plays the falling tones.
+
+The web UI test counts and shows distances as before, and plays no tones. It does not remind during the test. The screen stays on while the test runs, also when it was started from the web UI (it neither dims nor turns off, also on battery). The test ends when you leave the Test page on the device, when you press Stop in the web UI, when the screen is turned off (for example with the PWR key), when the taught movement is forgotten or after 10 minutes, and the normal screen timers then resume. Leaving the web page does not stop a test. When a test ends while the device shows the Test page, the page shows "Test ended. Open Test again to run it." and the counters stop. The web UI shows the counters live, and for each Taught capture its distance from the taught movement and the limit.
 
 A good taught movement gives a match for nearly every opening and few matches for other things, such as closing the door, knocking or tapping the screen. If other movements match too often, lower the sensitivity or teach again.
 

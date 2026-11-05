@@ -32,6 +32,7 @@ static lv_obj_t *s_xt, *s_x_hint, *s_x_a, *s_x_b;
 static bool s_t_done[HY_CAB_TAKES];
 static bool s_x_on;
 static int s_x_last;   /* 0 none, 1 match, 2 other */
+static bool s_t_check_first;   /* the teach view opens straight into the guided check (the Test row of the page) */
 
 static bool is_taught(void)
 {
@@ -162,7 +163,13 @@ static void page_nav_tap(void *ud)
             toast_show_info(HY_S_CAB_TEACH_FIRST);
             return;
         }
-        ui_nav_push(HY_V_CAB_TEST);
+        if (is_taught()) {
+            /* with a movement taught the device runs the guided test with tones, as after teaching */
+            s_t_check_first = true;
+            ui_nav_push(HY_V_CAB_TEACH);
+        } else {
+            ui_nav_push(HY_V_CAB_TEST);
+        }
         break;
     case P_FORGET:
         lv_obj_set_hidden(s_fg, false);
@@ -629,7 +636,7 @@ void cab_debug_ui(const char *phase)
     ESP_LOGI(TAG, "usage: cab ui idle|running|saved|checking|ok|miss|nomove|failed|nostill|teststopped");
 }
 
-/* `cab press <start|test|again|keep|done|cancel>`: the teach view's button taps without a finger, so the cue lines
+/* `cab press <start|test|again|keep|done|cancel>` and `cab press menutest` (the Test row of the Cabinet open page, with that page open): the teach view's button taps without a finger, so the cue lines
    of a real teach or check can be read from the console. Only while the teach view is the current view; a button
    that is not shown in the current phase does nothing, as a tap would. Open the view first with `cab ui idle`. */
 void cab_debug_press(const char *btn)
@@ -638,6 +645,14 @@ void cab_debug_press(const char *btn)
         {"start", t_start_tap}, {"test", t_test_tap}, {"again", t_again_tap},
         {"keep", t_close_tap},  {"done", t_close_tap}, {"cancel", t_cancel_tap},
     };
+    if (btn && strcmp(btn, "menutest") == 0) {
+        if (ui_current_view() != HY_V_CAB) {
+            ESP_LOGW(TAG, "cab press: the Cabinet open page is not open");
+            return;
+        }
+        page_nav_tap((void *)(uintptr_t)P_TEST);
+        return;
+    }
     if (ui_current_view() != HY_V_CAB_TEACH) {
         ESP_LOGW(TAG, "cab press: the teach view is not open (cab ui idle opens it)");
         return;
@@ -661,7 +676,7 @@ void cab_debug_press(const char *btn)
             return;
         }
     }
-    ESP_LOGI(TAG, "usage: cab press start|test|again|keep|done|cancel");
+    ESP_LOGI(TAG, "usage: cab press start|test|again|keep|done|cancel|menutest");
 }
 #endif
 
@@ -756,10 +771,11 @@ static void test_event(const hy_cabev_t *e)
     switch (e->kind) {
     case HY_CABEV_MATCH:
         s_x_last = 1;
-        cue_play(HY_CUE_TAKE);   /* the low tones, at the set volume whatever the switches say */
+        cue_play(HY_CUE_DONE);   /* the rising tones, at the set volume whatever the switches say */
         break;
     case HY_CABEV_OTHER:
         s_x_last = 2;
+        cue_play(HY_CUE_FAIL);
         break;
     default:
         return;
@@ -802,6 +818,11 @@ void cab_show(hy_view_t v)
         break;
     case HY_V_CAB_TEACH:
         teach_reset();
+        if (s_t_check_first) {
+            s_t_check_first = false;
+            s_flow.phase = HY_CF_SAVED;   /* the phase the Test button expects */
+            t_test_tap(NULL);   /* a check that cannot start shows the usual status */
+        }
         break;
     case HY_V_CAB_TEST:
         test_start();
