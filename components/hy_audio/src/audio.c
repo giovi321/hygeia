@@ -20,28 +20,37 @@ static const char *TAG = "hy_audio";
 static esp_codec_dev_handle_t s_dev;
 static int16_t *s_buf;
 static size_t s_samples;   /* chime samples */
-static size_t s_total;     /* chime plus trailing silence */
+static size_t s_total;     /* leading silence, chime and trailing silence */
 static int16_t *s_tone[HY_TONE_N];     /* rendered cues, same rate as the chime, with the tail silence */
 static size_t s_tone_total[HY_TONE_N];
 static TaskHandle_t s_task;
 static atomic_bool s_ok;
 static atomic_int s_volume = 60;
 
-/* Play requests: a ring of HY_AUDIO_QUEUE_N, so two cues in a row both play. The chime is never queued: it is
- * dropped while anything plays or waits. */
+/* Play requests: a ring of HY_AUDIO_QUEUE_N, so two cues in a row both play. The chime queues behind the cues (a due
+ * chime must not be lost during a teach or the counting test); it is dropped only while another chime plays or
+ * waits. */
 #define HY_AUDIO_QUEUE_N 4
-typedef struct { const int16_t *buf; size_t bytes; } play_req_t;
+typedef struct { const int16_t *buf; size_t bytes; bool chime; } play_req_t;
 static portMUX_TYPE s_qmux = portMUX_INITIALIZER_UNLOCKED;
 static play_req_t s_q[HY_AUDIO_QUEUE_N];
 static uint8_t s_q_head, s_q_n;
-static bool s_playing;           /* the task is playing a request (under s_qmux) */
+static bool s_chime_playing;     /* the request being played is the chime (under s_qmux), set in q_pop */
 
-/* false when the ring is full, or for the chime when anything plays or waits */
+/* false when the ring is full, or for the chime when another chime plays or waits */
 static bool q_push(play_req_t r, bool chime)
 {
     bool ok = false;
     portENTER_CRITICAL(&s_qmux);
-    if (!(chime && (s_playing || s_q_n > 0)) && s_q_n < HY_AUDIO_QUEUE_N) {
+    bool chime_busy = false;
+    if (chime) {
+        chime_busy = s_chime_playing;
+        for (uint8_t i = 0; i < s_q_n && !chime_busy; i++) {
+            chime_busy = s_q[(s_q_head + i) % HY_AUDIO_QUEUE_N].chime;
+        }
+    }
+    if (!chime_busy && s_q_n < HY_AUDIO_QUEUE_N) {
+        r.chime = chime;
         s_q[(s_q_head + s_q_n) % HY_AUDIO_QUEUE_N] = r;
         s_q_n++;
         ok = true;
@@ -50,7 +59,8 @@ static bool q_push(play_req_t r, bool chime)
     return ok;
 }
 
-/* The next request, or false when none is left (and then nothing is playing) */
+/* The next request, or false when none is left (and then nothing is playing). The chime playing flag follows the
+ * popped request and is cleared here when the queue is empty. */
 static bool q_pop(play_req_t *r)
 {
     bool have = false;
@@ -59,10 +69,10 @@ static bool q_pop(play_req_t *r)
         *r = s_q[s_q_head];
         s_q_head = (uint8_t)((s_q_head + 1) % HY_AUDIO_QUEUE_N);
         s_q_n--;
-        s_playing = true;
+        s_chime_playing = r->chime;
         have = true;
     } else {
-        s_playing = false;
+        s_chime_playing = false;
     }
     portEXIT_CRITICAL(&s_qmux);
     return have;
@@ -303,17 +313,20 @@ static esp_err_t audio_init_impl(void)
     }
     size_t n = hy_chime_len(HY_CHIME_RATE);
     size_t silence = (size_t)HY_CHIME_RATE * TAIL_SILENCE_MS / 1000;
-    s_buf = heap_caps_malloc((n + silence) * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    size_t head = (size_t)HY_CHIME_RATE * HEAD_SILENCE_MS / 1000;   /* as the cues: the codec start eats the first ~140 ms */
+    size_t alloc = head + n + silence;
+    s_buf = heap_caps_malloc(alloc * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     if (!s_buf) {
-        ESP_LOGE(TAG, "no PSRAM for the chime (%u bytes)", (unsigned)((n + silence) * sizeof(int16_t)));
+        ESP_LOGE(TAG, "no PSRAM for the chime (%u bytes)", (unsigned)(alloc * sizeof(int16_t)));
         goto fail;
     }
-    s_samples = hy_chime_render(s_buf, n, HY_CHIME_RATE);
+    memset(s_buf, 0, head * sizeof(int16_t));
+    s_samples = hy_chime_render(s_buf + head, n, HY_CHIME_RATE);
     if (s_samples == 0) {
         goto fail;
     }
-    memset(s_buf + s_samples, 0, silence * sizeof(int16_t));
-    s_total = s_samples + silence;
+    memset(s_buf + head + s_samples, 0, silence * sizeof(int16_t));
+    s_total = head + s_samples + silence;
     if (!tones_render()) {
         ESP_LOGW(TAG, "no PSRAM for the cabinet cues, they stay silent");
         for (int t = 0; t < HY_TONE_N; t++) {
@@ -372,7 +385,7 @@ void hy_audio_chime(void)
         return;
     }
     if (!q_push((play_req_t){s_buf, s_total * sizeof(int16_t)}, true)) {
-        ESP_LOGW(TAG, "chime dropped: a sound is already playing");
+        ESP_LOGW(TAG, "chime dropped: a chime is already playing or waiting");
         return;
     }
     xTaskNotifyGive(s_task);
