@@ -20,6 +20,16 @@ extern "C" {
 int         hy_ls_bucket(int64_t requested_us);
 const char *hy_ls_bucket_label(int bucket);   /* "?" outside 0..HY_LS_BUCKETS-1 */
 
+/* How a light-sleep entry ended, from the time the exit callback reports. IDF computes that time whether the sleep ran
+   or was rejected, so a rejected sleep arrives with a short positive value. */
+typedef enum {
+    HY_LS_NOT_TRIED = 0,   /* 0 us or less: the idle period was too short, no sleep was attempted */
+    HY_LS_REJECTED,        /* under HY_LS_MIN_SLEPT_US: rejected, or a wake pin was already active */
+    HY_LS_RAN              /* a sleep that ran */
+} hy_ls_exit_t;
+#define HY_LS_MIN_SLEPT_US 1000
+hy_ls_exit_t hy_ls_exit_class(int64_t slept_us);
+
 /* ---- time on battery per screen state ---- */
 
 typedef enum {

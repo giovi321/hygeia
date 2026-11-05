@@ -644,9 +644,15 @@ void cab_debug_press(const char *btn)
     for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) {
         if (btn && strcmp(btn, k[i].name) == 0) {
             uint8_t ph = s_flow.phase;
-            /* the tap handlers of Done, Keep and Cancel do not look at the phase: only press what is shown */
-            bool shown = i == 3 ? (ph == HY_CF_CHECK_MISS || ph == HY_CF_CHECK_NOMOVE) :
-                         i == 4 ? (ph == HY_CF_SAVED || ph == HY_CF_CHECK_OK) : true;
+            /* the tap handlers of Done, Keep and Cancel do not look at the phase: only press what is shown (as t_btn) */
+            bool shown = true;
+            if (strcmp(k[i].name, "keep") == 0) {
+                shown = ph == HY_CF_CHECK_MISS || ph == HY_CF_CHECK_NOMOVE;
+            } else if (strcmp(k[i].name, "done") == 0) {
+                shown = ph == HY_CF_SAVED || ph == HY_CF_CHECK_OK;
+            } else if (strcmp(k[i].name, "cancel") == 0) {
+                shown = ph == HY_CF_IDLE || ph == HY_CF_FAILED || ph == HY_CF_RUNNING || ph == HY_CF_CHECKING;
+            }
             ESP_LOGI(TAG, "cab press: %s (phase %u)%s", k[i].name, (unsigned)ph, shown ? "" : ", button not shown");
             if (shown) {
                 k[i].fn(NULL);

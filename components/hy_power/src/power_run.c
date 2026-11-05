@@ -125,10 +125,11 @@ static RTC_NOINIT_ATTR sleep_ctr_t s_ctr;
  * follow the same rules (kept over a software, panic, watchdog or brownout reset, cleared by a power-on reset or a
  * wrong magic word). The light-sleep callbacks write them from the idle task with interrupts off, one writer at a time,
  * so they take no lock; a dump may read a half-written 64-bit sum once in a very long while. */
-#define LS_MAGIC 0x4C535433u   /* "LST3": change it when the struct layout changes */
+#define LS_MAGIC 0x4C535434u   /* "LST4": change it when the struct layout changes */
 typedef struct {
     uint32_t magic;
-    uint32_t entered, slept_n, zero_n;               /* callback entries, sleeps that ran, sleeps that did not (0 us) */
+    uint32_t entered, slept_n;                      /* callback entries, sleeps that ran */
+    uint32_t short_n, rej_n;                         /* entries not tried (idle period too short), rejected or woke at once */
     uint64_t slept_us;                               /* time really spent in light sleep */
     uint32_t req_hist[HY_LS_BUCKETS];                /* requested length of each entry */
     uint32_t cause_timer, cause_gpio, cause_other;   /* hardware wake causes of the sleeps that ran */
@@ -623,6 +624,16 @@ static void enter_sleep(void)
         if (!s_logged_held) {
             s_logged_held = true;
             ESP_LOGI(TAG, "sleep mode: held by the radio");
+#if CONFIG_HY_DEBUG_CONSOLE
+            if (px_on(HY_PX_LSVBUS)) {
+                portENTER_CRITICAL(&s_mux);
+                bool usb = s_vbus_real;
+                portEXIT_CRITICAL(&s_mux);
+                if (usb) {
+                    ESP_LOGW(TAG, "pwrx lsvbus is on but the radio holds the sleep mode off on USB: the run measures the awake current, turn Wi-Fi off first (wifi mode off)");
+                }
+            }
+#endif
         }
         xSemaphoreGive(s_sleep_mu);
         return;
@@ -977,6 +988,7 @@ static void power_task(void *arg)
 #if CONFIG_HY_DEBUG_CONSOLE
         if (s_asleep && s_light) {
             s_ls.loops_pwr++;
+            hy_board_debug_touch_cut_poll();   /* pwrx touch: the driver may release the reset line by itself */
         }
 #endif
         int64_t mono = mono_s();
@@ -1179,8 +1191,13 @@ static esp_err_t ls_enter_cb(int64_t sleep_time_us, void *arg)
 static esp_err_t ls_exit_cb(int64_t slept_us, void *arg)
 {
     (void)arg;
-    if (slept_us <= 0) {
-        s_ls.zero_n++;   /* the sleep was rejected or too short */
+    hy_ls_exit_t k = hy_ls_exit_class(slept_us);
+    if (k == HY_LS_NOT_TRIED) {
+        s_ls.short_n++;   /* the idle period was too short, no sleep was attempted */
+        return ESP_OK;
+    }
+    if (k == HY_LS_REJECTED) {
+        s_ls.rej_n++;   /* IDF reports the time spent in the reject path as a sleep: not a sleep that ran */
         return ESP_OK;
     }
     s_ls.slept_n++;
@@ -1272,7 +1289,7 @@ static void wake_task(void)
 
 void hy_power_debug_pmu(const char *args)
 {
-    if (args && strncmp(args, "rails", 5) == 0) {
+    if (args && strcmp(args, "rails") == 0) {
         hy_board_pmu_rails();
         return;
     }
@@ -1356,18 +1373,25 @@ static uint32_t pct10(uint64_t part, uint64_t whole)   /* tenths of a percent */
 /* lsstat: what the light-sleep callbacks, the per-state clock and the task loop counters have collected */
 static void ls_print(void)
 {
+#if !CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+    ESP_LOGW(TAG, "lsstat: light-sleep callbacks not built (CONFIG_PM_LIGHT_SLEEP_CALLBACKS is off in sdkconfig): the sleep counts stay 0");
+#endif
     ls_scr_mark();
+    const volatile ls_ctr_t *vs = &s_ls;
     ls_ctr_t c;
     do {
-        c = s_ls;   /* a 64-bit sum written while this copy ran is read again */
-    } while (c.slept_us != s_ls.slept_us || c.entered != s_ls.entered);
+        c = *vs;   /* a 64-bit sum written while this copy ran is read again */
+    } while (c.slept_us != vs->slept_us || c.entered != vs->entered);
+    portENTER_CRITICAL(&s_mux);
+    c.st = s_ls.st;   /* ls_scr_mark writes it under s_mux */
+    portEXIT_CRITICAL(&s_mux);
     uint64_t off_asleep_ms = c.st.ms[HY_ST_OFF_ASLEEP];
     uint32_t res = pct10(c.slept_us / 1000, off_asleep_ms);
-    ESP_LOGI(TAG, "lsstat: light-sleep entries %" PRIu32 " (slept %" PRIu32 ", rejected or empty %" PRIu32
+    ESP_LOGI(TAG, "lsstat: light-sleep entries %" PRIu32 " (ran %" PRIu32 ", rejected or woke at once %" PRIu32 ", too short to try %" PRIu32
              "), time in light sleep %llu ms, residency %" PRIu32 ".%" PRIu32 "%% of the OFF asleep time (%llu ms)",
-             c.entered, c.slept_n, c.zero_n, (unsigned long long)(c.slept_us / 1000), res / 10, res % 10,
+             c.entered, c.slept_n, c.rej_n, c.short_n, (unsigned long long)(c.slept_us / 1000), res / 10, res % 10,
              (unsigned long long)off_asleep_ms);
-    char h[160];
+    char h[256];
     int n = snprintf(h, sizeof h, "lsstat requested sleep length:");
     for (int b = 0; b < HY_LS_BUCKETS && n > 0 && n < (int)sizeof h; b++) {
         n += snprintf(h + n, sizeof h - n, "%s %s %" PRIu32, b ? "," : "", hy_ls_bucket_label(b), c.req_hist[b]);
@@ -1424,7 +1448,7 @@ static void mv_print(void)
     uint32_t n = total < HY_MV_RING ? total : HY_MV_RING;
     printf("pwrx mv: %u points kept (%u since the ring was cleared), boot #%u now, t_s restarts at each boot\n",
            (unsigned)n, (unsigned)total, (unsigned)boots);
-    printf("mv,t_s,mv,pct,scr\n");
+    printf("tag,t_s,mv,pct,scr\n");
     static const char *const scr[3] = {"ON", "DIM", "OFF"};
     for (uint32_t i = 0; i < n; i++) {
         hy_mv_pt_t pt;
@@ -1438,11 +1462,21 @@ static void mv_print(void)
     fflush(stdout);
 }
 
+/* The touch driver released the reset line while pwrx touch held it: the sleepstat of that run says so. */
+static void px_print_touch_invalid(void)
+{
+    uint32_t n = hy_board_debug_touch_cut_poll();
+    if (n) {
+        ESP_LOGW(TAG, "pwrx touch: INVALID, the touch driver released the controller reset %u times since the flag was turned on (scan current back on): repeat the run", (unsigned)n);
+    }
+}
+
 static void px_print_flags(void)
 {
     char names[48];
     hy_px_names(px_mask_get(), names, sizeof names);
     ESP_LOGI(TAG, "pwrx flags in force: %s", names);
+    px_print_touch_invalid();
 }
 
 /* the first line of every sleepstat: the dump says which flags were on */
@@ -1451,6 +1485,7 @@ static void px_print_flags_sleepstat(void)
     char names[48];
     hy_px_names(px_mask_get(), names, sizeof names);
     ESP_LOGI(TAG, "sleepstat flags in force: %s", names);
+    px_print_touch_invalid();
 }
 
 /* pwrx | pwrx <touch|nonet|panel|wakers|lsvbus> on|off | pwrx off | pwrx mv [clear] */

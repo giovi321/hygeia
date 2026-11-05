@@ -82,6 +82,7 @@ static bool s_sleep_set;   /* between hy_board_sleep_wake_arm(true) and (false),
  * wake set, from hy_board_sleep_wake_arm(true) to (false). s_panel_held: the reset line of the panel is held low since
  * the last Display Off, until the next Display On initialises it again. */
 static volatile bool s_touch_cut_en, s_touch_off;
+static volatile uint32_t s_touch_rel_n;   /* times the touch driver released the reset line during a pwrx touch sleep mode */
 static volatile bool s_panel_cut_en, s_panel_held;
 #endif
 /* IMU interrupt (wake on motion): the GPIO while attached, else -1, and its level at attach; under s_wake_mux */
@@ -1078,11 +1079,33 @@ static void key_and_sleep_pins_init(void)
 void hy_board_debug_touch_cut(bool on)
 {
     s_touch_cut_en = on;
+    if (on) {
+        s_touch_rel_n = 0;   /* a new run starts with a clean count */
+    }
 }
 
 void hy_board_debug_panel_cut(bool on)
 {
     s_panel_cut_en = on;
+}
+
+/* The level the output register holds on the touch reset pin (the pin is an output, a read of the pad is not reliable). */
+static bool touch_rst_out_high(void)
+{
+    uint32_t p = (uint32_t)BSP_LCD_TOUCH_RST;
+    return p < 32 ? ((GPIO.out >> p) & 1u) != 0 : ((GPIO.out1.val >> (p - 32)) & 1u) != 0;
+}
+
+/* While the controller should be held in reset: the CST9217 driver releases the line by itself after a failed read.
+ * That brings the scan current back and invalidates a touch run. Counted, logged, and the line pulled low again. */
+uint32_t hy_board_debug_touch_cut_poll(void)
+{
+    if (s_touch_off && touch_rst_out_high()) {
+        s_touch_rel_n++;
+        gpio_set_level(BSP_LCD_TOUCH_RST, 0);
+        ESP_LOGW(TAG, "pwrx touch: the touch driver released the controller reset during the sleep mode (%u times): the run is invalid", (unsigned)s_touch_rel_n);
+    }
+    return s_touch_rel_n;
 }
 
 /* The flag is on and a light sleep begins: the touch controller is held in reset (RST stays low through the sleep:
@@ -1104,6 +1127,7 @@ static void touch_cut_end(void)
     if (!s_touch_off) {
         return;
     }
+    hy_board_debug_touch_cut_poll();
     gpio_set_level(BSP_LCD_TOUCH_RST, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
     const uint8_t mode = 0x01;
@@ -1239,6 +1263,11 @@ bool hy_board_touch_poll(bool *down, int16_t *x, int16_t *y)
 
 bool hy_board_touch_wake_rearm(void)
 {
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (s_touch_off) {
+        return true;   /* pwrx touch: the controller is held in reset, GPIO 11 stays out of the wake set */
+    }
+#endif
     const uint32_t bit = 1u << BSP_LCD_TOUCH_INT;
     bool ok = false;
     bool armed_now = false;

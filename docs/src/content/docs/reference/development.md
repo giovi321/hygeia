@@ -47,11 +47,11 @@ Commands added for the Cabinet open teach view and the battery work:
 | Command | What it does |
 |---|---|
 | `cab ui <idle\|running\|saved\|checking\|ok\|miss\|nomove\|failed\|nostill\|teststopped>` | Shows the teach view in that phase without the runner, for screenshots. `nostill` and `teststopped` are the saved view after a check that did not start still or was stopped |
-| `cab press <start\|test\|again\|keep\|done\|cancel>` | Presses a button of the teach view without a finger, so the `cue` lines of a real teach or check can be read. Open the view first with `cab ui idle`; a button that is not shown in the current phase does nothing |
+| `cab press <start\|test\|again\|keep\|done\|cancel>` | Presses a button of the teach view without a finger, so the `cue` lines of a real teach or check can be read. Open the view first with `cab ui idle`; a button that is not shown in the current phase does nothing (Cancel is shown while idle, failed, running and checking) |
 | `gesture <bandright\|banddown\|bandup>` | A stroke that starts in the 80 px gesture band, with nothing under the finger that scrolls. With `consumed` a scrolling widget claims the stroke right after the press |
 | `sleepstat` | Flags in force, sleep counters, wakes by cause, `lsstat`, PM locks |
-| `pwrx` | Lists the battery investigation flags and `lsstat` |
-| `pwrx <touch\|nonet\|panel\|wakers\|lsvbus> on\|off` | Sets one flag (RAM only, off at every boot) |
+| `pwrx` | Lists the battery investigation flags and `lsstat` (entries that ran, rejected or woke at once, too short to try). Prints a warning when the touch driver released the controller reset during a `touch` run, which makes that run invalid |
+| `pwrx <touch|nonet|panel|wakers|lsvbus> on|off` | Sets one flag (RAM only, off at every boot). `lsvbus` needs Wi-Fi off (`wifi mode off`) on USB, or the radio keeps the sleep mode off |\|nonet\|panel\|wakers\|lsvbus> on\|off` | Sets one flag (RAM only, off at every boot) |
 | `pwrx off` | Clears every flag |
 | `pwrx mv [clear]` | Prints the ring of 60 s battery readings (RTC memory), or empties it |
 | `pmu rails` | Read-only dump of the AXP2101 rail registers |

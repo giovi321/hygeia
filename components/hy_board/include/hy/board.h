@@ -165,6 +165,9 @@ void hy_board_pmu_rails(void);
 /* `pwrx touch`: from the next light-sleep entry on, the touch controller is held in reset and GPIO 11 is left out of
    the wake set (no touch wake); both undone at the end of that sleep mode. RAM only. */
 void hy_board_debug_touch_cut(bool on);
+/* Counts, logs and undoes a release of the touch reset line by the touch driver while `pwrx touch` holds the controller in
+   reset; returns the number of releases since boot. A run with a count above 0 is invalid. */
+uint32_t hy_board_debug_touch_cut_poll(void);
 /* `pwrx panel`: after the next panel off, the reset line of the panel is held low; the next panel on initialises it
    again (about 1.4 s). RAM only. */
 void hy_board_debug_panel_cut(bool on);

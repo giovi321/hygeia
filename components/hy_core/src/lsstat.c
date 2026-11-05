@@ -32,6 +32,14 @@ const char *hy_ls_bucket_label(int bucket)
     return bucket >= 0 && bucket < HY_LS_BUCKETS ? k[bucket] : "?";
 }
 
+hy_ls_exit_t hy_ls_exit_class(int64_t slept_us)
+{
+    if (slept_us <= 0) {
+        return HY_LS_NOT_TRIED;
+    }
+    return slept_us < HY_LS_MIN_SLEPT_US ? HY_LS_REJECTED : HY_LS_RAN;
+}
+
 /* ---- time on battery per screen state ---- */
 
 int hy_scrtime_category(bool vbus, uint8_t scr, bool asleep, bool held)

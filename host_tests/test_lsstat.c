@@ -37,6 +37,16 @@ static void test_bucket_labels(void)
     TEST_ASSERT_EQUAL_STRING("?", hy_ls_bucket_label(HY_LS_BUCKETS));
 }
 
+static void test_exit_class_splits_not_tried_rejected_and_ran(void)
+{
+    TEST_ASSERT_EQUAL(HY_LS_NOT_TRIED, hy_ls_exit_class(0));
+    TEST_ASSERT_EQUAL(HY_LS_NOT_TRIED, hy_ls_exit_class(-7));
+    TEST_ASSERT_EQUAL(HY_LS_REJECTED, hy_ls_exit_class(1));
+    TEST_ASSERT_EQUAL(HY_LS_REJECTED, hy_ls_exit_class(HY_LS_MIN_SLEPT_US - 1));
+    TEST_ASSERT_EQUAL(HY_LS_RAN, hy_ls_exit_class(HY_LS_MIN_SLEPT_US));
+    TEST_ASSERT_EQUAL(HY_LS_RAN, hy_ls_exit_class(2000000));
+}
+
 static void test_scr_category(void)
 {
     TEST_ASSERT_EQUAL(HY_ST_NONE, hy_scrtime_category(true, 0, false, false));
@@ -246,6 +256,7 @@ int main(void)
     RUN_TEST(test_bucket_edges_include_the_lower_bound);
     RUN_TEST(test_bucket_of_a_negative_length_is_the_first);
     RUN_TEST(test_bucket_labels);
+    RUN_TEST(test_exit_class_splits_not_tried_rejected_and_ran);
     RUN_TEST(test_scr_category);
     RUN_TEST(test_scr_time_goes_to_the_state_that_ended);
     RUN_TEST(test_scr_time_same_state_closes_the_stretch);
