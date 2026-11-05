@@ -69,6 +69,7 @@ static bool q_pop(play_req_t *r)
 }
 
 #define TAIL_SILENCE_MS 100   /* lets the DMA queue drain before close so the decay is not cut */
+#define HEAD_SILENCE_MS 200   /* covers the codec and amplifier start after each open, which ate the first note of a cue */
 
 /* esp_codec_dev 1.5.11 disables the I2S TX channel unconditionally in its set_fmt step (open), so every
  * open after a close logs an error from "i2s_common" ("channel has not been enabled yet") and playback
@@ -157,8 +158,8 @@ static size_t tone_burst(int16_t *out, unsigned freq, unsigned ms)
 
 /* The note list of each cue; the gap follows the note and is dropped after the last one */
 typedef struct { uint16_t freq, ms, gap_ms; } note_t;
-static const note_t N_GO[] = {{1319, 120, 0}};
-static const note_t N_TAKE[] = {{880, 80, 60}, {880, 80, 0}};
+static const note_t N_GO[] = {{1319, 250, 0}};
+static const note_t N_TAKE[] = {{880, 120, 120}, {880, 120, 0}};
 static const note_t N_REDO[] = {{440, 400, 0}};
 static const note_t N_DONE[] = {{659, 120, 40}, {880, 120, 40}, {1319, 120, 0}};
 static const note_t N_FAIL[] = {{659, 250, 60}, {440, 250, 0}};
@@ -174,8 +175,9 @@ static const struct { const note_t *n; size_t count; } k_tones[HY_TONE_N] = {
 static bool tones_render(void)
 {
     size_t silence = (size_t)HY_CHIME_RATE * TAIL_SILENCE_MS / 1000;
+    size_t head = (size_t)HY_CHIME_RATE * HEAD_SILENCE_MS / 1000;
     for (int t = 0; t < HY_TONE_N; t++) {
-        size_t total = silence;
+        size_t total = head + silence;
         for (size_t i = 0; i < k_tones[t].count; i++) {
             const note_t *n = &k_tones[t].n[i];
             total += (size_t)HY_CHIME_RATE * n->ms / 1000;
@@ -187,7 +189,7 @@ static bool tones_render(void)
         if (!s_tone[t]) {
             return false;
         }
-        size_t o = 0;
+        size_t o = head;   /* calloc left the head silent */
         for (size_t i = 0; i < k_tones[t].count; i++) {
             const note_t *n = &k_tones[t].n[i];
             o += tone_burst(s_tone[t] + o, n->freq, n->ms);
