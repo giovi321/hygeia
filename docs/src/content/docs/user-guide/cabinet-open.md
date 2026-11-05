@@ -77,9 +77,9 @@ After a miss, Teach again starts teaching at once, with the 5 seconds to get rea
 
 Settings › Cabinet open › Test, or Start under Test in the web UI, checks the trigger without reminding.
 
-With a taught movement, Test on the device runs the same guided test as after teaching: see Checking the movement above, with the same tones, status lines, result screens and buttons. You can run it with the cabinet closed and listen for the tones.
+When Trigger is Taught movement, Test on the device runs the same guided test of the taught movement as after teaching: see Checking the movement above, with the same tones, status lines, result screens and buttons. You can run it with the cabinet closed and listen for the tones.
 
-Without a taught movement (trigger Any movement), Test on the device shows "Do the movement." and counts "Movements" (a test started from the web UI does not open this page on the device). Each movement seen plays the rising tones. In the rare case of a Taught movement trigger on this page, a match plays the rising tones and another movement plays the falling tones.
+When Trigger is Any movement, also while a movement is still taught, Test on the device runs the counting test of any movement at the set sensitivity. It shows "Do the movement." and counts "Movements" (a test started from the web UI does not open this page on the device). Each movement seen plays the rising tones. In the rare case of a Taught movement trigger on this page, a match plays the rising tones and another movement plays the falling tones.
 
 The web UI test counts and shows distances as before, and plays no tones. It does not remind during the test. The screen stays on while the test runs, also when it was started from the web UI (it neither dims nor turns off, also on battery). The test ends when you leave the Test page on the device, when you press Stop in the web UI, when the screen is turned off (for example with the PWR key), when the taught movement is forgotten or after 10 minutes, and the normal screen timers then resume. Leaving the web page does not stop a test. When a test ends while the device shows the Test page, the page shows "Test ended. Open Test again to run it." and the counters stop. The web UI shows the counters live, and for each Taught capture its distance from the taught movement and the limit.
 

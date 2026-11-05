@@ -159,15 +159,17 @@ static void page_nav_tap(void *ud)
         ui_nav_push(HY_V_CAB_TEACH);
         break;
     case P_TEST:
-        if (hy_settings()->cab_mode == HY_CAB_TAUGHT && !is_taught()) {
-            toast_show_info(HY_S_CAB_TEACH_FIRST);
-            return;
-        }
-        if (is_taught()) {
-            /* with a movement taught the device runs the guided test with tones, as after teaching */
+        if (hy_settings()->cab_mode == HY_CAB_TAUGHT) {
+            if (!is_taught()) {
+                toast_show_info(HY_S_CAB_TEACH_FIRST);
+                return;
+            }
+            /* Taught movement: the guided check of the taught movement, with tones, as after teaching */
             s_t_check_first = true;
             ui_nav_push(HY_V_CAB_TEACH);
         } else {
+            /* Any movement: the counting test at the Any movement level, even with a movement still taught (the
+               guided check uses the template's trigger, which daily use does not react to in this mode) */
             ui_nav_push(HY_V_CAB_TEST);
         }
         break;
