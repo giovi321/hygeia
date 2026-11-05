@@ -25,6 +25,7 @@ idf_component_register(
         "src/cabinet.c"
         "src/cabmatch.c"
         "src/cabcodec.c"
+        "src/cabretry.c"
         "src/cabteach.c"
         "src/cabflow.c"
         "src/netcfg.c"

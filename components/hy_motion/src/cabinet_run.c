@@ -22,6 +22,7 @@
 #include "freertos/task.h"
 #include "hy/board.h"
 #include "hy/cabinet_file.h"
+#include "hy/cabretry.h"
 #include "hy/cabteach.h"
 #include "hy/clock.h"
 #include "hy/power_run.h"
@@ -42,7 +43,7 @@ static const char *TAG = "cabinet";
 static portMUX_TYPE s_cmux = portMUX_INITIALIZER_UNLOCKED;
 typedef struct { bool on, chime, light; uint8_t mode, sens; } cab_cfg_t;
 static cab_cfg_t s_cfg = {false, true, true, HY_CAB_ANY, 3};
-static bool s_fault;               /* an IMU fault since the last config change: the feature is off */
+static bool s_fault;               /* an IMU fault since the last config change or retry: the feature is off */
 static bool s_taught;              /* s_model.valid, for readers that do not take s_mu */
 static int64_t s_taught_at;
 static uint16_t s_trig_mg;
@@ -70,6 +71,7 @@ static HY_EXT_BSS hy_cab_cap_t s_cap;
 static HY_EXT_BSS hy_cab_seq_t s_takes[HY_CAB_TAKES];
 static HY_EXT_BSS hy_cab_model_t s_tmodel;
 static int s_ioerr;
+static hy_cabretry_t s_retry;     /* retries of a paused feature at screen wakes; the motion task only */
 static int64_t s_last_react_ms = INT64_MIN / 2;
 
 /* Screen-off path */
@@ -262,6 +264,33 @@ static void io_result(esp_err_t err, const char *what)
         s_ioerr = 0;
         fault(what, err);
     }
+}
+
+/* Screen wake (motion task, once per wake, before the IMU is powered for the stream). A paused feature is tried
+ * again: the sensor may have been wedged only for a moment (a stuck CTRL9 handshake, see qmi8658.c). Bounded by
+ * hy_cabretry (at most HY_CABRETRY_PER_HOUR an hour, HY_CABRETRY_GAP_MS apart); each decision is logged. A settings
+ * change still clears the fault at once (hy_cab_run_config). */
+void hy_cab_int_wake(void)
+{
+    portENTER_CRITICAL(&s_cmux);
+    bool paused = s_fault;
+    portEXIT_CRITICAL(&s_cmux);
+    if (!paused) {
+        return;
+    }
+    int64_t now = mono_ms(), wait = 0;
+    if (!hy_cabretry_wake(&s_retry, now, &wait)) {
+        ESP_LOGI(TAG, "cabinet: imu fault, no retry at this wake (next in %lld s, at most %d an hour)",
+                 (long long)((wait + 999) / 1000), HY_CABRETRY_PER_HOUR);
+        return;
+    }
+    esp_err_t ierr = hy_board_imu_init();   /* a no-op while the driver is ready; finds and resets a lost sensor */
+    ESP_LOGW(TAG, "cabinet: imu fault, retrying at the screen wake (attempt %u of %d this hour, sensor init %s)",
+             (unsigned)hy_cabretry_count(&s_retry, now), HY_CABRETRY_PER_HOUR, esp_err_to_name(ierr));
+    s_ioerr = 0;
+    portENTER_CRITICAL(&s_cmux);
+    s_fault = false;
+    portEXIT_CRITICAL(&s_cmux);
 }
 
 static bool faulted(void)

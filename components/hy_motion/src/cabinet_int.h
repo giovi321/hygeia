@@ -30,6 +30,8 @@ void hy_cab_int_sleep_end(void);
 bool hy_cab_int_imu_held(void);
 /* Screen on, before the motion task powers the IMU up for the stream: the screen-off state is dropped. */
 void hy_cab_int_screen_on(void);
+/* Once per screen wake: a paused (faulted) feature is tried again, within the retry limits. */
+void hy_cab_int_wake(void);
 /* Stream path, before each read: true when the IMU is in the capture mode (read accel and gyro). */
 bool hy_cab_int_stream_gyro(void);
 /* Stream path, before each read: true once when a mode switch failed and the motion task must power the IMU up

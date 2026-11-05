@@ -108,7 +108,7 @@ When both switches are off, Cabinet open does nothing and the motion sensor is n
 
 While Cabinet open is on and a switch is on (and, with Taught movement, a movement is taught), the motion sensor stays powered in a low-power mode while the screen is off, and a movement wakes the CPU for a moment. The screen stays off unless the device reacts. Otherwise the motion sensor is powered down while the screen is off, as described in [Idle clock and power](../idle-power/#motion-sensor).
 
-If the motion sensor stops answering, Cabinet open pauses itself until it is switched off and on again, or its trigger, sensitivity or one of its switches is changed. The Cabinet open page on the device shows "Paused: sensor fault" and the web page shows "Paused: the motion sensor did not answer".
+If the motion sensor stops answering, the device first tries to bring it back itself (a few retries, then a reset of the sensor). If that does not work, Cabinet open pauses itself, and tries again at the next time the screen wakes, at most four times an hour. A change of its switches, trigger or sensitivity, or switching it off and on, tries again at once. The Cabinet open page on the device shows "Paused: sensor fault" and the web page shows "Paused: the motion sensor did not answer".
 
 ## Downloading samples
 

@@ -216,7 +216,7 @@ static void motion_task(void *arg)
     hy_orient_init(&o, (hy_rot_t)(uintptr_t)arg);
     s_orient_cur = hy_orient_current(&o);
     hy_shake_t sh;
-    bool shake_on = false, powered = false, fail_logged = false, imu_bad_logged = false;
+    bool shake_on = false, powered = false, fail_logged = false, imu_bad_logged = false, prev_want = false;
     int fails = 0;
     uint32_t seen_seq = 0, seen_arm = 0, seen_gen = 0;
     TickType_t last = xTaskGetTickCount();
@@ -250,6 +250,10 @@ static void motion_task(void *arg)
 #endif
         portEXIT_CRITICAL(&s_mux);
         lock = lock || hy_cab_int_rot_locked();   /* teach and test pause the rotation */
+        if (want && !prev_want) {
+            hy_cab_int_wake();   /* a screen wake: a paused Cabinet open is tried again */
+        }
+        prev_want = want;
 
         if (!want) {
             snap_publish(&o, false);

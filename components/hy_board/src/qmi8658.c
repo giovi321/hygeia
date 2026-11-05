@@ -80,6 +80,7 @@ static const char *TAG = "imu";
 #define QMI_LSB_PER_DPS   32
 #define QMI_IO_TIMEOUT_MS 50
 #define QMI_CMD_TIMEOUT_MS 100
+#define QMI_CTRL9_RETRIES 2   /* acknowledge and repeat this often before the chip is reset */
 #define QMI_SETTLE_MAX_MS 300
 #define QMI_WOM_SETTLE_MS 500
 
@@ -108,6 +109,7 @@ static qmi_mode_t s_mode = M_OFF;
  * check settles it; INT2 is expected on GPIO 21. */
 static uint8_t s_int_chip = 1;
 static int s_int_gpio = 17;
+static bool s_ctrl9_reset;   /* the last ctrl9 ended in a chip reset (the chip is configured and powered down) */
 
 static esp_err_t reg_write(uint8_t reg, uint8_t v)
 {
@@ -149,10 +151,28 @@ static esp_err_t cmd_done_wait(bool want)
     }
 }
 
-/* CTRL9 protocol: write the command, wait for CmdDone, acknowledge, wait for CmdDone to clear */
-static esp_err_t ctrl9(uint8_t cmd)
+/* The handshake is stuck when CmdDone stays set (the chip waits for the acknowledge) or never rises. The datasheet
+ * procedure (5.10.1, 5.10.4) is: command in CTRL9, wait for STATUSINT bit 7, write 0x00 to CTRL9, wait for the bit to
+ * clear. A half done handshake is finished by the acknowledge alone. */
+static esp_err_t ack_clear(void)
+{
+    esp_err_t err = reg_write(QMI_REG_CTRL9, QMI_CMD_ACK);
+    if (err == ESP_OK) {
+        err = cmd_done_wait(false);
+    }
+    return err;
+}
+
+/* One CTRL9 command: a CmdDone left over from an earlier command is acknowledged first (it would pass for this
+ * command's answer), then command, wait for CmdDone, acknowledge, wait for CmdDone to clear */
+static esp_err_t ctrl9_once(uint8_t cmd)
 {
     esp_err_t err = reg_write(QMI_REG_CTRL8, QMI_CTRL8_HS_STAT);
+    uint8_t st = 0;
+    if (err == ESP_OK && (err = reg_read(QMI_REG_STATUSINT, &st, 1)) == ESP_OK && (st & QMI_STATUSINT_DONE)) {
+        ESP_LOGW(TAG, "ctrl9 0x%02x: CmdDone already set (STATUSINT 0x%02x), acknowledging it first", cmd, st);
+        err = ack_clear();
+    }
     if (err == ESP_OK) {
         err = reg_write(QMI_REG_CTRL9, cmd);
     }
@@ -160,14 +180,70 @@ static esp_err_t ctrl9(uint8_t cmd)
         err = cmd_done_wait(true);
     }
     if (err == ESP_OK) {
-        err = reg_write(QMI_REG_CTRL9, QMI_CMD_ACK);
+        err = ack_clear();
+    }
+    return err;
+}
+
+/* Soft reset and the powered down configuration of init, without the device handle and WHO_AM_I steps. The reset
+ * result and the register writes are checked; the chip may NACK while it resets, so the reset write is not. */
+static esp_err_t chip_reset_config(void)
+{
+    reg_write(QMI_REG_RESET, QMI_RESET_CMD);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    uint8_t rr = 0;
+    for (int i = 0; i < 5; i++) {
+        if (reg_read(QMI_REG_RST_RES, &rr, 1) == ESP_OK && rr == QMI_RST_RES_OK) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (rr != QMI_RST_RES_OK) {
+        ESP_LOGW(TAG, "reset result 0x%02x, expected 0x%02x", rr, QMI_RST_RES_OK);
+    }
+    s_mode = M_OFF;
+    esp_err_t err;
+    if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_125)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL8, QMI_CTRL8_HS_STAT)) == ESP_OK &&
+        (err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE)) == ESP_OK) {
+        return ESP_OK;
+    }
+    return err;
+}
+
+/* CTRL9 command with bounded recovery. A timeout is retried QMI_CTRL9_RETRIES times, each after an acknowledge to
+ * finish a half done handshake. If the handshake stays stuck the chip is soft reset and configured again (which
+ * drops any WoM setting, so a WoM exit is done by it and a WoM arm is not): s_ctrl9_reset is set and ESP_FAIL is
+ * returned, and the caller decides whether the command's effect is reached. */
+static esp_err_t ctrl9(uint8_t cmd)
+{
+    s_ctrl9_reset = false;
+    esp_err_t err = ctrl9_once(cmd);
+    for (int retry = 1; err != ESP_OK && retry <= QMI_CTRL9_RETRIES; retry++) {
+        ESP_LOGW(TAG, "ctrl9 0x%02x: %s, retry %d of %d after an acknowledge", cmd, esp_err_to_name(err), retry,
+                 QMI_CTRL9_RETRIES);
+        ack_clear();   /* the result is judged by the repeat */
+        err = ctrl9_once(cmd);
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "ctrl9 0x%02x: recovered on retry %d", cmd, retry);
+            return ESP_OK;
+        }
     }
     if (err == ESP_OK) {
-        err = cmd_done_wait(false);
+        return ESP_OK;
     }
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ctrl9 0x%02x: %s", cmd, esp_err_to_name(err));
+    ESP_LOGE(TAG, "ctrl9 0x%02x: %s after %d retries, soft reset and configure again", cmd, esp_err_to_name(err),
+             QMI_CTRL9_RETRIES);
+    board_imu_int_detach();   /* WoM is gone with the reset */
+    esp_err_t rerr = chip_reset_config();
+    if (rerr == ESP_OK) {
+        s_ctrl9_reset = true;
+        ESP_LOGW(TAG, "ctrl9 0x%02x: chip reset and configured, powered down", cmd);
+        return ESP_FAIL;
     }
+    ESP_LOGE(TAG, "ctrl9 0x%02x: reset and configure: %s", cmd, esp_err_to_name(rerr));
     return err;
 }
 
@@ -181,6 +257,9 @@ static esp_err_t mode_exit(void)
         if ((err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK && (err = reg_write(QMI_REG_CAL1_L, 0)) == ESP_OK &&
             (err = reg_write(QMI_REG_CAL1_H, 0)) == ESP_OK && (err = ctrl9(QMI_CMD_WOM)) == ESP_OK) {
             err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE);
+        }
+        if (err != ESP_OK && s_ctrl9_reset) {
+            err = ESP_OK;   /* the recovery reset the chip: sensors off, WoM off, powered down; the exit is done */
         }
     } else if (s_mode == M_CAPTURE) {
         err = reg_write(QMI_REG_CTRL7, 0x00);
@@ -218,26 +297,7 @@ esp_err_t hy_board_imu_init(void)
     }
     ESP_LOGI(TAG, "who_am_i 0x%02x", id);
 
-    /* The chip may NACK while it resets, so the write result of the reset is not checked */
-    reg_write(QMI_REG_RESET, QMI_RESET_CMD);
-    vTaskDelay(pdMS_TO_TICKS(20));
-    uint8_t rr = 0;
-    for (int i = 0; i < 5; i++) {
-        if (reg_read(QMI_REG_RST_RES, &rr, 1) == ESP_OK && rr == QMI_RST_RES_OK) {
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    if (rr != QMI_RST_RES_OK) {
-        ESP_LOGW(TAG, "reset result 0x%02x, expected 0x%02x", rr, QMI_RST_RES_OK);
-    }
-    s_mode = M_OFF;
-
-    if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_125)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CTRL8, QMI_CTRL8_HS_STAT)) == ESP_OK &&
-        (err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE)) == ESP_OK) {
+    if ((err = chip_reset_config()) == ESP_OK) {
         s_state = ESP_OK;
         ESP_LOGI(TAG, "ready: accel +-8 g, 125 Hz, powered down");
         return ESP_OK;
@@ -421,7 +481,7 @@ esp_err_t hy_board_imu_sample_once(int16_t mg[3])
 }
 
 /* Datasheet figure 25: sensors off, accel ODR and range, threshold and routing, the WoM command, accel on */
-esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3])
+static esp_err_t wom_arm_once(uint16_t thr_mg, int16_t rest[3])
 {
     if (s_state != ESP_OK || s_int_gpio < 0) {
         return ESP_ERR_INVALID_STATE;
@@ -463,6 +523,20 @@ esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3])
     ESP_LOGD(TAG, "wom: armed %u mg, INT%u gpio %d level %d", (unsigned)thr_mg, (unsigned)s_int_chip, s_int_gpio,
              level);
     return ESP_OK;
+}
+
+/* A CTRL9 timeout that ended in a chip reset dropped the arm (the reset leaves the chip powered down and idle): the arm
+ * is repeated once at once, so wake on motion is not lost until the next screen wake */
+esp_err_t hy_board_imu_wom_arm(uint16_t thr_mg, int16_t rest[3])
+{
+    s_ctrl9_reset = false;
+    esp_err_t err = wom_arm_once(thr_mg, rest);
+    if (err != ESP_OK && s_ctrl9_reset) {
+        ESP_LOGW(TAG, "wom arm: the chip was reset by the CTRL9 recovery, arming again");
+        s_ctrl9_reset = false;
+        err = wom_arm_once(thr_mg, rest);
+    }
+    return err;
 }
 
 esp_err_t hy_board_imu_wom_disarm(void)
