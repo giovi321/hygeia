@@ -164,6 +164,12 @@ static bool wake_single_tap_now(void)
     return hy_settings()->wake_single_tap;
 }
 
+/* Same for "Double tap to wake": the power task reads it at each light-sleep entry and while asleep */
+static bool double_tap_wake_now(void)
+{
+    return hy_settings()->double_tap_wake;
+}
+
 /* The first snapshot, as soon as the LVGL task runs; the tiles stay blank until then */
 static void first_tick(void *arg)
 {
@@ -536,6 +542,7 @@ esp_err_t hy_ui_start(void)
                                            .wake = power_wake};
     hy_power_set_ui(&power_ui);
     hy_power_set_wake_single_fn(wake_single_tap_now);
+    hy_power_set_double_tap_wake_fn(double_tap_wake_now);
     pair_register();
     net_ui_init();
     upd_ui_init();

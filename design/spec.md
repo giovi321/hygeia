@@ -192,7 +192,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 ## Power
 
 - On USB: screen dims to the idle clock after 30 s, never turns off unless the user sets it
-- On battery: dims after 30 s, screen off after 2 min, CPU in light sleep. Wake sources: touch interrupt, RTC alarm (next due occurrence), AXP2101 interrupt (PWR key, USB plugged), user key, motion sensor interrupt (Cabinet open only). A touch wakes the CPU; the screen turns on only for a double tap unless Wake on single tap is on
+- On battery: dims after 30 s, screen off after 2 min, CPU in light sleep. Wake sources: touch interrupt, RTC alarm (next due occurrence), AXP2101 interrupt (PWR key, USB plugged), user key, motion sensor interrupt (Cabinet open only). A touch wakes the CPU; the screen turns on only for a double tap unless Wake on single tap is on. The setting Double tap to wake (default on) off holds the touch controller in reset while the screen is off in light sleep, so a touch wakes nothing (about 3.0 mA instead of 7.3 mA with the screen off, USB meter 2026-11-05); then only PWR, the user key, the RTC alarm, the motion sensor (Cabinet open) and USB wake, and Wake on single tap does not apply (its row is hidden). The dimmed and lit screens take touches as usual
 - A running Cabinet open teach, check or test keeps the screen on, whatever started it (device, web UI): no dim, no off, on USB and on battery; the normal timers resume when it ends or the view closes. A screen turned off ends the teach, check or test
 - The motion sensor is read while the screen is on or dimmed. While the screen is off it is powered down, except while Cabinet open is live (on, the chime or the light switched on, and with Taught movement a movement taught): then it watches for movement in its low-power wake-on-motion mode and its interrupt is a wake source. If the sensor stops answering, the driver retries the command and resets the sensor; if that fails Cabinet open pauses itself and is tried again at the next screen wake (at most four times an hour) or at once on a settings change
 - On battery the saved Wi-Fi mode does not start by itself. Turning on Wi-Fi or the access point from the screen or the web UI starts it; it stops after 10 minutes with no web request and no touch. Plugging in USB starts the saved mode. A setting keeps Wi-Fi on while on battery. While the radio is on the CPU does not enter light sleep. Events produced while offline go to the outbox
@@ -233,7 +233,7 @@ Gestures:
 | Swipe up on due card | next due entry |
 | Swipe down on due card | previous due entry |
 | Tap "Skip" (due card) | log as skipped |
-| Double tap while dimmed or off | wake: two taps within 300 ms and 40 px, not passed to the screen underneath; a single tap wakes only when Wake on single tap is on (default off) |
+| Double tap while dimmed or off | wake: two taps within 300 ms and 40 px, not passed to the screen underneath; a single tap wakes only when Wake on single tap is on (default off). With Double tap to wake off (default on) a touch does not wake the screen while it is off |
 | Turn the device | the screen follows in all four orientations after about 1 s in the new position, unless Rotation lock is on |
 | Tap anywhere outside the Undo button while the logged or skipped toast shows | closes the toast; the entry stays logged and the tap does nothing else (no tile log, no navigation); the shake no longer undoes it (`hy_toast_stroke`). Swipes, long presses and edge gestures while it shows are consumed and leave it open, as is a stroke that only wakes the screen or lands on the power-off or pairing overlay |
 | Tap anywhere while an info or ok toast shows (`toast_show_info`, `toast_show_ok`) | closes the toast; the tap does nothing else, by the same rule as the Undo toast (`hy_toast_stroke`, `on_undo` false). A clear scrim catches the tap; no scrim and no consumption while the power-off or pairing overlay is up. A held low-battery toast follows the close |
@@ -327,7 +327,7 @@ REST API (JSON):
 | `GET /api/history?days=7\|30` | per-medicine daily grid for 7 or 30 days |
 | `GET /api/schedule?from&to` | all occurrences in a time range |
 | `GET /api/export.csv`, `GET /api/export.json`, `POST /api/import` | export and import |
-| `GET/PUT /api/settings` | settings (secrets write-only), including the Cabinet open fields |
+| `GET/PUT /api/settings` | settings (secrets write-only), including the Cabinet open fields and `double_tap_wake` |
 | `POST /api/time` | set time and zone from the browser |
 | `GET /api/wifi` | mode, status, saved networks, AP settings (no passwords) |
 | `POST /api/wifi/mode` | client, ap, off |

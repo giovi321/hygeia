@@ -347,6 +347,7 @@ void screen_usb(bool in);                        /* hy_power_ui_t.usb: USB_IN / 
 void screen_touch_wake(void);                    /* a touch woke the CPU from the sleep mode */
 void screen_wake_guard_set(void);                /* HY_PWAKE_GUARD: the next stroke only wakes */
 void screen_double_tap_wake(void);               /* the power task saw a double tap on the OFF screen */
+bool idle_touch_blocked(void);                  /* input.c: "Double tap to wake" is off and the screen is OFF: a stroke is dropped */
 bool idle_double_tap_required(void);             /* input.c: a dimmed screen wakes on a double tap only (setting off) */
 bool screen_wake_guard_take(void);               /* input.c at a press: a stroke right after screen_touch_wake only wakes */
 void screen_activity(void);                      /* input.c: a stroke on an awake screen restarts the timers */

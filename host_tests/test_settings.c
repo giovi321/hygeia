@@ -52,6 +52,16 @@ static void test_wifi_keep_default_false(void)
     TEST_ASSERT_FALSE(s.wifi_keep_batt);
 }
 
+static void test_double_tap_wake_default_true(void)
+{
+    hy_settings_t s;
+    s.double_tap_wake = false;
+    hy_settings_defaults(&s);
+    TEST_ASSERT_TRUE(s.double_tap_wake);
+    hy_settings_clamp(&s);
+    TEST_ASSERT_TRUE(s.double_tap_wake);
+}
+
 static void test_power_defaults(void)
 {
     hy_settings_t s;
@@ -180,6 +190,7 @@ int main(void)
     RUN_TEST(test_settings_defaults_and_clamp);
     RUN_TEST(test_quiet_defaults_clamp);
     RUN_TEST(test_wifi_keep_default_false);
+    RUN_TEST(test_double_tap_wake_default_true);
     RUN_TEST(test_power_defaults);
     RUN_TEST(test_power_clamp);
     RUN_TEST(test_settings_rot_defaults);

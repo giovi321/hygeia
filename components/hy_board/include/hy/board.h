@@ -157,17 +157,23 @@ esp_err_t hy_board_imu_int_select(uint8_t chip_pin, int gpio);
 void      hy_board_imu_int_route(uint8_t *chip_pin, int *gpio);
 #endif
 
+/* Touch cut: from the next light-sleep entry on, the touch controller is held in reset and GPIO 11 is left out of the
+   wake set (no touch wake); both undone at the end of that sleep mode. Two ways to turn it on, either one is enough:
+   the debug flag `pwrx touch` (hy_board_debug_touch_cut, RAM only), and the setting "Double tap to wake" off, read
+   through the function given to hy_board_set_touch_cut_fn at each light-sleep entry (fn returns true to cut; NULL
+   removes it). */
+void hy_board_debug_touch_cut(bool on);
+void hy_board_set_touch_cut_fn(bool (*fn)(void));
+/* Counts, logs and undoes a release of the touch reset line by the touch driver while the controller should be held in
+   reset; returns the number of releases since boot (cleared when `pwrx touch` is turned on). A count above 0 means the
+   touch current came back during that run. */
+uint32_t hy_board_touch_cut_poll(void);
+
 #if CONFIG_HY_DEBUG_CONSOLE
 /* Log the raw PMU registers: STATUS1/2, 0xA4, battery mV, INTEN1..3, 0x22, 0x27, 0x30, 0x50, 0x61..0x64 */
 void hy_board_pmu_dump(void);
 /* `pmu rails`: read-only dump of the AXP2101 rail enable bits and voltage codes (0x80, 0x82..0x86, 0x90..0x9A), 0x69 */
 void hy_board_pmu_rails(void);
-/* `pwrx touch`: from the next light-sleep entry on, the touch controller is held in reset and GPIO 11 is left out of
-   the wake set (no touch wake); both undone at the end of that sleep mode. RAM only. */
-void hy_board_debug_touch_cut(bool on);
-/* Counts, logs and undoes a release of the touch reset line by the touch driver while `pwrx touch` holds the controller in
-   reset; returns the number of releases since boot. A run with a count above 0 is invalid. */
-uint32_t hy_board_debug_touch_cut_poll(void);
 /* `pwrx panel`: after the next panel off, the reset line of the panel is held low; the next panel on initialises it
    again (about 1.4 s). RAM only. */
 void hy_board_debug_panel_cut(bool on);

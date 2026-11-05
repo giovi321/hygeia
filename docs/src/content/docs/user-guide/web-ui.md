@@ -35,7 +35,7 @@ The current week, Monday to Sunday: a column per day on a wide screen and a list
 
 ## Settings
 
-- Screen and sound: volume with Play chime, brightness, sound, do not disturb, snooze minutes, dim time and screen off time on battery and on USB, and Wake on single tap (off: tap twice to wake the dimmed or dark screen)
+- Screen and sound: volume with Play chime, brightness, sound, do not disturb, snooze minutes, dim time and screen off time on battery and on USB, Double tap to wake (off: a touch does not wake the screen while it is off, which saves current), and Wake on single tap (off: tap twice to wake the dimmed or dark screen; hidden while Double tap to wake is off)
 - Quiet hours: from, to, or off
 - Rotation lock
 - Clock: the device time and when it was last synced, a time zone picker with the zones of the browser, and Sync from this browser. The device refuses a zone name that is not in its own table and the page says so

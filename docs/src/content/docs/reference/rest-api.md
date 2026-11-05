@@ -99,7 +99,7 @@ While the Cabinet open test runs, every counted movement sends `{"ev":"cabinet",
 | `POST /api/log/{id}/undo` | undo within 5 seconds of logging |
 | `GET /api/history?days=7` or `30` | the daily grid per medicine |
 | `GET /api/schedule?from=&to=` | occurrences in a time range, at most 8 days |
-| `GET /api/settings`, `PUT /api/settings` | settings; a key that is not sent stays as it is, and the answer holds the values the device kept |
+| `GET /api/settings`, `PUT /api/settings` | settings; a key that is not sent stays as it is, and the answer holds the values the device kept. `double_tap_wake` (boolean, default `true`): `false` holds the touch controller in reset while the screen is off, so a touch does not wake it. `wake_single_tap` (boolean, default `false`) applies only while `double_tap_wake` is `true`. A value that is not a boolean gives `400 invalid` with the field name |
 | `POST /api/time` | set the clock and the zone from a browser |
 | `GET /api/wifi`, `POST /api/wifi/mode` | state, saved networks, mode (`off`, `client`, `ap`) |
 | `POST /api/wifi/networks`, `DELETE /api/wifi/networks` | save or forget a network (at most 5) |

@@ -707,6 +707,7 @@ static hy_settings_t full_settings(void)
     s.quiet_from = 22 * 60; s.quiet_to = 7 * 60 + 30; s.wifi_keep_batt = true;
     s.cab_on = true; s.cab_mode = HY_CAB_TAUGHT; s.cab_chime = false; s.cab_light = true; s.cab_sens = 4; s.cab_window_min = 45;
     s.wake_single_tap = true;
+    s.double_tap_wake = false;
     return s;
 }
 
@@ -732,6 +733,7 @@ static void assert_settings_eq(const hy_settings_t *a, const hy_settings_t *b)
     TEST_ASSERT_EQUAL_UINT8(a->cab_sens, b->cab_sens);
     TEST_ASSERT_EQUAL_UINT8(a->cab_window_min, b->cab_window_min);
     TEST_ASSERT_EQUAL(a->wake_single_tap, b->wake_single_tap);
+    TEST_ASSERT_EQUAL(a->double_tap_wake, b->double_tap_wake);
 }
 
 static void test_settings_roundtrip(void)
@@ -757,6 +759,7 @@ static void test_settings_roundtrip(void)
     TEST_ASSERT_EQUAL_UINT16(s.quiet_from, out.quiet_from);
     TEST_ASSERT_EQUAL_UINT16(s.quiet_to, out.quiet_to);
     TEST_ASSERT_EQUAL(s.wifi_keep_batt, out.wifi_keep_batt);
+    TEST_ASSERT_FALSE(out.double_tap_wake);
     /* the applied rotation is read-only: the body's "rot" never reaches the settings */
     TEST_ASSERT_EQUAL_UINT8(cur.rot, out.rot);
     free(js);
@@ -899,6 +902,33 @@ static void test_api_settings_wake_tap(void)
     TEST_ASSERT_FALSE(out.wake_single_tap);
     TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json("{\"wake_single_tap\":1}", &cur, &out, &err));
     TEST_ASSERT_EQUAL_STRING("wake_single_tap", err.field);
+    TEST_ASSERT_EQUAL_INT(400, err.http);
+}
+
+static void test_api_settings_double_tap_wake(void)
+{
+    hy_settings_t cur, out;
+    hy_settings_defaults(&cur);
+    hy_api_err_t err;
+    char *js = hy_api_settings_json(&cur);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"double_tap_wake\":true"));
+    free(js);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"double_tap_wake\":false}", &cur, &out, &err));
+    TEST_ASSERT_FALSE(out.double_tap_wake);
+    out.double_tap_wake = cur.double_tap_wake;
+    assert_settings_eq(&cur, &out);   /* only that one changed */
+    cur.double_tap_wake = false;
+    js = hy_api_settings_json(&cur);
+    TEST_ASSERT_NOT_NULL(js);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"double_tap_wake\":false"));
+    free(js);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"volume\":10}", &cur, &out, &err));   /* absent keeps the value */
+    TEST_ASSERT_FALSE(out.double_tap_wake);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_settings_from_json("{\"double_tap_wake\":true}", &cur, &out, &err));
+    TEST_ASSERT_TRUE(out.double_tap_wake);
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_settings_from_json("{\"double_tap_wake\":1}", &cur, &out, &err));
+    TEST_ASSERT_EQUAL_STRING("double_tap_wake", err.field);
     TEST_ASSERT_EQUAL_INT(400, err.http);
 }
 
@@ -1361,6 +1391,7 @@ int main(void)
     RUN_TEST(test_api_settings_cab_roundtrip);
     RUN_TEST(test_api_settings_cab_bad);
     RUN_TEST(test_api_settings_wake_tap);
+    RUN_TEST(test_api_settings_double_tap_wake);
     RUN_TEST(test_route_cabinet);
     RUN_TEST(test_api_cabinet_json_not_taught);
     RUN_TEST(test_api_cabinet_json_taught);

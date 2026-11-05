@@ -104,7 +104,7 @@ bool hy_api_time_should_set(const hy_api_time_t *t, int64_t device_utc_ms, bool 
 /* ---- settings ---- */
 
 /* {"sound","dnd","volume","brightness","snooze_min","dim_s","off_bat_s","off_usb_s","rot_lock","rot",
- * "quiet":{"from":"HH:MM","to":"HH:MM"} or null (from == to),"wifi_keep_batt","cabinet":{...},"wake_single_tap"}. malloc'd, NULL on failure. */
+ * "quiet":{"from":"HH:MM","to":"HH:MM"} or null (from == to),"wifi_keep_batt","cabinet":{...},"wake_single_tap","double_tap_wake"}. malloc'd, NULL on failure. */
 char    *hy_api_settings_json(const hy_settings_t *s);
 /* Merges the body onto *cur (absent and null members keep their value; "quiet": null clears the quiet hours;
  * "rot", the applied rotation, and unknown members are ignored), then hy_settings_clamp. A wrong type, a

@@ -40,6 +40,11 @@ void      hy_power_set_next_wake_fn(int64_t (*fn)(void));
  * the touch controller with LVGL still paused and the screen OFF, wakes on a double tap (hy_wake_gate) and
  * otherwise returns to light sleep. */
 void      hy_power_set_wake_single_fn(bool (*fn)(void));
+/* The setting "Double tap to wake", read by the power task (any task may change it). Without a function it is on.
+ * Off: at each light-sleep entry the touch controller is held in reset and GPIO 11 stays out of the wake set (the
+ * debug flag `pwrx touch` does the same), and while the sleep mode runs without light sleep (USB) a touch is
+ * ignored. Touch works as usual while the screen is ON or DIM. */
+void      hy_power_set_double_tap_wake_fn(bool (*fn)(void));
 
 /* Sleep mode. The UI calls hy_power_screen_off(true) from the LVGL task, and only from there, when the screen state
  * is OFF (again after each tick while it stays OFF): LVGL pauses at the end of the current lv_timer_handler pass and,

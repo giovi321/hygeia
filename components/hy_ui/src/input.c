@@ -54,6 +54,7 @@ static hy_stroke_t s_prev_tap;
 static bool s_have_prev;   /* s_prev_tap is a tap that may start a double tap */
 static bool s_waking;      /* the stroke started on the dimmed screen: it only wakes */
 static bool s_gated;       /* ... and "wake on single tap" is off: only a double tap of such strokes wakes (s_gate) */
+static bool s_blocked;     /* the stroke started on the OFF screen and "Double tap to wake" is off: dropped */
 static hy_wake_gate_t s_gate;
 
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -174,6 +175,7 @@ static bool stroke_waking(void)
     /* a stroke that follows a CPU wake by touch (guard) is already past the decision; a dimmed screen under an
      * overlay that wakes on any touch (power-off confirmation, pairing code) is not gated either */
     s_gated = idle && !guard && idle_double_tap_required();
+    s_blocked = idle && !guard && idle_touch_blocked();
     return idle || guard;
 }
 
@@ -305,7 +307,9 @@ static void finish(int32_t x, int32_t y, uint32_t t)
         if (ui_nav_idle()) {
             /* gated: the second tap of a double tap wakes; a lone tap, a long press or a swipe is dropped and the
              * screen stays as it is (the gate remembers a first tap for HY_DOUBLE_TAP_MS) */
-            if (!s_gated || hy_wake_gate_up(&s_gate, t, (int16_t)x, (int16_t)y) == HY_WG_WAKE) {
+            if (s_blocked) {
+                ESP_LOGI(TAG, "waking stroke dropped: double tap to wake is off");
+            } else if (!s_gated || hy_wake_gate_up(&s_gate, t, (int16_t)x, (int16_t)y) == HY_WG_WAKE) {
                 ui_nav_gesture(g);
             } else {
                 ESP_LOGI(TAG, "waking stroke dropped: not a double tap");

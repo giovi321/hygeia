@@ -57,6 +57,7 @@ Stored in NVS:
 | brightness | 50 | 10 to 100 |
 | snooze | 15 min | 1 to 120 |
 | rot_lock | 0 | 0 or 1 (1 keeps the current orientation) |
+| double_tap_wake | on | on or off (off holds the touch controller in reset while the screen is off); key `wake_dtap`, absent reads as on |
 | rot | 0 | 0 to 3: the orientation in force, 0, 90, 180 or 270 degrees clockwise; an out-of-range value reads as 0 |
 
 The settings are in NVS namespace `settings`.

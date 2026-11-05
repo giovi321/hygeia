@@ -35,7 +35,7 @@ Settings has these entries:
 - Time zone: two rollers, region and city, from a table of time zones built into the firmware, so the zone can change with no network. Set stores the zone and its POSIX rule
 - Date and time: the same rollers as the "Set the time" screen
 - Sound: a volume slider and a Play chime button
-- Display: brightness, Rotation lock under the brightness slider, and Wake on single tap (off by default: a double tap wakes the dimmed or dark screen, see [Gestures](../gestures/#waking-the-screen))
+- Display: brightness, Rotation lock under the brightness slider, Double tap to wake (on by default; off holds the touch controller in reset while the screen is off, so a touch cannot wake it, see [Idle and power](../idle-power/)), and Wake on single tap (off by default: a double tap wakes the dimmed or dark screen, see [Gestures](../gestures/#waking-the-screen)). Wake on single tap is hidden while Double tap to wake is off
 - Cabinet open: the reminder when the cabinet is opened, its trigger, teaching and test. See [Cabinet open](../cabinet-open/)
 - Wi-Fi: the mode (Off, Wi-Fi, Access point), the saved networks (tap one to connect to it), the Access point row (it opens the join screen with the name and password), the web UI address, the number of paired browsers with Forget all, and Keep Wi-Fi on battery. Networks are added only in the web UI
 

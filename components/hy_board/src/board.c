@@ -76,16 +76,19 @@ static portMUX_TYPE s_wake_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_wake_armed;
 static volatile uint32_t s_wake_live;
 static bool s_sleep_set;   /* between hy_board_sleep_wake_arm(true) and (false), even when no pin could be armed */
-#if CONFIG_HY_DEBUG_CONSOLE
-/* Battery investigation flags (pwrx touch, pwrx panel), RAM only. _en: the flag; applied at the next light-sleep entry
- * (touch) or the next panel off (panel). s_touch_off: the touch controller is held in reset and its INT pin is out of the
- * wake set, from hy_board_sleep_wake_arm(true) to (false). s_panel_held: the reset line of the panel is held low since
- * the last Display Off, until the next Display On initialises it again. */
+/* Touch cut: the touch controller is held in reset while the screen is off in light sleep. s_touch_cut_en: the debug
+ * flag `pwrx touch`; s_touch_cut_fn: the setting "Double tap to wake" (cut when it returns false). Either one cuts, applied
+ * at the next light-sleep entry. s_touch_off: the controller is held in reset and its INT pin is out of the wake set, from
+ * hy_board_sleep_wake_arm(true) to (false). */
 static volatile bool s_touch_cut_en, s_touch_off;
+static bool (*volatile s_touch_cut_fn)(void);
+static volatile uint32_t s_touch_rel_n;   /* times the touch driver released the reset line while the controller was held in reset */
+#if CONFIG_HY_DEBUG_CONSOLE
+/* Battery investigation flag pwrx panel, RAM only: applied at the next panel off. s_panel_held: the reset line of the
+ * panel is held low since the last Display Off, until the next Display On initialises it again. */
 /* pwrx gesture: _en the flag; s_touch_gst: the controller runs in its gesture wake mode, from
  * hy_board_sleep_wake_arm(true) to (false) */
 static volatile bool s_touch_gst_en, s_touch_gst;
-static volatile uint32_t s_touch_rel_n;   /* times the touch driver released the reset line during a pwrx touch sleep mode */
 static volatile bool s_panel_cut_en, s_panel_held;
 #endif
 /* IMU interrupt (wake on motion): the GPIO while attached, else -1, and its level at attach; under s_wake_mux */
@@ -1018,11 +1021,9 @@ static void IRAM_ATTR touch_isr(esp_lcd_touch_handle_t tp, void *ctx)
         s_touch_isr_us = esp_timer_get_time();
     }
 #endif
-#if CONFIG_HY_DEBUG_CONSOLE
     if (s_touch_off) {
         return;   /* the controller is held in reset: whatever its INT pin does is not a touch */
     }
-#endif
     wake_pin_fired(BSP_LCD_TOUCH_INT);
     void (*fn)(void) = s_touch_hook;
     if (fn) {
@@ -1078,7 +1079,6 @@ static void key_and_sleep_pins_init(void)
     }
 }
 
-#if CONFIG_HY_DEBUG_CONSOLE
 void hy_board_debug_touch_cut(bool on)
 {
     s_touch_cut_en = on;
@@ -1087,9 +1087,9 @@ void hy_board_debug_touch_cut(bool on)
     }
 }
 
-void hy_board_debug_panel_cut(bool on)
+void hy_board_set_touch_cut_fn(bool (*fn)(void))
 {
-    s_panel_cut_en = on;
+    s_touch_cut_fn = fn;
 }
 
 /* The level the output register holds on the touch reset pin (the pin is an output, a read of the pad is not reliable). */
@@ -1101,21 +1101,23 @@ static bool touch_rst_out_high(void)
 
 /* While the controller should be held in reset: the CST9217 driver releases the line by itself after a failed read.
  * That brings the scan current back and invalidates a touch run. Counted, logged, and the line pulled low again. */
-uint32_t hy_board_debug_touch_cut_poll(void)
+uint32_t hy_board_touch_cut_poll(void)
 {
     if (s_touch_off && touch_rst_out_high()) {
         s_touch_rel_n++;
         gpio_set_level(BSP_LCD_TOUCH_RST, 0);
-        ESP_LOGW(TAG, "pwrx touch: the touch driver released the controller reset during the sleep mode (%u times): the run is invalid", (unsigned)s_touch_rel_n);
+        ESP_LOGW(TAG, "pwrx touch: the touch driver released the controller reset during the sleep mode (%u times): the touch current is back on", (unsigned)s_touch_rel_n);
     }
     return s_touch_rel_n;
 }
 
-/* The flag is on and a light sleep begins: the touch controller is held in reset (RST stays low through the sleep:
- * the pin is excluded from the sleep GPIO switch). The caller leaves GPIO 11 out of the wake set. */
+/* The debug flag is on, or the setting "Double tap to wake" is off, and a light sleep begins: the touch controller is
+ * held in reset (RST stays low through the sleep: the pin is excluded from the sleep GPIO switch). The caller leaves
+ * GPIO 11 out of the wake set. */
 static bool touch_cut_begin(void)
 {
-    if (!s_touch_cut_en || !s_tp) {
+    bool (*fn)(void) = s_touch_cut_fn;
+    if (!(s_touch_cut_en || (fn && fn())) || !s_tp) {
         return false;
     }
     gpio_set_level(BSP_LCD_TOUCH_RST, 0);
@@ -1128,16 +1130,18 @@ static bool touch_cut_begin(void)
  * Also leaves the gesture wake mode, which only a reset leaves. */
 static void touch_cut_end(void)
 {
+#if CONFIG_HY_DEBUG_CONSOLE
     if (s_touch_gst) {
         s_touch_off = true;   /* the ISR ignores the INT edges of the reset */
         s_touch_gst = false;
         gpio_set_level(BSP_LCD_TOUCH_RST, 0);
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+#endif
     if (!s_touch_off) {
         return;
     }
-    hy_board_debug_touch_cut_poll();
+    hy_board_touch_cut_poll();
     gpio_set_level(BSP_LCD_TOUCH_RST, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
     const uint8_t mode = 0x01;
@@ -1149,6 +1153,7 @@ static void touch_cut_end(void)
     ESP_LOGI(TAG, "touch controller released from reset (mode write %s, %s)", esp_err_to_name(e1), esp_err_to_name(e2));
 }
 
+#if CONFIG_HY_DEBUG_CONSOLE
 void hy_board_debug_touch_gesture(bool on)
 {
     s_touch_gst_en = on;
@@ -1221,6 +1226,11 @@ bool hy_board_touch_gesture_read(uint8_t raw[HY_TOUCH_RAW_LEN])
     vTaskDelay(pdMS_TO_TICKS(2));
     return esp_lcd_panel_io_rx_param(s_tp->io, -1, raw, HY_TOUCH_RAW_LEN) == ESP_OK;
 }
+
+void hy_board_debug_panel_cut(bool on)
+{
+    s_panel_cut_en = on;
+}
 #endif
 
 void hy_board_sleep_wake_arm(bool on)
@@ -1235,19 +1245,17 @@ void hy_board_sleep_wake_arm(bool on)
             return;
         }
         uint32_t armed = 0;
-#if CONFIG_HY_DEBUG_CONSOLE
         bool touch_cut = touch_cut_begin();
+#if CONFIG_HY_DEBUG_CONSOLE
         if (!touch_cut) {
             touch_gesture_begin();
         }
 #endif
         for (size_t i = 0; i < sizeof pins / sizeof pins[0]; i++) {
             uint32_t p = pins[i];
-#if CONFIG_HY_DEBUG_CONSOLE
             if (touch_cut && p == BSP_LCD_TOUCH_INT) {
-                continue;   /* pwrx touch: no touch wake, the controller is in reset */
+                continue;   /* no touch wake, the controller is in reset */
             }
-#endif
             if (gpio_get_level((gpio_num_t)p) == 0) {
                 ESP_LOGW(TAG, "sleep wake: gpio %u low, not armed", (unsigned)p);
                 continue;
@@ -1288,9 +1296,7 @@ void hy_board_sleep_wake_arm(bool on)
         ESP_LOGI(TAG, "sleep wake: armed gpio%s", list[0] ? list : " none");
         return;
     }
-#if CONFIG_HY_DEBUG_CONSOLE
     touch_cut_end();
-#endif
     portENTER_CRITICAL(&s_wake_mux);
     uint32_t was = s_wake_armed;
     s_sleep_set = false;
@@ -1349,11 +1355,9 @@ bool hy_board_touch_poll(bool *down, int16_t *x, int16_t *y)
 
 bool hy_board_touch_wake_rearm(void)
 {
-#if CONFIG_HY_DEBUG_CONSOLE
     if (s_touch_off) {
-        return true;   /* pwrx touch: the controller is held in reset, GPIO 11 stays out of the wake set */
+        return true;   /* the controller is held in reset, GPIO 11 stays out of the wake set */
     }
-#endif
     const uint32_t bit = 1u << BSP_LCD_TOUCH_INT;
     bool ok = false;
     bool armed_now = false;

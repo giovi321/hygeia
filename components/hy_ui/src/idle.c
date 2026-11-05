@@ -445,6 +445,14 @@ bool idle_double_tap_required(void)
            !cab_run_active();
 }
 
+/* "Double tap to wake" is off and the screen is OFF with LVGL running (the sleep mode is held off, for instance while
+ * the radio is on): a touch does not wake it. The same overlays as above are exempt. */
+bool idle_touch_blocked(void)
+{
+    return !hy_settings()->double_tap_wake && screen_state() == HY_SCR_OFF && !poweroff_visible() &&
+           !poweroff_countdown_visible() && !pair_visible() && !cab_run_active();
+}
+
 /* The power task judged a double tap while the screen was OFF: both taps are over and LVGL never saw them, so no
  * guard for the next stroke */
 void screen_double_tap_wake(void)

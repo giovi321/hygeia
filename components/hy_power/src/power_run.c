@@ -483,6 +483,26 @@ void hy_power_set_wake_single_fn(bool (*fn)(void))
     s_wake_single_fn = fn;
 }
 
+static bool (*volatile s_double_tap_wake_fn)(void);
+
+static bool double_tap_wake(void)
+{
+    bool (*fn)(void) = s_double_tap_wake_fn;
+    return !fn || fn();
+}
+
+/* The function the board calls at each light-sleep entry: cut the touch controller when the setting is off */
+static bool touch_cut_now(void)
+{
+    return !double_tap_wake();
+}
+
+void hy_power_set_double_tap_wake_fn(bool (*fn)(void))
+{
+    s_double_tap_wake_fn = fn;
+    hy_board_set_touch_cut_fn(fn ? touch_cut_now : NULL);
+}
+
 static bool wake_single(void)
 {
     bool (*fn)(void) = s_wake_single_fn;
@@ -1031,12 +1051,12 @@ static void power_task(void *arg)
     int32_t saved_rate = st.batt.rate_cph;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(loop_ms()));
-#if CONFIG_HY_DEBUG_CONSOLE
         if (s_asleep && s_light) {
+#if CONFIG_HY_DEBUG_CONSOLE
             s_ls.loops_pwr++;
-            hy_board_debug_touch_cut_poll();   /* pwrx touch: the driver may release the reset line by itself */
-        }
 #endif
+            hy_board_touch_cut_poll();   /* touch cut: the driver may release the reset line by itself */
+        }
         int64_t mono = mono_s();
         if (mono - last_up >= UPTIME_SAVE_S) {   /* RTC memory, no flash write */
             last_up = mono;
@@ -1061,6 +1081,9 @@ static void power_task(void *arg)
         bool touch = s_touch_isr, key = s_key_isr;
         s_touch_isr = s_key_isr = false;
         portEXIT_CRITICAL(&s_mux);
+        if (!double_tap_wake()) {
+            touch = false;   /* "Double tap to wake" off: while the sleep mode is on a touch is ignored (USB without light sleep) */
+        }
         wake_cause_t cause = W_N;
         bool seen_asleep = s_asleep;
         bool double_tap = false;
@@ -1523,7 +1546,7 @@ static void mv_print(void)
 /* The touch driver released the reset line while pwrx touch held it: the sleepstat of that run says so. */
 static void px_print_touch_invalid(void)
 {
-    uint32_t n = hy_board_debug_touch_cut_poll();
+    uint32_t n = hy_board_touch_cut_poll();
     if (n) {
         ESP_LOGW(TAG, "pwrx touch: INVALID, the touch driver released the controller reset %u times since the flag was turned on (scan current back on): repeat the run", (unsigned)n);
     }

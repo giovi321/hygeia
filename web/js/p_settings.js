@@ -50,6 +50,10 @@ HY.settingsLinks.push({ href: "#/settings/cabinet", text: "Cabinet open", note: 
         if (c.type === "checkbox") { c.checked = !!cur[k]; }
         else if (document.activeElement !== c) { c.value = cur[k]; }
       }
+      if (ctl.double_tap_wake) {
+        var box = document.getElementById("s-wake1-box");
+        if (box) { box.hidden = !cur.double_tap_wake; }   // Wake on single tap only applies while Double tap to wake is on
+      }
       if (ctl.volume) { ctl.volume_out.textContent = cur.volume + "%"; }
       if (ctl.brightness) { ctl.brightness_out.textContent = cur.brightness + "%"; }
       if (ctl.quiet_on) {
@@ -105,7 +109,8 @@ HY.settingsLinks.push({ href: "#/settings/cabinet", text: "Cabinet open", note: 
         number("dim_s", "Dim the screen after (seconds)", 10, 600),
         number("off_bat_s", "Screen off on battery after (seconds)", 30, 3600),
         number("off_usb_s", "Screen off on USB after (seconds)", 0, 86400, "0 keeps the screen on. Otherwise 60 or more"),
-        check("wake_single_tap", "Wake on single tap", "Off: tap twice to wake the dimmed or dark screen")
+        check("double_tap_wake", "Double tap to wake", "Off: a touch does not wake the screen while it is off, which saves about 4 mA on battery. Wake with the PWR key, the user key or by opening the cabinet"),
+        HY.h("div", { id: "s-wake1-box" }, check("wake_single_tap", "Wake on single tap", "Off: tap twice to wake the dimmed or dark screen"))
       ]);
     }
 

@@ -23,7 +23,7 @@ description: Every touch gesture, with the thresholds the firmware uses.
 | Tap anywhere outside Undo while the Undo toast shows | closes the toast; the dose stays logged and the tap does nothing else |
 | Tap anywhere while a message toast shows (amber "!" or green check mark) | closes the toast; the tap does nothing else |
 | Shake the device while the Undo toast shows | undoes the dose or skip, the same as tapping Undo |
-| Double tap while the screen is dimmed or off | wakes the screen; nothing else happens |
+| Double tap while the screen is dimmed or off | wakes the screen; nothing else happens. With Double tap to wake off, a touch does not wake the screen while it is off |
 | Single tap while the screen is dimmed or off | does nothing, unless Wake on single tap is on; then it wakes the screen |
 
 ## Edge gestures
@@ -44,7 +44,9 @@ After you log or skip a dose, the Undo toast shows for 5 seconds, or until you t
 
 By default a double tap wakes the dimmed or dark screen: two taps within 300 ms and within 40 px of each other. A lone tap does nothing, and a dark screen stays dark. A long press or a swipe does not wake it either. The taps that wake the screen are not passed to the screen underneath.
 
-Wake on single tap, in Settings under Display and in the web UI, is off by default. When it is on, one tap wakes the screen.
+Wake on single tap, in Settings under Display and in the web UI, is off by default. When it is on, one tap wakes the screen. It applies only while Double tap to wake is on; both settings hide or disable it when Double tap to wake is off.
+
+Double tap to wake, in the same places, is on by default. When it is off, a touch does not wake the screen while the screen is off: the touch controller is held in reset in light sleep to save current (see [Idle and power](../idle-power/#screen-off-and-sleep)). Wake the screen with the PWR key, the user key, a due card, plugging in USB or a Cabinet open reminder. A touch still wakes the dimmed screen and works as usual while the screen is on.
 
 A due card, the PWR key, the user key, plugging in USB and a [Cabinet open](../cabinet-open/) reminder wake the screen whatever the setting. The power-off confirmation, the battery critical countdown and the pairing code wake on a single touch too.
 

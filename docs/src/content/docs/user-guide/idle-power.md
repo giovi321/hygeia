@@ -15,7 +15,7 @@ After 30 seconds without a touch, and with no due card showing, a black overlay 
 
 The whole group moves by a few pixels each minute to limit burn-in on the AMOLED panel.
 
-A double tap wakes the screen: two taps within 300 ms and 40 px. A lone tap does nothing, unless Wake on single tap is on (Settings, Display, and the web UI; off by default). The waking taps are not passed to the screen underneath. A due card wakes the screen by itself. See [Gestures](../gestures/#waking-the-screen).
+A double tap wakes the screen: two taps within 300 ms and 40 px. A lone tap does nothing, unless Wake on single tap is on (Settings, Display, and the web UI; off by default). With Double tap to wake off, a touch does not wake a screen that is off (see Screen off and sleep). The waking taps are not passed to the screen underneath. A due card wakes the screen by itself. See [Gestures](../gestures/#waking-the-screen).
 
 ## Motion sensor
 
@@ -26,7 +26,8 @@ The one exception is [Cabinet open](../cabinet-open/) while it is live: on, with
 ## Screen off and sleep
 
 - On USB power the screen dims after 30 seconds and stays dimmed. A due card on USB keeps the screen on
-- On battery the screen turns off 2 minutes after the last activity and the CPU enters light sleep. A touch, the RTC alarm for the next dose, the PWR key, the user key, plugging in USB or, with Cabinet open live, the motion sensor wakes the CPU. A due card wakes the screen. A touch turns the screen on only as a double tap (or a single tap with Wake on single tap on); after a lone tap the CPU goes back to sleep with the screen off. A Cabinet open reminder turns the screen on when its light switch is on. A repeat chime on battery does not turn the screen on
+- On battery the screen turns off 2 minutes after the last activity and the CPU enters light sleep. A touch (with Double tap to wake on), the RTC alarm for the next dose, the PWR key, the user key, plugging in USB or, with Cabinet open live, the motion sensor wakes the CPU. A due card wakes the screen. A touch turns the screen on only as a double tap (or a single tap with Wake on single tap on); after a lone tap the CPU goes back to sleep with the screen off. A Cabinet open reminder turns the screen on when its light switch is on. A repeat chime on battery does not turn the screen on
+- Double tap to wake (Settings, Display, and the web UI; on by default) sets what a touch does while the screen is off. The touch controller scans for touches all the time and draws about 4.3 mA while it does. With the setting off, the touch controller is held in reset while the screen is off in light sleep (on battery, and on USB when light sleep runs there) and the touch no longer wakes anything. Only the PWR key, the user key, the RTC alarm, the motion sensor (Cabinet open) and USB wake the device. The controller starts again when the sleep ends, which makes each wake about 60 ms longer. The dimmed screen and the lit screen are not affected: a touch wakes the dimmed screen and works as usual on the lit screen. Measured on USB through a meter with the charger done: about 7.3 mA with the screen off and Double tap to wake on, about 3.0 mA with it off. Battery-only figures are likely a little lower
 - A running Cabinet open teach or test keeps the screen on, on USB and on battery, also when it was started from the web UI
 - Unplugging USB starts the 2 minute timer from the unplug
 
