@@ -71,7 +71,7 @@
 
     var taughtLine = HY.h("p", { id: "c-taught" });
     var thrLine = HY.h("p", { class: "mut", id: "c-thr" });
-    var pausedLine = HY.h("p", { class: "banner warn", id: "c-paused", hidden: true }, "Paused: the motion sensor did not answer. Change a setting to try again.");
+    var pausedLine = HY.h("p", { class: "banner warn", id: "c-paused", hidden: true }, "Paused: the motion sensor did not answer. It is tried again when the screen wakes, or change a setting.");
     var countLine = HY.h("p", { class: "mut sm", id: "c-counts" });
     var forgetBtn = HY.h("button", { class: "btn danger", type: "button", onclick: forget }, "Forget the movement");
     var dl = HY.h("a", { class: "btn", id: "c-dl", href: "/api/cabinet/samples.csv", download: "cabinet-samples.csv" }, "Download samples");

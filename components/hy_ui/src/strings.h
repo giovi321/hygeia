@@ -190,7 +190,7 @@
 #define HY_S_CAB_FORGET    "Forget the movement"
 #define HY_S_CAB_NOT_TAUGHT "Not taught"
 #define HY_S_CAB_TAUGHT    "Taught"
-#define HY_S_CAB_PAUSED    "Paused: sensor fault"   /* Cabinet open switched itself off until a setting changes */
+#define HY_S_CAB_PAUSED    "Paused: sensor fault"   /* Cabinet open paused itself; tried again at the next screen wake or when a setting changes */
 #define HY_S_CAB_TEACH_FIRST "Teach the movement first"
 #define HY_S_CAB_MINUS     "\xE2\x88\x92"            /* U+2212 */
 #define HY_S_CAB_T_BODY    "Do the movement 5 times. After Start, put everything back and wait. High tone: do the movement. Two low tones: got it, go back and wait."

@@ -74,7 +74,7 @@ void cabinet_ui_event(const hy_cabev_t *e)
         react();
         break;
     case HY_CABEV_FAULT:
-        ESP_LOGW(TAG, "cabinet: sensor fault, the feature is off until a settings change");
+        ESP_LOGW(TAG, "cabinet: sensor fault, paused; tried again at the next screen wake or a settings change");
         cab_event(e);
         break;
     case HY_CABEV_MATCH:

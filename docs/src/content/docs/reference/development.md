@@ -51,8 +51,7 @@ Commands added for the Cabinet open teach view and the battery work:
 | `gesture <bandright\|banddown\|bandup>` | A stroke that starts in the 80 px gesture band, with nothing under the finger that scrolls. With `consumed` a scrolling widget claims the stroke right after the press |
 | `sleepstat` | Flags in force, sleep counters, wakes by cause, `lsstat`, PM locks |
 | `pwrx` | Lists the battery investigation flags and `lsstat` (entries that ran, rejected or woke at once, too short to try). Prints a warning when the touch driver released the controller reset during a `touch` run, which makes that run invalid |
-| `pwrx <touch|nonet|panel|wakers|lsvbus> on|off` | Sets one flag (RAM only, off at every boot). `lsvbus` needs Wi-Fi off (`wifi mode off`) on USB, or the radio keeps the sleep mode off |\|nonet\|panel\|wakers\|lsvbus> on\|off` | Sets one flag (RAM only, off at every boot) |
-| `pwrx off` | Clears every flag |
+| `pwrx <touch\|nonet\|panel\|wakers\|lsvbus> on\|off` | Sets one flag (RAM only, off at every boot). `lsvbus` needs Wi-Fi off (`wifi mode off`) on USB, or the radio keeps the sleep mode off |
 | `pwrx mv [clear]` | Prints the ring of 60 s battery readings (RTC memory), or empties it |
 | `pmu rails` | Read-only dump of the AXP2101 rail registers |
 

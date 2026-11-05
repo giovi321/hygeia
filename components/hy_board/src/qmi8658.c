@@ -185,29 +185,44 @@ static esp_err_t ctrl9_once(uint8_t cmd)
     return err;
 }
 
-/* Soft reset and the powered down configuration of init, without the device handle and WHO_AM_I steps. The reset
- * result and the register writes are checked; the chip may NACK while it resets, so the reset write is not. */
+/* Written to CTRL3 before the reset: a reset puts the register back to its default, so reading anything else proves
+ * the chip took the reset. CTRL3 is rewritten by every capture start. */
+#define QMI_RESET_SENTINEL 0x5A
+
+/* Soft reset and the powered down configuration of init, without the device handle and WHO_AM_I steps. The reset is
+ * confirmed before it is recorded: the sentinel in CTRL3 is gone, RST_RESULT reads 0x80 and STATUSINT bit 7 (CmdDone)
+ * is clear. The chip may NACK while it resets, so the reset write itself is not checked. s_mode becomes M_OFF only when
+ * the reset and every configuration write succeeded, so a failed recovery leaves a recorded WoM exit to be repeated. */
 static esp_err_t chip_reset_config(void)
 {
+    esp_err_t err = reg_write(QMI_REG_CTRL3, QMI_RESET_SENTINEL);
+    if (err != ESP_OK) {
+        return err;
+    }
     reg_write(QMI_REG_RESET, QMI_RESET_CMD);
     vTaskDelay(pdMS_TO_TICKS(20));
-    uint8_t rr = 0;
-    for (int i = 0; i < 5; i++) {
-        if (reg_read(QMI_REG_RST_RES, &rr, 1) == ESP_OK && rr == QMI_RST_RES_OK) {
-            break;
+    uint8_t rr = 0, c3 = QMI_RESET_SENTINEL, st = QMI_STATUSINT_DONE;
+    bool ok = false;
+    for (int i = 0; i < 5 && !ok; i++) {
+        if (reg_read(QMI_REG_RST_RES, &rr, 1) == ESP_OK && reg_read(QMI_REG_CTRL3, &c3, 1) == ESP_OK &&
+            reg_read(QMI_REG_STATUSINT, &st, 1) == ESP_OK) {
+            ok = rr == QMI_RST_RES_OK && c3 != QMI_RESET_SENTINEL && !(st & QMI_STATUSINT_DONE);
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        if (!ok) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
-    if (rr != QMI_RST_RES_OK) {
-        ESP_LOGW(TAG, "reset result 0x%02x, expected 0x%02x", rr, QMI_RST_RES_OK);
+    if (!ok) {
+        ESP_LOGW(TAG, "reset not confirmed: RST_RESULT 0x%02x (expected 0x%02x), CTRL3 0x%02x (sentinel 0x%02x), "
+                 "STATUSINT 0x%02x (bit 7 must be clear)", rr, QMI_RST_RES_OK, c3, QMI_RESET_SENTINEL, st);
+        return ESP_ERR_INVALID_RESPONSE;
     }
-    s_mode = M_OFF;
-    esp_err_t err;
     if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL2, QMI_CTRL2_8G_125)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL8, QMI_CTRL8_HS_STAT)) == ESP_OK &&
         (err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE | QMI_CTRL1_DISABLE)) == ESP_OK) {
+        s_mode = M_OFF;
         return ESP_OK;
     }
     return err;
@@ -254,7 +269,11 @@ static esp_err_t mode_exit(void)
     esp_err_t err = ESP_OK;
     if (s_mode == M_WOM) {
         board_imu_int_detach();   /* first: the exit must not reach the hook */
-        if ((err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK && (err = reg_write(QMI_REG_CAL1_L, 0)) == ESP_OK &&
+        s_ctrl9_reset = false;    /* only a reset inside this exit counts */
+        /* Oscillator on before the command: a failed exit leaves CTRL1 with the oscillator off (power_down_best_effort),
+           and the CTRL9 engine does not answer then. AI_LE also puts the interrupt outputs high-Z (the pin is detached) */
+        if ((err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE)) == ESP_OK &&
+            (err = reg_write(QMI_REG_CTRL7, 0x00)) == ESP_OK && (err = reg_write(QMI_REG_CAL1_L, 0)) == ESP_OK &&
             (err = reg_write(QMI_REG_CAL1_H, 0)) == ESP_OK && (err = ctrl9(QMI_CMD_WOM)) == ESP_OK) {
             err = reg_write(QMI_REG_CTRL1, QMI_CTRL1_AI_LE);
         }
@@ -493,6 +512,7 @@ static esp_err_t wom_arm_once(uint16_t thr_mg, int16_t rest[3])
     if (err != ESP_OK) {
         return err;
     }
+    s_ctrl9_reset = false;   /* a reset inside the power up (its WoM exit) is not a reset of this arm */
     int16_t r[3];
     err = hy_board_imu_wait_settled(QMI_WOM_SETTLE_MS, r);
     uint8_t cal1h = (uint8_t)((s_int_chip == 2 ? QMI_CAL1H_INT2 : 0) | QMI_WOM_BLANK);   /* initial level 0 */
