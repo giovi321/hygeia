@@ -384,7 +384,7 @@ void hy_audio_chime(void)
         ESP_LOGW(TAG, "chime ignored: audio not available");
         return;
     }
-    if (!q_push((play_req_t){s_buf, s_total * sizeof(int16_t)}, true)) {
+    if (!q_push((play_req_t){s_buf, s_total * sizeof(int16_t), true}, true)) {
         ESP_LOGW(TAG, "chime dropped: a chime is already playing or waiting");
         return;
     }
@@ -396,7 +396,7 @@ void hy_audio_tone(hy_tone_t t)
     if (!s_task || (unsigned)t >= HY_TONE_N || !s_tone[t]) {
         return;
     }
-    if (!q_push((play_req_t){s_tone[t], s_tone_total[t] * sizeof(int16_t)}, false)) {
+    if (!q_push((play_req_t){s_tone[t], s_tone_total[t] * sizeof(int16_t), false}, false)) {
         ESP_LOGW(TAG, "tone dropped: %d sounds are already waiting", HY_AUDIO_QUEUE_N);
         return;
     }
