@@ -42,6 +42,8 @@ Tap a tile to log the medicine as taken now. A toast shows the code and the time
 
 A tap anywhere outside the Undo button closes the toast at once. The entry stays logged, and that tap does nothing else: it does not log a tile and does not open anything. The next tap works as usual. Closing the toast also ends the shake to undo, because the shake only works while the toast shows. Swipes and long presses while the toast shows do nothing and leave it open.
 
+Every other message toast closes the same way: a tap anywhere, on the toast or outside it, closes it at once, and that tap does nothing else. These are the amber toasts with a "!" (errors, "Next: ... at 19:40", "Battery low", pairing and update messages) and the green toasts with a check mark (saved, paired, Wi-Fi forgotten). Without a tap they close after 5 seconds. A message toast does not dim the screen. While the power-off or pairing screen is up, taps go to that screen and the toast stays until its 5 seconds end.
+
 - While the toast is showing, taps on other tiles do not log. The first such tap closes the toast
 - Logging needs a valid clock. With an invalid clock, a tap shows "Set the time first"
 - For an as-needed medicine with a minimum interval, a tap sooner than the interval shows "Last dose 2 h ago, minimum 4 h. Tap again to log". A second tap within 5 seconds logs the dose

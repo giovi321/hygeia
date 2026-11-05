@@ -47,6 +47,15 @@ static void test_overlay_or_waking_stroke_does_not_close(void)
     TEST_ASSERT_EQUAL(HY_TS_CONSUME, hy_toast_stroke(true, HY_G_TAP, false, true, false));
 }
 
+static void test_info_toast_follows_the_same_rule(void)
+{
+    /* an info or ok toast has no Undo button: on_undo is false, so any tap closes it and the rest is consumed */
+    TEST_ASSERT_EQUAL(HY_TS_CLOSE, hy_toast_stroke(true, HY_G_TAP, false, false, false));
+    TEST_ASSERT_EQUAL(HY_TS_CONSUME, hy_toast_stroke(true, HY_G_SWIPE_UP, false, false, false));
+    TEST_ASSERT_EQUAL(HY_TS_CONSUME, hy_toast_stroke(true, HY_G_LONG_PRESS, false, false, false));
+    TEST_ASSERT_EQUAL(HY_TS_CONSUME, hy_toast_stroke(true, HY_G_TAP, false, true, false));
+}
+
 static void test_point_in_area_includes_the_edges(void)
 {
     /* an area 100..199 by 300..339: the corner pixels are on the button, one pixel further out is not */
@@ -92,6 +101,7 @@ int main(void)
     RUN_TEST(test_next_tap_after_close_is_normal);
     RUN_TEST(test_other_strokes_are_consumed_and_keep_the_toast);
     RUN_TEST(test_overlay_or_waking_stroke_does_not_close);
+    RUN_TEST(test_info_toast_follows_the_same_rule);
     RUN_TEST(test_point_in_area_includes_the_edges);
     RUN_TEST(test_point_in_area_single_pixel_and_negative_coordinates);
     RUN_TEST(test_a_near_miss_beside_undo_closes_the_toast);

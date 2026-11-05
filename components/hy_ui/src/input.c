@@ -45,7 +45,7 @@ static lv_indev_t *s_indev;
 static lv_indev_read_cb_t s_orig_read;
 static hy_stroke_t s_st;
 static bool s_active;      /* between PRESSED and RELEASED */
-static bool s_toast_press; /* the stroke began while the logged toast showed */
+static bool s_toast_press; /* the stroke began while a toast showed */
 static bool s_consumed;    /* a widget owns the current stroke */
 static bool s_last_tap;    /* the last finished stroke classified as TAP */
 static bool s_phys_down;   /* the last sample was pressed */
@@ -235,8 +235,8 @@ static void indev_cb(lv_event_t *e)
         s_glide_pending = false;
         s_st.glide_stop = s_glide_stop;
         s_st.scroll_view = pressed_in_scroller(lv_indev_get_active_obj());
-        /* while the logged toast and its scrim are up a swipe does not navigate */
-        s_toast_press = toast_logged_visible();
+        /* while a toast and its scrim are up a swipe does not navigate */
+        s_toast_press = toast_stroke_wanted();
         s_consumed = s_toast_press;
         s_last_tap = false;
         s_last_double = false;
@@ -273,7 +273,7 @@ static void finish(int32_t x, int32_t y, uint32_t t)
     s_last_tap = g == HY_G_TAP;
     if (s_toast_press) {
         s_toast_press = false;
-        toast_stroke_end(g, s_st.x0, s_st.y0, s_waking);   /* a tap outside Undo closes the toast; the stroke stays consumed */
+        toast_stroke_end(g, s_st.x0, s_st.y0, s_waking);   /* a tap closes the toast (not one on Undo); the stroke stays consumed */
     }
     if (s_glide_stop && (g == HY_G_TAP || g == HY_G_LONG_PRESS)) {
         /* the touch only stopped a moving list: not a tap for any widget, and no gesture */
@@ -448,7 +448,7 @@ void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t 
     lv_display_trigger_activity(NULL);
     s_waking = stroke_waking();
     screen_activity();
-    s_toast_press = toast_logged_visible();
+    s_toast_press = toast_stroke_wanted();
     s_consumed = s_toast_press;
     s_glide_stop = false;
     s_st.glide_stop = s_st.scroll_view = false;
@@ -471,7 +471,7 @@ void input_debug_hold(int16_t x0, int16_t y0)
     lv_display_trigger_activity(NULL);
     s_waking = stroke_waking();
     screen_activity();
-    s_toast_press = toast_logged_visible();
+    s_toast_press = toast_stroke_wanted();
     s_consumed = s_toast_press;
     s_glide_stop = false;
     s_st.glide_stop = s_st.scroll_view = false;

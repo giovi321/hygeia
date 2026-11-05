@@ -21,6 +21,7 @@ description: Every touch gesture, with the thresholds the firmware uses.
 | Double tap on History | switches between 7 and 30 days |
 | Turn the device | the screen follows in all four orientations once the device has stayed still in the new position, unless Rotation lock is on |
 | Tap anywhere outside Undo while the Undo toast shows | closes the toast; the dose stays logged and the tap does nothing else |
+| Tap anywhere while a message toast shows (amber "!" or green check mark) | closes the toast; the tap does nothing else |
 | Shake the device while the Undo toast shows | undoes the dose or skip, the same as tapping Undo |
 | Double tap while the screen is dimmed or off | wakes the screen; nothing else happens |
 | Single tap while the screen is dimmed or off | does nothing, unless Wake on single tap is on; then it wakes the screen |

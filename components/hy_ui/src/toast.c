@@ -65,7 +65,7 @@ void toast_create(lv_obj_t *parent)
     lv_obj_set_pos(s_scrim, 0, HY_BAR_H);
     lv_obj_set_style_bg_color(s_scrim, lv_color_hex(HY_C_BG), 0);
     lv_obj_set_style_bg_opa(s_scrim, LV_OPA_60, 0);
-    lv_obj_set_clickable(s_scrim, true);   /* absorbs taps while the logged toast shows */
+    lv_obj_set_clickable(s_scrim, true);   /* absorbs taps while any toast shows (clear for info and ok toasts) */
     lv_obj_set_scrollable(s_scrim, false);
     lv_obj_set_hidden(s_scrim, true);
     lv_obj_set_floating(s_scrim, true);
@@ -140,6 +140,19 @@ static void open(int mode)
     lv_timer_resume(s_timer);
 }
 
+/* The scrim catches the tap that closes the toast, so it does not also reach the tile below; only the Undo toast
+ * dims the screen. While the power-off or pairing overlay is up the overlay keeps its taps: no clear scrim. */
+static void scrim_show(lv_opa_t opa)
+{
+    if (opa == LV_OPA_TRANSP && (poweroff_visible() || poweroff_countdown_visible() || pair_visible())) {
+        lv_obj_set_hidden(s_scrim, true);
+        return;
+    }
+    lv_obj_set_style_bg_opa(s_scrim, opa, 0);
+    lv_obj_set_hidden(s_scrim, false);
+    lv_obj_move_foreground(s_scrim);
+}
+
 /* shared by the logged and the skipped toast: Undo, the scrim, the 5 s window */
 static void show_undoable(uint32_t log_id, uint32_t icon_color, const char *glyph)
 {
@@ -155,8 +168,7 @@ static void show_undoable(uint32_t log_id, uint32_t icon_color, const char *glyp
     lv_obj_align(s_text, LV_ALIGN_LEFT_MID, 22 + ICON + 16, 0);
     lv_label_set_text_fmt(s_undo_lbl, HY_S_UNDO, (unsigned)HY_UNDO_WINDOW_S);
     lv_obj_set_hidden(s_undo_area, false);
-    lv_obj_set_hidden(s_scrim, false);
-    lv_obj_move_foreground(s_scrim);
+    scrim_show(LV_OPA_60);
     open(MODE_LOGGED);
 }
 
@@ -183,7 +195,7 @@ void toast_show_info(const char *text)
     lv_obj_set_width(s_text, HY_TOAST_W - 22 - ICON - 16 - 22);
     lv_obj_align(s_text, LV_ALIGN_LEFT_MID, 22 + ICON + 16, 0);
     lv_obj_set_hidden(s_undo_area, true);
-    lv_obj_set_hidden(s_scrim, true);
+    scrim_show(LV_OPA_TRANSP);
     open(MODE_INFO);
 }
 
@@ -196,7 +208,7 @@ void toast_show_ok(const char *text)
     lv_obj_set_width(s_text, HY_TOAST_W - 22 - ICON - 16 - 22);
     lv_obj_align(s_text, LV_ALIGN_LEFT_MID, 22 + ICON + 16, 0);
     lv_obj_set_hidden(s_undo_area, true);
-    lv_obj_set_hidden(s_scrim, true);
+    scrim_show(LV_OPA_TRANSP);
     open(MODE_INFO);
 }
 
@@ -254,17 +266,31 @@ bool toast_logged_visible(void)
     return s_mode == MODE_LOGGED;
 }
 
-/* A stroke that began while the logged toast showed has ended: a tap outside Undo closes the toast (the entry stays
- * logged and a shake no longer undoes it). The caller keeps every such stroke consumed. */
+/* A stroke that begins now belongs to the toast: the Undo toast always; an info or ok toast unless the power-off
+ * or pairing overlay is up (the overlay keeps its taps). */
+bool toast_stroke_wanted(void)
+{
+    if (s_mode == MODE_LOGGED) {
+        return true;
+    }
+    return s_mode == MODE_INFO && !poweroff_visible() && !poweroff_countdown_visible() && !pair_visible();
+}
+
+/* A stroke that began while a toast showed has ended: a tap closes it, on the toast or outside it (a tap on Undo is
+ * the Undo button's). A closed Undo toast keeps the entry logged and a shake no longer undoes it. The caller keeps
+ * every such stroke consumed. */
 void toast_stroke_end(hy_gesture_t g, int x0, int y0, bool waking)
 {
-    lv_area_t a;
-    lv_obj_get_coords(s_undo_area, &a);
-    bool on_undo = hy_toast_point_in_area(x0, y0, a.x1, a.y1, a.x2, a.y2);
+    bool on_undo = false;
+    if (s_mode == MODE_LOGGED) {
+        lv_area_t a;
+        lv_obj_get_coords(s_undo_area, &a);
+        on_undo = hy_toast_point_in_area(x0, y0, a.x1, a.y1, a.x2, a.y2);
+    }
     bool overlay = poweroff_visible() || poweroff_countdown_visible() || pair_visible();
-    if (hy_toast_stroke(s_mode == MODE_LOGGED, g, on_undo, waking, overlay) == HY_TS_CLOSE) {
-        ESP_LOGI(TAG, "tap outside Undo: toast closed, log %u stays", (unsigned)s_log_id);
+    if (hy_toast_stroke(s_mode != MODE_NONE, g, on_undo, waking, overlay) == HY_TS_CLOSE) {
+        ESP_LOGI(TAG, "tap: toast closed%s", s_mode == MODE_LOGGED ? ", entry stays" : "");
         hide();
-        ui_battery_toast_flush();   /* the Undo toast is gone */
+        ui_battery_toast_flush();   /* a held low-battery toast can follow */
     }
 }
