@@ -326,7 +326,7 @@ static int local_minute_now(void)
     return ok ? tm.tm_hour * 60 + tm.tm_min : -1;
 }
 
-void hy_sched_chime_once(const char *why)
+bool hy_sched_chime_once(const char *why)
 {
     ESP_LOGD(TAG, "chime requested (%s)", why ? why : "");
     const hy_settings_t *st = hy_settings();
@@ -335,6 +335,7 @@ void hy_sched_chime_once(const char *why)
         int lm = local_minute_now();
         quiet = lm >= 0 && hy_quiet_now(st->quiet_from, st->quiet_to, (uint16_t)lm);
     }
+    bool sounded = false;
     if (!st->sound) {
         ESP_LOGI(TAG, "chime silent (sound off)");
     } else if (st->dnd) {
@@ -342,7 +343,8 @@ void hy_sched_chime_once(const char *why)
     } else if (quiet) {
         ESP_LOGI(TAG, "chime silent (quiet hours)");
     } else {
-        if (!hy_audio_ok()) {
+        sounded = hy_audio_ok();
+        if (!sounded) {
             /* not silenced, but the speaker failed: the UI flashes; the play is still attempted,
                so a speaker that recovers is heard again */
             if (!s_flash) {
@@ -354,6 +356,7 @@ void hy_sched_chime_once(const char *why)
         }
         hy_audio_chime();
     }
+    return sounded;
 }
 
 static void play_chime(void)

@@ -103,7 +103,7 @@ When the screen lights and a dose is open, the due card shows. When the dose is 
 
 Nothing happens while the screen is on: you are already looking at it, so there is no chime, and the 2-minute pause below does not start. A dimmed or dark screen reacts as described here.
 
-With Light the screen off, the chime comes with a dark or dimmed screen. The device keeps the reason and shows it the next time the screen wakes, by a double tap, the power button or USB: when a dose is open the due card shows, and otherwise Home shows the "Next" note for 5 seconds. The note is dropped once it has been shown, when the dose is logged or becomes open, or when the dose time has passed.
+With Light the screen off, the chime comes with a dark or dimmed screen. If the chime is silenced (Sound off, do not disturb or quiet hours), nothing is remembered. When it sounds, the device keeps the reason and shows it the next time the screen wakes, by a double tap, the power button or USB: when a dose is open the due card shows, and otherwise Home shows the "Next" note for 5 seconds. The note is dropped once it has been shown, when the dose is logged or becomes open, or when the dose time has passed.
 
 The device reacts at most once every 2 minutes, however often the door opens. It does not react while the Undo toast shows, so closing the cabinet right after you log a dose changes nothing, and a shake still undoes it. Tapping outside the toast closes it early, and the device reacts again from then on.
 

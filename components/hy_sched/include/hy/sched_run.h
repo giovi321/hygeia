@@ -51,8 +51,10 @@ int64_t   hy_sched_run_next_wake(void);
    of cab_window_min calls hy_sched_run_invalidate. */
 int64_t   hy_sched_run_attention_from(void);
 /* LVGL task. One chime with the scheduler's gating (sound, do-not-disturb, quiet hours, audio flash); logs
-   "chime silent (<reason>)" when it does not play. why names the caller, for the debug log only. */
-void      hy_sched_chime_once(const char *why);
+   "chime silent (<reason>)" when it does not play. why names the caller, for the debug log only. Returns true when
+   the chime was played, false when it was silenced (sound off, do not disturb, quiet hours) or the speaker is
+   unavailable. */
+bool      hy_sched_chime_once(const char *why);
 /* Debug: duration of the log query in the last evaluation (us). */
 uint32_t  hy_sched_run_query_us(void);
 

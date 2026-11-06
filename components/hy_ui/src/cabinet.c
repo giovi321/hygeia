@@ -92,8 +92,9 @@ static void react(void)
     }
     s_pending.set = false;   /* this reaction replaces an older note */
     /* the chime is gated by sound, do-not-disturb and quiet hours; the light is not */
+    bool sounded = false;
     if (chime) {
-        hy_sched_chime_once("cabinet");
+        sounded = hy_sched_chime_once("cabinet");
     }
     bool woke = false;
     if (light) {   /* the screen is DIM or OFF here: wake to ON */
@@ -110,8 +111,9 @@ static void react(void)
         if (have) {
             show_next(name, hhmm);
         }
-    } else if (chime && have && hy_sched_snapshot()->out.n_open == 0) {
-        /* The chime came with a dark or dim screen: keep the reason for the next wake */
+    } else if (sounded && have && hy_sched_snapshot()->out.n_open == 0) {
+        /* The chime sounded with a dark or dim screen: keep the reason for the next wake. A silenced chime leaves
+           nothing to explain. */
         s_pending.set = true;
         s_pending.slot = slot;
     }
