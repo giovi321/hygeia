@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "hy/api.h"
 #include "hy/events.h"
+#include "hy/integ.h"
 #include "hy/occ.h"
 #include "hy/settings.h"
 
@@ -32,7 +33,7 @@ static bool parse_hhmm(const cJSON *it, uint16_t *out)
     return true;
 }
 
-char *hy_api_settings_json(const hy_settings_t *s)
+static cJSON *settings_obj(const hy_settings_t *s)
 {
     if (!s) return NULL;
     cJSON *o = cJSON_CreateObject();
@@ -66,7 +67,28 @@ char *hy_api_settings_json(const hy_settings_t *s)
     }
     ok = ok && cJSON_AddBoolToObject(o, "wake_single_tap", s->wake_single_tap);
     ok = ok && cJSON_AddBoolToObject(o, "double_tap_wake", s->double_tap_wake);
-    char *js = ok ? cJSON_PrintUnformatted(o) : NULL;
+    if (!ok) {
+        cJSON_Delete(o);
+        return NULL;
+    }
+    return o;
+}
+
+char *hy_api_settings_json(const hy_settings_t *s)
+{
+    cJSON *o = settings_obj(s);
+    if (!o) return NULL;
+    char *js = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    return js;
+}
+
+char *hy_api_settings_full_json(const hy_settings_t *s, const hy_integ_t *c, bool secrets)
+{
+    if (!c) return NULL;
+    cJSON *o = settings_obj(s);
+    if (!o) return NULL;
+    char *js = hy_api_integ_add(o, c, secrets) ? cJSON_PrintUnformatted(o) : NULL;
     cJSON_Delete(o);
     return js;
 }

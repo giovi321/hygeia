@@ -113,6 +113,11 @@ char    *hy_api_settings_json(const hy_settings_t *s);
 hy_err_t hy_api_settings_from_json(const char *body, const hy_settings_t *cur, hy_settings_t *out,
                                    hy_api_err_t *err);
 
+struct hy_integ_s;
+/* The hy_api_settings_json members followed by hy_api_integ_add(c, secrets) (see hy/integ.h). secrets true is
+ * for exports only. malloc'd, NULL on failure. */
+char *hy_api_settings_full_json(const hy_settings_t *s, const struct hy_integ_s *c, bool secrets);
+
 /* ---- dashboard state ---- */
 
 typedef struct {

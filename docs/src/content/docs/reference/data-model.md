@@ -62,6 +62,37 @@ Stored in NVS:
 
 The settings are in NVS namespace `settings`.
 
+### Integration members
+
+The settings JSON also carries the integration settings, in two members next to the ones above.
+
+`mqtt`:
+
+| Member | Default | Rule |
+|---|---|---|
+| `on` | false | true needs a valid `url` |
+| `url` | empty | `mqtt://host[:port]` (port 1883) or `mqtts://host[:port]` (port 8883), no path. An off broker may keep an empty url |
+| `user` | empty | up to 64 bytes of valid UTF-8, no control characters |
+| `password` | empty | same rule as `user`. Write only: the settings object shows `password_set` (true or false) instead |
+| `base` | `hygeia` | topic prefix, 1 to 32 characters of letters, digits, `_`, `-` and `/`; not starting or ending with `/`, no `//` |
+| `ha` | false | Home Assistant discovery on or off |
+| `ha_prefix` | `homeassistant` | same rule as `base` |
+
+`webhooks` is a list of 0 to 4 items. Each item:
+
+| Member | Default | Rule |
+|---|---|---|
+| `url` | required | `http://` or `https://` (ports 80 and 443), host, optional port, optional path starting with `/`. Unique in the list; the scheme and host compare without regard to case |
+| `on` | true | this webhook is active |
+| `events` | every type | a list of `taken`, `skipped`, `missed`, `due`, `snoozed`, `undone`, `battery_low`, `battery_critical`, `clock_invalid`. An empty list sends nothing |
+| `secret` | empty | up to 64 bytes of valid UTF-8, no control characters. Write only: the settings object shows `secret_set` instead |
+
+A host is 1 to 64 letters, digits, dots and hyphens (a dotted IPv4 address qualifies) and does not start or end with `.` or `-`. A url has no user name, no `#`, no spaces or control characters and at most 255 bytes.
+
+A `PUT` with a `webhooks` list replaces the whole list. A secret stays with its position in the list: if the item is sent without `secret`, it keeps the secret of the stored webhook at the same position, also when its url changed. `"secret": ""` clears it, a string sets it. An item added at the end starts with no secret. For `mqtt`, a member that is absent keeps its value, and `"password": ""` clears the password. `password_set` and `secret_set` in a request are ignored.
+
+The password and the webhook secrets are never returned by the API, written to the log or shown in a status. A settings export contains them only when requested with `secrets=1`.
+
 The time zone (IANA name and POSIX rule) is also stored in NVS, namespace `clock`.
 
 ## Storage

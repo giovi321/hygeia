@@ -36,6 +36,7 @@ idf_component_register(
         "src/api_med.c"
         "src/api_log.c"
         "src/api_set.c"
+        "src/integ.c"
         "src/import.c"
         "src/fwupdate.c"
         "src/toast_stroke.c"
