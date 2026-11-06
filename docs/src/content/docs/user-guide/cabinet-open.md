@@ -66,12 +66,12 @@ Test on the "Movement saved" page checks the movement you just taught. The page 
 - "Movement recognised" with the rising tones: the movement matches. Done closes the page
 - "Not recognised. Teach the movement again?" with the falling tones: the movement was seen and does not match
 - "No movement seen. Teach the movement again?" with the falling tones: nothing moved for a minute after "Now"
-- "Not still, test stopped" with the falling tones: the device was not still for a second within 20 seconds. The page returns to "Movement saved" and Test starts it again
-- "Test stopped" with the falling tones: the check was stopped from outside, by a sensor fault or the screen turning off. The page returns to "Movement saved"
+- "Not still, test stopped" with the falling tones: the device was not still for a second within 20 seconds. The page returns to "Movement saved" and Test starts it again. When the check was started from Settings › Cabinet open › Test, the page is headed "Test the movement" instead, with Done only, because nothing was saved just now
+- "Test stopped" with the falling tones: the check was stopped from outside, by a sensor fault or the screen turning off. The page returns to "Movement saved" (or "Test the movement" after a check from the Test row)
 
 The check uses the same trigger as the device uses in daily use. A movement too small to start a capture there does not start the check either, and ends as "No movement seen". So "Movement recognised" means the device would act on that movement.
 
-After a miss, Teach again starts teaching at once, with the 5 seconds to get ready, and Keep closes the page and leaves the taught movement as it was. A movement that is too small or too long, or one the device could not capture, counts as a redo of the check: the long low tone, then wait for the next high tone. If the check cannot start, the page says "The test cannot start now". Cancel, or leaving the page, stops the check. The screen stays on while the check runs. The web UI shows "The movement is being tested on the device" and disables Start while it runs.
+After a miss, Teach again starts teaching at once, with the 5 seconds to get ready, and Keep closes the page and leaves the taught movement as it was. A movement that is too small or too long, or one the device could not capture, counts as a redo of the check: the long low tone, then wait for the next high tone. If the check cannot start after teaching, the page says "The test cannot start now". From the Test row a refused check shows that message as a toast and the page does not open. Cancel, or leaving the page, stops the check. The screen stays on while the check runs. The web UI shows "The movement is being tested on the device" and disables Start while it runs.
 
 ## Test mode
 

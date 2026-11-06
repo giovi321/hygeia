@@ -46,7 +46,7 @@ Commands added for the Cabinet open teach view and the battery work:
 
 | Command | What it does |
 |---|---|
-| `cab ui <idle\|running\|saved\|checking\|ok\|miss\|nomove\|failed\|nostill\|teststopped>` | Shows the teach view in that phase without the runner, for screenshots. `nostill` and `teststopped` are the saved view after a check that did not start still or was stopped |
+| `cab ui <idle\|running\|saved\|checking\|ok\|miss\|nomove\|failed\|nostill\|teststopped\|rownostill\|rowstopped>` | Shows the teach view in that phase without the runner, for screenshots. `nostill` and `teststopped` are the saved view after a check that did not start still or was stopped; `rownostill` and `rowstopped` are the same after a check from the Settings › Cabinet open › Test row |
 | `cab press <start\|test\|again\|keep\|done\|cancel>` | Presses a button of the teach view without a finger, so the `cue` lines of a real teach or check can be read. Open the view first with `cab ui idle`; a button that is not shown in the current phase does nothing (Cancel is shown while idle, failed, running and checking) |
 | `gesture <bandright\|banddown\|bandup>` | A stroke that starts in the 80 px gesture band, with nothing under the finger that scrolls. With `consumed` a scrolling widget claims the stroke right after the press |
 | `sleepstat` | Flags in force, sleep counters, wakes by cause, the last 12 touch judgments on a dark screen, `lsstat`, PM locks |

@@ -33,6 +33,7 @@ static bool s_t_done[HY_CAB_TAKES];
 static bool s_x_on;
 static int s_x_last;   /* 0 none, 1 match, 2 other */
 static bool s_t_check_first;   /* the teach view opens straight into the guided check (the Test row of the page) */
+static bool s_t_from_row;      /* the check in this view was started from the Test row: nothing was saved just now */
 
 static bool is_taught(void)
 {
@@ -164,7 +165,14 @@ static void page_nav_tap(void *ud)
                 toast_show_info(HY_S_CAB_TEACH_FIRST);
                 return;
             }
-            /* Taught movement: the guided check of the taught movement, with tones, as after teaching */
+            /* Taught movement: the guided check of the taught movement, with tones, as after teaching. A check the
+               runner refuses (fault, a web test running) opens no view. */
+            esp_err_t err = hy_cab_run_check(true);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "check did not start: %s", esp_err_to_name(err));
+                toast_show_info(HY_S_CAB_C_REFUSED);
+                return;
+            }
             s_t_check_first = true;
             ui_nav_push(HY_V_CAB_TEACH);
         } else {
@@ -420,14 +428,17 @@ static void t_draw(void)
 {
     uint8_t p = s_flow.phase;
     bool check = p == HY_CF_CHECKING || p == HY_CF_CHECK_OK || p == HY_CF_CHECK_MISS || p == HY_CF_CHECK_NOMOVE;
-    lv_label_set_text(s_t_title, p == HY_CF_SAVED ? HY_S_CAB_D_TITLE : check ? HY_S_CAB_TEST : HY_S_CAB_TEACH);
+    /* back on the saved view after a check from the Test row: the movement was not saved just now */
+    bool row_stop = p == HY_CF_SAVED && s_t_from_row;
+    lv_label_set_text(s_t_title, row_stop ? HY_S_CAB_TEST_TITLE : p == HY_CF_SAVED ? HY_S_CAB_D_TITLE :
+                                 check ? HY_S_CAB_TEST : HY_S_CAB_TEACH);
 
     bool body = p == HY_CF_IDLE || p == HY_CF_CHECKING;
     lv_obj_set_hidden(s_t_body, !body);
     if (body) {
         lv_label_set_text(s_t_body, p == HY_CF_IDLE ? HY_S_CAB_T_BODY : HY_S_CAB_C_BODY);
     }
-    const char *msg = p == HY_CF_SAVED ? HY_S_CAB_D_ASK : p == HY_CF_CHECK_OK ? HY_S_CAB_C_OK :
+    const char *msg = row_stop ? NULL : p == HY_CF_SAVED ? HY_S_CAB_D_ASK : p == HY_CF_CHECK_OK ? HY_S_CAB_C_OK :
                       p == HY_CF_CHECK_MISS ? HY_S_CAB_C_MISS : p == HY_CF_CHECK_NOMOVE ? HY_S_CAB_C_NOMOVE : NULL;
     lv_obj_set_hidden(s_t_msg, msg == NULL);
     if (msg) {
@@ -456,8 +467,8 @@ static void t_draw(void)
     if (p == HY_CF_RUNNING || p == HY_CF_CHECKING) {
         t_btn(s_t_cancel, true, 2);
     }
-    t_btn(s_t_test, p == HY_CF_SAVED, 0);
-    t_btn(s_t_done_b, p == HY_CF_SAVED || p == HY_CF_CHECK_OK, p == HY_CF_SAVED ? 1 : 2);
+    t_btn(s_t_test, p == HY_CF_SAVED && !row_stop, 0);
+    t_btn(s_t_done_b, p == HY_CF_SAVED || p == HY_CF_CHECK_OK, p == HY_CF_SAVED && !row_stop ? 1 : 2);
     t_btn(s_t_again, p == HY_CF_CHECK_MISS || p == HY_CF_CHECK_NOMOVE, 0);
     t_btn(s_t_keep, p == HY_CF_CHECK_MISS || p == HY_CF_CHECK_NOMOVE, 1);
 }
@@ -467,6 +478,7 @@ static void teach_reset(void)
 {
     hy_cab_flow_init(&s_flow);
     s_t_refused = false;
+    s_t_from_row = false;
     memset(s_t_done, 0, sizeof s_t_done);
     dots_refresh(-1);
     t_draw();
@@ -476,6 +488,7 @@ static void teach_reset(void)
 static void t_teaching_began(void)
 {
     s_t_refused = false;
+    s_t_from_row = false;   /* a movement saved from here on is a real save */
     memset(s_t_done, 0, sizeof s_t_done);
     dots_refresh(0);
     t_count(1);
@@ -607,7 +620,7 @@ static void teach_event(const hy_cabev_t *e)
 #if CONFIG_HY_DEBUG_CONSOLE
 /* `cab ui <idle|running|saved|checking|ok|miss|nomove|failed|nostill|teststopped>`: the teach view in that phase
    without the runner, for screenshots. nostill and teststopped are the saved view after a check that did not start
-   still or was stopped. Leaving the view resets it. */
+   still or was stopped; rownostill and rowstopped the same after a check from the Test row. Leaving the view resets it. */
 void cab_debug_ui(const char *phase)
 {
     static const struct { const char *name; uint8_t phase, status; } k[] = {
@@ -616,6 +629,7 @@ void cab_debug_ui(const char *phase)
         {"ok", HY_CF_CHECK_OK, HY_CF_S_NONE},     {"miss", HY_CF_CHECK_MISS, HY_CF_S_NONE},
         {"nomove", HY_CF_CHECK_NOMOVE, HY_CF_S_NONE}, {"failed", HY_CF_FAILED, HY_CF_S_STOPPED},
         {"nostill", HY_CF_SAVED, HY_CF_S_C_NOSTILL},  {"teststopped", HY_CF_SAVED, HY_CF_S_C_STOPPED},
+        {"rownostill", HY_CF_SAVED, HY_CF_S_C_NOSTILL}, {"rowstopped", HY_CF_SAVED, HY_CF_S_C_STOPPED},
     };
     for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) {
         if (phase && strcmp(phase, k[i].name) == 0) {
@@ -625,6 +639,7 @@ void cab_debug_ui(const char *phase)
             teach_reset();
             s_flow.phase = k[i].phase;
             s_flow.status = k[i].status;
+            s_t_from_row = strncmp(k[i].name, "row", 3) == 0;   /* the view as the Test row leaves it */
             if (k[i].phase == HY_CF_RUNNING) {
                 s_t_done[0] = s_t_done[1] = true;
                 dots_refresh(2);
@@ -635,7 +650,7 @@ void cab_debug_ui(const char *phase)
             return;
         }
     }
-    ESP_LOGI(TAG, "usage: cab ui idle|running|saved|checking|ok|miss|nomove|failed|nostill|teststopped");
+    ESP_LOGI(TAG, "usage: cab ui idle|running|saved|checking|ok|miss|nomove|failed|nostill|teststopped|rownostill|rowstopped");
 }
 
 /* `cab press <start|test|again|keep|done|cancel>` and `cab press menutest` (the Test row of the Cabinet open page, with that page open): the teach view's button taps without a finger, so the cue lines
@@ -822,8 +837,11 @@ void cab_show(hy_view_t v)
         teach_reset();
         if (s_t_check_first) {
             s_t_check_first = false;
-            s_flow.phase = HY_CF_SAVED;   /* the phase the Test button expects */
-            t_test_tap(NULL);   /* a check that cannot start shows the usual status */
+            /* the menu started the check already (a refusal never opens this view): the view follows it */
+            s_flow.phase = HY_CF_SAVED;
+            hy_cab_flow_user(&s_flow, HY_CF_U_TEST);
+            s_t_from_row = true;
+            t_draw();
         }
         break;
     case HY_V_CAB_TEST:
@@ -843,6 +861,7 @@ void cab_hide(hy_view_t next)
         hy_cab_run_check(false);
     }
     hy_cab_flow_init(&s_flow);
+    s_t_from_row = false;
     if (s_x_on) {
         hy_cab_run_test(false);
         s_x_on = false;

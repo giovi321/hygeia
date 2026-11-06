@@ -208,6 +208,7 @@
 #define HY_S_CAB_T_STOPPED "Teaching stopped"
 #define HY_S_CAB_D_TITLE   "Movement saved"       /* the teach view after the last take */
 #define HY_S_CAB_D_ASK     "Test it now?"
+#define HY_S_CAB_TEST_TITLE "Test the movement"   /* the teach view after a check from the Test row stopped */
 #define HY_S_CAB_D_TEST    "Test"
 #define HY_S_CAB_D_DONE    "Done"
 #define HY_S_CAB_C_BODY    "Put everything back and wait. After the high tone, do the movement once."
