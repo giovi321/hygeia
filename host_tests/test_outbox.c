@@ -323,7 +323,7 @@ static void test_ob_torn_last_line(void)
     ob = reopen();
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(4, st.pending[0]);
-    TEST_ASSERT_EQUAL_UINT32(0, count_files(odir) > 3 ? 1 : 0); /* no stray temp file */
+    TEST_ASSERT_EQUAL_UINT(1, count_files(odir)); /* the segment only: no stray temp file */
     hy_ob_close(ob);
 }
 
@@ -475,6 +475,76 @@ static void test_ob_ram_backend_no_files(void)
     TEST_ASSERT_EQUAL_UINT(0, count_files(base));
 }
 
+static void test_ob_unreadable_segment_skips_nothing(void)
+{
+    hy_ob_t *ob = op(true);
+    hy_ob_stats_t st;
+    char a[160], b[160];
+    snprintf(a, sizeof a, "%s/00000000.q", odir);
+    snprintf(b, sizeof b, "%s/away", odir);
+    for (unsigned i = 0; i < 5; i++) add(ob, 0x01, i);
+    TEST_ASSERT_EQUAL_INT(0, rename(a, b));
+    TEST_ASSERT_EQUAL(HY_E_IO, hy_ob_peek(ob, 0, &rec));
+    TEST_ASSERT_EQUAL(HY_E_IO, hy_ob_peek(ob, 0, &rec));
+    hy_ob_stats(ob, &st);
+    TEST_ASSERT_EQUAL_UINT32(0, st.corrupt);
+    TEST_ASSERT_EQUAL_UINT32(5, st.pending[0]);
+    TEST_ASSERT_EQUAL_INT(0, rename(b, a));
+    for (uint32_t s = 0; s < 5; s++) deliver(ob, 0, s);
+    hy_ob_close(ob);
+}
+
+static void test_ob_failed_cut_never_glues_next_record(void)
+{
+    hy_ob_t *ob = op(true);
+    for (unsigned i = 0; i < 3; i++) add(ob, 0x01, i);
+    hy_ob_close(ob);
+    char path[160];
+    snprintf(path, sizeof path, "%s/00000000.q", odir);
+    FILE *f = fopen(path, "a");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("3\t1000\t1\t0123", f);
+    fclose(f);
+    snprintf(path, sizeof path, "%s/00000000.tmp", odir); /* a directory in the way: the cut cannot be made */
+    TEST_ASSERT_EQUAL_INT(0, mkdir(path, 0775));
+    ob = reopen();
+    TEST_ASSERT_EQUAL_UINT32(3, add(ob, 0x01, 3));
+    TEST_ASSERT_TRUE(exists("00000003.q"));
+    hy_ob_close(ob);
+    ob = reopen();
+    for (uint32_t s = 0; s < 4; s++) deliver(ob, 0, s);
+    TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
+    hy_ob_close(ob);
+}
+
+static void test_ob_failed_unlink_does_not_force_state_writes(void)
+{
+    fake_now = 1000;
+    hy_ob_t *ob = op(true);
+    hy_ob_stats_t st;
+    char a[160], cmd[640];
+    snprintf(a, sizeof a, "%s/00000000.q", odir);
+    for (unsigned i = 0; i < 100; i++) add(ob, 0x01, i);
+    for (uint32_t s = 0; s < 100; s++) deliver(ob, 0, s);
+    /* the segment becomes a non-empty directory: unlink fails */
+    snprintf(cmd, sizeof cmd, "rm -f '%s' && mkdir '%s' && touch '%s/x'", a, a, a);
+    TEST_ASSERT_EQUAL_INT(0, system(cmd));
+    TEST_ASSERT_TRUE(hy_ob_flush(ob, false)); /* forced by the deletable segment */
+    TEST_ASSERT_TRUE(exists("00000000.q"));
+    for (unsigned i = 100; i < 105; i++) {
+        add(ob, 0x01, i);
+        deliver(ob, 0, i);
+        TEST_ASSERT_FALSE(hy_ob_flush(ob, false)); /* no write per ack while the unlink keeps failing */
+    }
+    hy_ob_stats(ob, &st);
+    TEST_ASSERT_EQUAL_UINT32(1, st.state_writes);
+    fake_now += 10;
+    TEST_ASSERT_TRUE(hy_ob_flush(ob, false));
+    hy_ob_stats(ob, &st);
+    TEST_ASSERT_EQUAL_UINT32(2, st.state_writes);
+    hy_ob_close(ob);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -496,5 +566,8 @@ int main(void)
     RUN_TEST(test_ob_state_writes_coalesced);
     RUN_TEST(test_ob_payload_rules);
     RUN_TEST(test_ob_ram_backend_no_files);
+    RUN_TEST(test_ob_unreadable_segment_skips_nothing);
+    RUN_TEST(test_ob_failed_cut_never_glues_next_record);
+    RUN_TEST(test_ob_failed_unlink_does_not_force_state_writes);
     return UNITY_END();
 }

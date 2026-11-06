@@ -43,6 +43,8 @@ struct hy_ob {
     uint32_t appends, state_writes;
     uint32_t disk_tail;         /* tail held by the state file on disk */
     bool dirty;
+    bool seal;                  /* the last segment ends in a torn line: the next append starts a new one */
+    bool del_fail;              /* a segment could not be unlinked: retry at the next state write */
     char *line;                 /* OB_LINEBUF bytes */
     char *arena;                /* RAM backend: HY_OB_CAP slots of HY_OB_LINE_MAX bytes */
     size_t nseg;
@@ -203,7 +205,8 @@ static bool num_after(const char *s, const char *key, uint32_t *out)
 
 static void state_read(hy_ob_t *ob)
 {
-    char path[OB_PATH_MAX], buf[256];
+    static char buf[320] HY_EXT_BSS; /* only the owning task opens an outbox */
+    char path[OB_PATH_MAX];
     snprintf(path, sizeof path, "%s/state.json", ob->dir);
     FILE *f = fopen(path, "r");
     if (!f) return;
@@ -279,7 +282,7 @@ static size_t ndeletable(hy_ob_t *ob)
     return n;
 }
 
-static void delete_segments(hy_ob_t *ob, size_t n)
+static bool delete_segments(hy_ob_t *ob, size_t n)
 {
     size_t gone = 0;
     for (size_t i = 0; i < n; i++) {
@@ -292,6 +295,7 @@ static void delete_segments(hy_ob_t *ob, size_t n)
         memmove(ob->segs, ob->segs + gone, (ob->nseg - gone) * sizeof ob->segs[0]);
         ob->nseg -= gone;
     }
+    return gone == n;
 }
 
 static int cmp_u32(const void *a, const void *b)
@@ -356,7 +360,7 @@ static uint32_t seg_load(hy_ob_t *ob, size_t idx, bool is_last, uint32_t *min_go
         if (seq < *min_good) *min_good = seq;
     }
     fclose(f);
-    if (is_last && last_bad) (void)seg_cut(ob, ob->segs[idx].first, line_start);
+    if (is_last && last_bad && !seg_cut(ob, ob->segs[idx].first, line_start)) ob->seal = true;
     return hi;
 }
 
@@ -364,16 +368,16 @@ static hy_err_t scan_dir(hy_ob_t *ob)
 {
     DIR *d = opendir(ob->dir);
     if (!d) return HY_E_IO;
-    uint32_t firsts[OB_MAXSEG * 2];
+    static uint32_t firsts[OB_MAXSEG * 2] HY_EXT_BSS;
+    static char tpath[OB_DIR_MAX + 300] HY_EXT_BSS;
     size_t nf = 0;
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         const char *nm = e->d_name;
         size_t len = strlen(nm);
         if (len > 4 && strcmp(nm + len - 4, ".tmp") == 0) {
-            char p[OB_DIR_MAX + 300];
-            snprintf(p, sizeof p, "%s/%s", ob->dir, nm);
-            unlink(p);
+            snprintf(tpath, sizeof tpath, "%s/%s", ob->dir, nm);
+            unlink(tpath);
             continue;
         }
         if (len != 10 || strcmp(nm + 8, ".q") != 0) continue;
@@ -467,7 +471,7 @@ uint32_t hy_ob_next_seq(const hy_ob_t *ob) { return ob ? ob->tail : 0; }
 static hy_err_t file_append(hy_ob_t *ob, int64_t at, uint8_t mask, const char *payload, size_t plen)
 {
     uint32_t seq = ob->tail;
-    bool fresh = !(ob->nseg > 0 && ob->segs[ob->nseg - 1].count < HY_OB_SEG &&
+    bool fresh = ob->seal || !(ob->nseg > 0 && ob->segs[ob->nseg - 1].count < HY_OB_SEG &&
                    ob->segs[ob->nseg - 1].first + ob->segs[ob->nseg - 1].count == seq);
     if (fresh && ob->nseg == OB_MAXSEG) {
         (void)hy_ob_flush(ob, true);
@@ -493,13 +497,14 @@ static hy_err_t file_append(hy_ob_t *ob, int64_t at, uint8_t mask, const char *p
     ok = (fclose(f) == 0) && ok;
     if (!ok) {
         if (fresh && old == 0) unlink(path);
-        else if (truncate(path, old) != 0) { /* a torn line is cut at the next open */ }
+        else if (truncate(path, old) != 0) ob->seal = true; /* the torn line stays; never append to it */
         return HY_E_IO;
     }
     if (fresh) {
         ob->segs[ob->nseg].first = seq;
         ob->segs[ob->nseg].count = 1;
         ob->nseg++;
+        ob->seal = false;
     } else {
         ob->segs[ob->nseg - 1].count++;
     }
@@ -535,15 +540,16 @@ hy_err_t hy_ob_append(hy_ob_t *ob, int64_t at, uint8_t mask, const char *payload
 }
 
 /* Reads and verifies the record with this seq from its segment file. */
-static bool file_read(hy_ob_t *ob, uint32_t seq, hy_ob_rec_t *out)
+/* 1 read, 0 not there or failing its CRC (a bad record), -1 the file cannot be opened or read (try again later). */
+static int file_read(hy_ob_t *ob, uint32_t seq, hy_ob_rec_t *out)
 {
     size_t i = ob->nseg;
     while (i > 0 && ob->segs[i - 1].first > seq) i--;
-    if (i == 0) return false;
+    if (i == 0) return 0;
     char path[OB_PATH_MAX];
     seg_path(ob, path, sizeof path, ob->segs[i - 1].first, "q");
     FILE *f = fopen(path, "r");
-    if (!f) return false;
+    if (!f) return -1;
     size_t n;
     bool term, found = false;
     while (!found && rd_line(f, ob->line, OB_LINEBUF, &n, &term)) {
@@ -554,8 +560,10 @@ static bool file_read(hy_ob_t *ob, uint32_t seq, hy_ob_rec_t *out)
         out->payload[pn] = '\0';
         found = true;
     }
+    bool bad = ferror(f) != 0;
     fclose(f);
-    return found;
+    if (found) return 1;
+    return bad ? -1 : 0;
 }
 
 hy_err_t hy_ob_peek(hy_ob_t *ob, uint8_t dest, hy_ob_rec_t *out)
@@ -570,7 +578,9 @@ hy_err_t hy_ob_peek(hy_ob_t *ob, uint8_t dest, hy_ob_rec_t *out)
             strcpy(out->payload, ob->arena + (size_t)(s % HY_OB_CAP) * HY_OB_LINE_MAX);
             return HY_OK;
         }
-        if (file_read(ob, s, out)) return HY_OK;
+        int r = file_read(ob, s, out);
+        if (r > 0) return HY_OK;
+        if (r < 0) return HY_E_IO;
         /* Unreadable record: skip it for this destination. */
         ob->next[dest] = s + 1;
         ob->corrupt++;
@@ -603,7 +613,8 @@ bool hy_ob_flush(hy_ob_t *ob, bool force)
     size_t del = ndeletable(ob);
     bool need = ob->dirty || (del > 0 && ob->disk_tail < ob->tail);
     bool wrote = false;
-    if (need && (force || del > 0 || now_s(ob) - ob->last_write >= HY_OB_FLUSH_S)) {
+    bool forcedel = del > 0 && !ob->del_fail;
+    if (need && (force || forcedel || now_s(ob) - ob->last_write >= HY_OB_FLUSH_S)) {
         bool ok = true;
         if (ob->dir[0]) ok = state_write(ob);
         ob->last_write = now_s(ob);
@@ -614,7 +625,8 @@ bool hy_ob_flush(hy_ob_t *ob, bool force)
         wrote = true;
     }
     /* Segments go only once the state holding the current tail and cursors is on disk. */
-    if (del > 0 && ob->disk_tail >= ob->tail && !ob->dirty) delete_segments(ob, del);
+    if (del > 0 && ob->disk_tail >= ob->tail && !ob->dirty && (wrote || !ob->del_fail))
+        ob->del_fail = !delete_segments(ob, del);
     return wrote;
 }
 
