@@ -218,6 +218,7 @@
 #define HY_S_CAB_C_AGAIN   "Teach again"
 #define HY_S_CAB_C_KEEP    "Keep"
 #define HY_S_CAB_C_REFUSED "The test cannot start now"
+#define HY_S_CAB_T_REFUSED "Teaching cannot start now"   /* Start or Teach again, refused by the runner */
 #define HY_S_CAB_C_NOSTILL "Not still, test stopped"
 #define HY_S_CAB_C_STOPPED "Test stopped"
 #define HY_S_CAB_X_HINT    "Do the movement."

@@ -504,6 +504,7 @@ static void t_start_tap(void *ud)
     esp_err_t err = hy_cab_run_teach(true);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "teach did not start: %s", esp_err_to_name(err));
+        toast_show_info(HY_S_CAB_T_REFUSED);
         return;
     }
     hy_cab_flow_user(&s_flow, HY_CF_U_START);
@@ -519,6 +520,7 @@ static void t_again_tap(void *ud)
     esp_err_t err = hy_cab_run_teach(true);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "teach did not start: %s", esp_err_to_name(err));
+        toast_show_info(HY_S_CAB_T_REFUSED);
         return;
     }
     hy_cab_flow_user(&s_flow, HY_CF_U_AGAIN);
