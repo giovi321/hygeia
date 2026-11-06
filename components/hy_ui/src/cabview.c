@@ -681,7 +681,9 @@ void cab_debug_press(const char *btn)
             uint8_t ph = s_flow.phase;
             /* the tap handlers of Done, Keep and Cancel do not look at the phase: only press what is shown (as t_btn) */
             bool shown = true;
-            if (strcmp(k[i].name, "keep") == 0) {
+            if (strcmp(k[i].name, "test") == 0) {
+                shown = ph == HY_CF_SAVED && !s_t_from_row;
+            } else if (strcmp(k[i].name, "keep") == 0) {
                 shown = ph == HY_CF_CHECK_MISS || ph == HY_CF_CHECK_NOMOVE;
             } else if (strcmp(k[i].name, "done") == 0) {
                 shown = ph == HY_CF_SAVED || ph == HY_CF_CHECK_OK;
