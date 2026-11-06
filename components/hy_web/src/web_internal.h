@@ -184,6 +184,21 @@ hy_job_t *web_job_new(web_req_t *r, void (*fn)(void *), size_t ctx_size);
  * context; on a timeout the 503 busy answer is already sent in *sent, the job is released and NULL comes back.
  * Otherwise the caller reads the context and then calls hy_job_put(j). */
 void *web_job_go(web_req_t *r, hy_job_t *j, uint32_t timeout_ms, esp_err_t *sent);
+/* Result and scratch of web_settings_apply_json. The two integration copies may hold secrets: the helper wipes them
+ * before it returns, and the caller keeps this struct in a job context (PSRAM), never on a stack. */
+typedef struct {
+    hy_api_err_t aerr;
+    bool failed;            /* a body member was refused: nothing was saved */
+    bool not_taught;        /* the mode was set to Taught movement and no movement is taught: nothing was saved */
+    esp_err_t save;         /* the settings write */
+    esp_err_t integ_save;   /* the integration write, ESP_OK when it did not change */
+    hy_settings_t now;      /* the settings in force afterwards */
+    hy_integ_t inow;        /* the integration settings in force afterwards, secrets replaced by "*" (set) or "" */
+    hy_integ_t cur, next;   /* scratch */
+} web_settings_t;
+/* Merges a settings body (the settings members plus "mqtt" and "webhooks") onto the current values, saves what
+ * changed and tells the device UI. LVGL task only (call it from a job). Nothing is saved when any member is refused. */
+void web_settings_apply_json(const char *json, web_settings_t *res);
 /* Out of memory: 503 "busy" with Retry-After, the answer the web UI retries on */
 esp_err_t web_oom(web_req_t *r);
 

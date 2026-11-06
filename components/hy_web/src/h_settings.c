@@ -32,22 +32,90 @@ static int64_t utc_ms_now(void)
 
 typedef struct {
     const char *body;
-    hy_settings_t now;
-    bool failed;
-    bool not_taught;   /* the mode was set to Taught movement and no movement is taught: nothing was saved */
-    hy_api_err_t aerr;
-    esp_err_t save;
+    web_settings_t w;
 } sctx_t;
+
+/* Overwrites a buffer that held a secret; the volatile pointer keeps the stores from being optimised away. */
+static void wipe(void *p, size_t n)
+{
+    volatile unsigned char *v = (volatile unsigned char *)p;
+    while (n--) {
+        *v++ = 0;
+    }
+}
+
+/* The answer needs only whether a credential is set: a set value becomes "*", so no secret leaves the LVGL task in a
+ * job result. */
+static void redact(char *s, size_t size)
+{
+    bool set = s[0] != '\0';
+    wipe(s, size);
+    if (set) {
+        s[0] = '*';
+    }
+}
+
+static void snapshot(web_settings_t *w)
+{
+    w->now = *hy_settings();
+    w->inow = *hy_integ_cfg();
+    redact(w->inow.mqtt.pass, sizeof w->inow.mqtt.pass);
+    for (unsigned i = 0; i < HY_HOOK_MAX; i++) {
+        redact(w->inow.hook[i].secret, sizeof w->inow.hook[i].secret);
+    }
+}
+
+/* Merge, clamp and save, then tell the screen side. The applied rotation is never written from here; the callback
+ * (rotation lock, brightness and the views that show a setting) is the device UI's own refresh. */
+void web_settings_apply_json(const char *json, web_settings_t *w)
+{
+    hy_settings_t old = *hy_settings();
+    hy_settings_t next;
+    w->cur = *hy_integ_cfg();
+    const char *body = json && json[0] ? json : "{}";
+    if (hy_api_settings_from_json(body, &old, &next, &w->aerr) != HY_OK ||
+        hy_api_integ_from_json(body, &w->cur, &w->next, &w->aerr) != HY_OK) {
+        w->failed = true;
+        goto done;
+    }
+    next.rot = old.rot;
+    if (next.cab_mode == HY_CAB_TAUGHT && old.cab_mode != HY_CAB_TAUGHT) {
+        hy_cab_status_t cs;
+        hy_cab_run_status(&cs);
+        if (!cs.taught) {
+            w->not_taught = true;
+            goto done;
+        }
+    }
+    w->save = hy_settings_update(&next);   /* the RAM copy is updated even when the save fails */
+    /* A difference in struct padding only costs one extra write. */
+    if (memcmp(&w->cur, &w->next, sizeof w->cur) != 0) {
+        w->integ_save = hy_integ_cfg_save(&w->next);
+    }
+    snapshot(w);
+    if (w->now.cab_window_min != old.cab_window_min) {
+        hy_sched_run_invalidate();   /* the attention instant depends on the window */
+    }
+    hy_audio_set_volume(w->now.volume);
+    hy_net_set_keep_batt(w->now.wifi_keep_batt);
+    const hy_web_ui_t *ui = web_ui();
+    if (ui && ui->settings_applied) {
+        ui->settings_applied(&old, &w->now);
+    }
+done:
+    wipe(&w->cur, sizeof w->cur);
+    wipe(&w->next, sizeof w->next);
+}
 
 static void job_settings_get(void *arg)
 {
     sctx_t *c = arg;
-    c->now = *hy_settings();
+    snapshot(&c->w);
 }
 
-static esp_err_t send_settings(web_req_t *r, const hy_settings_t *s)
+static esp_err_t send_settings(web_req_t *r, const web_settings_t *w)
 {
-    char *json = hy_api_settings_json(s);
+    char *json = hy_api_settings_full_json(&w->now, &w->inow, false);
     esp_err_t e = json ? web_send_json(r, 200, json) : web_oom(r);
     free(json);
     return e;
@@ -64,47 +132,27 @@ static esp_err_t h_settings_get(web_req_t *r)
     if (!c) {
         return sent;
     }
-    esp_err_t e = send_settings(r, &c->now);
+    esp_err_t e = send_settings(r, &c->w);
     hy_job_put(j);
     return e;
 }
 
-/* Merge, clamp and save, then tell the screen side. The applied rotation is never written from here; the callback
- * (rotation lock, brightness and the views that show a setting) is the device UI's own refresh. */
+/* The job's body copy may hold secrets: wiped here, also when the handler no longer waits for the job. */
 static void job_settings_put(void *arg)
 {
     sctx_t *c = arg;
-    hy_settings_t old = *hy_settings();
-    hy_settings_t next;
-    if (hy_api_settings_from_json(c->body && c->body[0] ? c->body : "{}", &old, &next, &c->aerr) != HY_OK) {
-        c->failed = true;
-        return;
-    }
-    next.rot = old.rot;
-    if (next.cab_mode == HY_CAB_TAUGHT && old.cab_mode != HY_CAB_TAUGHT) {
-        hy_cab_status_t cs;
-        hy_cab_run_status(&cs);
-        if (!cs.taught) {
-            c->not_taught = true;
-            return;
-        }
-    }
-    c->save = hy_settings_update(&next);   /* the RAM copy is updated even when the save fails */
-    c->now = *hy_settings();
-    if (c->now.cab_window_min != old.cab_window_min) {
-        hy_sched_run_invalidate();   /* the attention instant depends on the window */
-    }
-    hy_audio_set_volume(c->now.volume);
-    hy_net_set_keep_batt(c->now.wifi_keep_batt);
-    const hy_web_ui_t *ui = web_ui();
-    if (ui && ui->settings_applied) {
-        ui->settings_applied(&old, &c->now);
+    web_settings_apply_json(c->body, &c->w);
+    if (c->body) {
+        wipe((char *)c->body, strlen(c->body));
     }
 }
 
 static esp_err_t h_settings_put(web_req_t *r)
 {
     hy_job_t *j = web_job_new(r, job_settings_put, sizeof(sctx_t));
+    if (r->body && r->body_len) {
+        wipe(r->body, r->body_len);   /* the job holds its own copy; the dispatcher frees this one */
+    }
     esp_err_t sent;
     if (!j) {
         return web_oom(r);
@@ -114,14 +162,16 @@ static esp_err_t h_settings_put(web_req_t *r)
         return sent;
     }
     esp_err_t e;
-    if (c->failed) {
-        e = web_fail_api(r, &c->aerr);
-    } else if (c->not_taught) {
+    if (c->w.failed) {
+        e = web_fail_api(r, &c->w.aerr);
+    } else if (c->w.not_taught) {
         e = web_send_err(r, 409, "not_taught", "cabinet.mode", "Teach the movement on the device first");
-    } else if (c->save != ESP_OK) {
+    } else if (c->w.integ_save != ESP_OK) {
+        e = web_send_err(r, 503, "storage", NULL, "The integration settings could not be saved");
+    } else if (c->w.save != ESP_OK) {
         e = web_fail(r, HY_E_IO);
     } else {
-        e = send_settings(r, &c->now);
+        e = send_settings(r, &c->w);
     }
     hy_job_put(j);
     return e;

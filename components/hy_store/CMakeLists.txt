@@ -4,6 +4,7 @@ idf_component_register(
         "src/store_mount.c"
         "src/cabinet_file.c"
         "src/settings_nvs.c"
+        "src/integ_nvs.c"
         "src/outbox.c"
     INCLUDE_DIRS
         "include"

@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include "hy/actions.h"
+#include "hy/integ.h"
 #include "hy/settings.h"
 
 /*
@@ -91,6 +92,16 @@ esp_err_t hy_settings_save(const hy_settings_t *s);
 const hy_settings_t *hy_settings(void);
 /* Clamps, saves, and updates the RAM copy (the RAM copy is updated even when the save fails). */
 esp_err_t hy_settings_update(const hy_settings_t *s);
+
+/* Integration settings in NVS namespace "integ": mq_on (u8), mq_url, mq_user, mq_pass, mq_base (str), mq_ha (u8),
+ * mq_pfx (str), wh_n (u8), and per slot i 0..3: wh<i>_on (u8), wh<i>_url (str), wh<i>_ev (u16), wh<i>_sec (str).
+ * LVGL task only, like hy_settings. The RAM copy lives in PSRAM. load: missing keys give defaults; a stored config
+ * that fails hy_integ_validate is logged by field name only and the defaults are used. save: writes every key,
+ * erases the keys of unused hook slots, one nvs_commit, and updates the RAM copy even when the write fails.
+ * The password and the webhook secrets are never logged. */
+esp_err_t hy_integ_cfg_load(void);
+const hy_integ_t *hy_integ_cfg(void);
+esp_err_t hy_integ_cfg_save(const hy_integ_t *c);
 #endif
 
 #endif /* HY_STORE_H */

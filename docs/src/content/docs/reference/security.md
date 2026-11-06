@@ -13,6 +13,7 @@ The web UI and the REST API let a browser read and change everything on the devi
 - Origin check: when a request carries an `Origin` header, it has to be `http://` plus the same host as the `Host` header
 - Host allow-list: a request is answered only when its `Host` header is the device address, the host name, `<host>.local` or a name whose first label is the host name. Any other name gets `421`. This blocks DNS rebinding, where a page on another site points its own name at the address of the device
 - Write-only secrets: no route returns a saved Wi-Fi password or the access point password. The Wi-Fi page shows the access point password as dots. The only exception is an export that you ask to include passwords
+- MQTT password and webhook secrets: they are stored in the flash settings area (NVS namespace `integ`), which is not encrypted, like the saved Wi-Fi passwords. Anyone with physical access to the device and a flash reader can read them. No route, status answer, log line or debug print shows them: the settings answer shows only `password_set` and `secret_set`. A request body that carried them is overwritten in memory once the device has used it.
 - Firmware images: an upload is checked for the Hygeia image header and size, and the new firmware must confirm itself or the device returns to the previous version. See [Web UI](../../user-guide/web-ui/#firmware)
 - Limits: bodies are up to 16 KB, an import up to 4 MB and a firmware image up to 3 MB. JSON nesting is limited. The device serves few requests at once and answers `503` when busy
 

@@ -327,8 +327,10 @@ static void wipe_strings(cJSON *obj, const char *key)
     if (cJSON_IsString(it) && it->valuestring) wipe(it->valuestring, strlen(it->valuestring));
 }
 
-static void wipe_body(cJSON *o)
+/* Overwrites the secret strings of a parsed settings body (see hy/integ.h). */
+void hy_api_integ_wipe_tree(struct cJSON *o)
 {
+    if (!o) return;
     cJSON *m = cJSON_GetObjectItemCaseSensitive(o, "mqtt");
     if (cJSON_IsObject(m)) wipe_strings(m, "password");
     cJSON *w = cJSON_GetObjectItemCaseSensitive(o, "webhooks");
@@ -375,7 +377,7 @@ hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_inte
     if (r == HY_OK) r = hy_integ_validate(w, err);
     if (r == HY_OK) *out = *w;
     wipe(w, sizeof *w);
-    wipe_body(o);
+    hy_api_integ_wipe_tree(o);
     cJSON_Delete(o);
     return r;
 }

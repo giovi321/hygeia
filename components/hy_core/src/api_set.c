@@ -161,6 +161,7 @@ hy_err_t hy_api_settings_from_json(const char *body, const hy_settings_t *cur, h
     if (!body || !cur || !out) return hy_api_fail(err, HY_E_INVALID, NULL);
     cJSON *o = cJSON_ParseWithOpts(body, NULL, true);
     if (!o || !cJSON_IsObject(o)) {
+        hy_api_integ_wipe_tree(o);
         cJSON_Delete(o);
         return hy_api_fail(err, HY_E_INVALID, NULL);
     }
@@ -210,6 +211,7 @@ hy_err_t hy_api_settings_from_json(const char *body, const hy_settings_t *cur, h
         const cJSON *c = cJSON_GetObjectItemCaseSensitive(o, "cabinet");
         if (c && !cJSON_IsNull(c)) r = cab_from_json(c, &s, err);
     }
+    hy_api_integ_wipe_tree(o);   /* the body may carry the MQTT password and webhook secrets */
     cJSON_Delete(o);
     if (r != HY_OK) return r;
     hy_settings_clamp(&s);

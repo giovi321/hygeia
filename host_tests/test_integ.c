@@ -566,10 +566,72 @@ static void test_settings_full_json(void)
     TEST_ASSERT_NULL(hy_api_settings_full_json(NULL, &c, false));
 }
 
+/* ---- secrets in freed heap ---- */
+
+static const char *s_needle;
+static unsigned s_leaks;
+
+static void *track_malloc(size_t n)
+{
+    size_t *p = malloc(n + 16);
+    if (!p) return NULL;
+    p[0] = n;
+    return (char *)p + 16;
+}
+
+static void track_free(void *q)
+{
+    if (!q) return;
+    size_t *p = (size_t *)((char *)q - 16);
+    size_t n = p[0], k = strlen(s_needle);
+    for (size_t i = 0; i + k <= n; i++)
+        if (memcmp((char *)q + i, s_needle, k) == 0) s_leaks++;
+    free(p);
+}
+
+static unsigned leaks_of(const char *body, const char *needle, bool settings_parse)
+{
+    hy_settings_t cur, next;
+    hy_integ_t ic = cfg_with_secrets(), io;
+    hy_api_err_t e;
+    cJSON_Hooks h = { track_malloc, track_free };
+    hy_settings_defaults(&cur);
+    s_needle = needle;
+    s_leaks = 0;
+    cJSON_InitHooks(&h);
+    if (settings_parse) (void)hy_api_settings_from_json(body, &cur, &next, &e);
+    else (void)hy_api_integ_from_json(body, &ic, &io, &e);
+    cJSON_InitHooks(NULL);
+    return s_leaks;
+}
+
+static void test_secrets_wiped_before_free(void)
+{
+    const char *body = "{\"volume\":50,\"mqtt\":{\"on\":true,\"url\":\"mqtt://broker.lan\",\"password\":\"pw-hunter2\"},"
+                       "\"webhooks\":[{\"url\":\"https://n8n.lan/webhook/hygeia\",\"secret\":\"hook-secret-1\"}]}";
+    /* the settings parse builds its own tree from the same body */
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "pw-hunter2", true));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "hook-secret-1", true));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "pw-hunter2", false));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "hook-secret-1", false));
+    /* a body that fails to merge still wipes */
+    const char *bad = "{\"volume\":\"x\",\"mqtt\":{\"password\":\"pw-hunter2\"}}";
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(bad, "pw-hunter2", true));
+    /* control: a plain delete of the same body does leave the needle in the freed block */
+    cJSON_Hooks h = { track_malloc, track_free };
+    s_needle = "pw-hunter2";
+    s_leaks = 0;
+    cJSON_InitHooks(&h);
+    cJSON_Delete(cJSON_Parse(body));
+    cJSON_InitHooks(NULL);
+    TEST_ASSERT_TRUE(s_leaks > 0);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_integ_defaults);
+    RUN_TEST(test_secrets_wiped_before_free);
     RUN_TEST(test_url_parse_mqtt);
     RUN_TEST(test_url_parse_hook);
     RUN_TEST(test_topic_rules);

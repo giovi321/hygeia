@@ -599,6 +599,10 @@ void app_main(void)
     init_nvs();
     hy_settings_t settings;
     esp_err_t serr = hy_settings_load(&settings);
+    esp_err_t ierr = hy_integ_cfg_load();
+    if (ierr != ESP_OK) {
+        ESP_LOGW(TAG, "integration settings: %s, using defaults", esp_err_to_name(ierr));
+    }
     ESP_LOGI(TAG, "settings loaded: %s (sound %d, dnd %d, volume %u, brightness %u, snooze %u min, rot %u, rot lock %d)",
              esp_err_to_name(serr), settings.sound, settings.dnd, (unsigned)settings.volume,
              (unsigned)settings.brightness, (unsigned)settings.snooze_min, (unsigned)settings.rot,

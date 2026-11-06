@@ -92,6 +92,8 @@ class Device:
                          "source": "screen", "edited": False})
         self.next_log = 6
         self.settings = sample("settings.json")
+        self.mqtt_pass = ""        # write-only: never in a response
+        self.hook_secrets = []     # write-only, one per webhook slot
         self.wifi = {"mode": "client", "ssid": "HomeNet", "host": "hygeia", "networks": ["HomeNet"]}
         st = sample("state.json")
         self.state = st
@@ -334,6 +336,102 @@ def err(status, code, field, message, **extra):
     body.update(extra)
     return status, body
 
+
+IEV_NAMES = ["taken", "skipped", "missed", "due", "snoozed", "undone", "battery_low", "battery_critical",
+             "clock_invalid"]
+
+
+def _text(v, lo, hi):
+    return isinstance(v, str) and lo <= len(v.encode("utf-8")) <= hi and all(ord(ch) >= 32 and ord(ch) != 127 for ch in v)
+
+
+def _url_ok(u, mqtt):
+    m = re.fullmatch(r"(mqtts?|https?)://([A-Za-z0-9.-]{1,64})(:\d{1,5})?(/[^\s#]*)?", u, re.I) if isinstance(u, str) else None
+    if not m or len(u) > 255:
+        return False
+    scheme = m.group(1).lower()
+    if (scheme.startswith("mqtt")) != mqtt:
+        return False
+    host = m.group(2)
+    if host[0] in ".-" or host[-1] in ".-":
+        return False
+    if m.group(3) and not 1 <= int(m.group(3)[1:]) <= 65535:
+        return False
+    return not (mqtt and m.group(4) not in (None, "", "/"))
+
+
+def _topic_ok(t):
+    return (isinstance(t, str) and 1 <= len(t) <= 32 and re.fullmatch(r"[A-Za-z0-9_/-]+", t) is not None
+            and t[0] not in "/$" and t[-1] != "/" and "//" not in t)
+
+
+def merge_integ(dev, body):
+    """Merge the "mqtt" and "webhooks" members of a settings PUT like the firmware: secrets stay server-side and the
+    answer carries password_set / secret_set. Returns (error tuple or None, mqtt, webhooks, password, secrets)."""
+    mq = dict(dev.settings["mqtt"])
+    pw = dev.mqtt_pass
+    hooks = [dict(h) for h in dev.settings["webhooks"]]
+    secrets = list(dev.hook_secrets)
+
+    def bad(field):
+        return err(400, "invalid", field, "Wrong value")[1]
+
+    m = body.get("mqtt")
+    if m is not None:
+        if not isinstance(m, dict):
+            return bad("mqtt"), None, None, None, None
+        for k, v in m.items():
+            if v is None or k == "password_set":
+                continue
+            if k in ("on", "ha"):
+                if not isinstance(v, bool):
+                    return bad("mqtt." + k), None, None, None, None
+            elif k in ("url", "user", "password", "base", "ha_prefix"):
+                if not isinstance(v, str):
+                    return bad("mqtt." + k), None, None, None, None
+            else:
+                return bad("mqtt." + k), None, None, None, None
+            if k == "password":
+                pw = v
+            else:
+                mq[k] = v
+        if not _text(mq["user"], 0, 64) or not _text(pw, 0, 64):
+            return bad("mqtt.user" if not _text(mq["user"], 0, 64) else "mqtt.password"), None, None, None, None
+        if (mq["on"] or mq["url"]) and not _url_ok(mq["url"], True):
+            return bad("mqtt.url"), None, None, None, None
+        for k in ("base", "ha_prefix"):
+            if not _topic_ok(mq[k]):
+                return bad("mqtt." + k), None, None, None, None
+        mq["password_set"] = pw != ""
+    w = body.get("webhooks")
+    if w is not None:
+        if not isinstance(w, list) or len(w) > 4:
+            return bad("webhooks"), None, None, None, None
+        new_h, new_s, seen = [], [], set()
+        for i, it in enumerate(w):
+            f = "webhooks.%d." % i
+            if not isinstance(it, dict) or not _url_ok(it.get("url"), False):
+                return bad(f + "url"), None, None, None, None
+            on = it.get("on", True)
+            ev = it.get("events", IEV_NAMES)
+            sec = secrets[i] if i < len(secrets) else ""
+            if "secret" in it and it["secret"] is not None:
+                sec = it["secret"]
+            if not isinstance(on, bool):
+                return bad(f + "on"), None, None, None, None
+            if not isinstance(ev, list) or any(e not in IEV_NAMES for e in ev):
+                return bad(f + "events"), None, None, None, None
+            if not _text(sec, 0, 64):
+                return bad(f + "secret"), None, None, None, None
+            key = re.sub(r"^(\w+)://([^/:]+)", lambda x: x.group(1).lower() + "://" + x.group(2).lower(), it["url"])
+            if key in seen:
+                return bad(f + "url"), None, None, None, None
+            seen.add(key)
+            new_h.append({"on": on, "url": it["url"], "events": [e for e in IEV_NAMES if e in ev],
+                          "secret_set": sec != ""})
+            new_s.append(sec)
+        hooks, secrets = new_h, new_s
+    return None, mq, hooks, pw, secrets
 
 def validate_med(dev, body, mid):
     code = body.get("code", "")
@@ -764,6 +862,11 @@ class Handler(BaseHTTPRequestHandler):
                                 return 400, err(400, "invalid", "cabinet." + ck, "Unknown field")[1]
                             cab[ck] = cv
                         new["cabinet"] = cab
+                bad, mq, hooks, pw, secrets = merge_integ(dev, body)
+                if bad:
+                    return 400, bad
+                new["mqtt"], new["webhooks"] = mq, hooks
+                dev.mqtt_pass, dev.hook_secrets = pw, secrets
                 dev.settings = new   # "rot" is the applied rotation: never written here
                 return 200, new
 
