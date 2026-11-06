@@ -337,6 +337,10 @@ static void wipe_body(cJSON *o)
             if (cJSON_IsObject(h)) wipe_strings(h, "secret");
 }
 
+/* Working copy of the merge (about 1.8 KB, in PSRAM, off every stack). Only the LVGL task calls
+ * hy_api_integ_from_json, so one copy is enough. */
+static HY_EXT_BSS hy_integ_t merge_scratch;
+
 hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_integ_t *out, hy_api_err_t *err)
 {
     if (!body || !cur || !out) return hy_api_fail(err, HY_E_INVALID, NULL);
@@ -345,11 +349,7 @@ hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_inte
         cJSON_Delete(o);
         return hy_api_fail(err, HY_E_INVALID, NULL);
     }
-    hy_integ_t *w = malloc(sizeof *w);   /* about 1.8 KB: kept off the caller's stack */
-    if (!w) {
-        cJSON_Delete(o);
-        return hy_api_fail(err, HY_E_IO, NULL);
-    }
+    hy_integ_t *w = &merge_scratch;
     *w = *cur;
     hy_err_t r = hy_api_reject_dups(o, err);
 
@@ -375,7 +375,6 @@ hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_inte
     if (r == HY_OK) r = hy_integ_validate(w, err);
     if (r == HY_OK) *out = *w;
     wipe(w, sizeof *w);
-    free(w);
     wipe_body(o);
     cJSON_Delete(o);
     return r;

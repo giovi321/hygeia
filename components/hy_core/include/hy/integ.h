@@ -63,7 +63,8 @@ bool hy_api_integ_add(struct cJSON *obj, const hy_integ_t *c, bool secrets);
  * secret of the stored hook in the same position (item i keeps slot i's secret, also when its url changed); an
  * item beyond the stored count starts with "". "secret_set" ignored.
  * null counts as absent. Then hy_integ_validate. Wrong types, more than 4 items, unknown event names:
- * HY_E_INVALID with the field. On failure *out is untouched. */
+ * HY_E_INVALID with the field. On failure *out is untouched. Uses one static scratch copy: call it from the
+ * LVGL task only. */
 hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_integ_t *out, hy_api_err_t *err);
 
 /* ---- status view ---- */
