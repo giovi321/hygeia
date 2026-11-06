@@ -266,6 +266,17 @@ bool toast_logged_visible(void)
     return s_mode == MODE_LOGGED;
 }
 
+/* The power-off or pairing overlay has closed: an info or ok toast that opened under it has no scrim yet, so it gets
+ * the clear one now and a tap can no longer reach the widget below. */
+void toast_overlay_closed(void)
+{
+    if (s_mode != MODE_INFO || poweroff_visible() || poweroff_countdown_visible() || pair_visible()) {
+        return;
+    }
+    scrim_show(LV_OPA_TRANSP);
+    lv_obj_move_foreground(s_toast);
+}
+
 /* A stroke that begins now belongs to the toast: the Undo toast always; an info or ok toast unless the power-off
  * or pairing overlay is up (the overlay keeps its taps). */
 bool toast_stroke_wanted(void)

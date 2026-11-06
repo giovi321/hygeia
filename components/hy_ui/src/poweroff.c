@@ -102,6 +102,7 @@ static void close_overlay(bool flush_toast)
     lv_anim_delete(s_ov, opa_exec);
     lv_obj_set_hidden(s_ov, true);
     ui_nav_set_poweroff(false);   /* the hold ends at the next screen event: the dim timer starts then */
+    toast_overlay_closed();
     if (flush_toast) {
         ui_battery_toast_flush();   /* a low-battery toast held while the overlay was up */
     }

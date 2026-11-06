@@ -446,5 +446,6 @@ void pair_debug(const char *arg);                /* "show|hide" */
 bool toast_undo_pressed(void);           /* false when no Undo is visible */
 bool toast_undo_by_shake(void);          /* same, then an info toast says the shake undid it */
 void toast_stroke_end(hy_gesture_t g, int x0, int y0, bool waking); /* a tap closes the showing toast (not a tap on Undo) */
+void toast_overlay_closed(void);          /* the power-off or pairing overlay closed: a showing info toast gets its clear scrim */
 bool toast_stroke_wanted(void);          /* a stroke that begins now is the toast's: any toast, unless an overlay is up */
 bool toast_logged_visible(void);         /* true while the logged toast and its tap-absorbing scrim are up */

@@ -115,6 +115,7 @@ static void close_overlay(void)
     lv_label_set_text(s_code, "");   /* the code does not stay in the widget tree */
     lv_obj_set_hidden(s_ov, true);
     ui_nav_set_pairing(false);   /* the hold ends at the next screen event: the dim timer starts then */
+    toast_overlay_closed();
 }
 
 /* hy_web_ui_t.pair_show: LVGL task. A new code while one shows replaces it. The code is never logged. */
