@@ -191,6 +191,12 @@ hy_err_t hy_act_log_update(uint32_t id, const hy_api_logreq_t *req);
 /* delete_log, then publishes HY_EV_LOG_EDITED (there is no delete event). No clock needed. */
 hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts);
 
+/* The entry the last successful write_entry, mark_missed, log_edit or log_update wrote (append or update), or the
+ * missed entry an undo restored. True and *out filled when its id equals log_id. Cleared by an undo of a fresh dose,
+ * by hy_act_log_delete and by removing the medicine's logs. LVGL task, for event subscribers, which run inside the
+ * publish. */
+bool hy_act_last_log(uint32_t log_id, hy_log_t *out);
+
 /*
  * Appends the gap through the store port and publishes HY_EV_UNTRACKED {ts = end, slot = start,
  * value = reason}. HY_E_INVALID when end <= start, the reason is out of range, or the port lacks

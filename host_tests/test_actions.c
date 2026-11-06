@@ -1531,6 +1531,104 @@ static void test_log_import_errors(void)
     TEST_ASSERT_EQUAL(HY_OK, hy_act_log_import(&e));
 }
 
+static void test_last_log_after_taken_and_missed(void)
+{
+    hy_log_t out;
+    uint32_t id = 0;
+    TEST_ASSERT_FALSE(hy_act_last_log(100, &out));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, "with food", HY_SRC_WEB, &id));
+    TEST_ASSERT_TRUE(hy_act_last_log(id, &out));
+    TEST_ASSERT_EQUAL_UINT32(id, out.id);
+    TEST_ASSERT_EQUAL_UINT32(1, out.med_id);
+    TEST_ASSERT_EQUAL_INT(HY_TAKEN, out.status);
+    TEST_ASSERT_EQUAL_STRING("with food", out.note);
+    TEST_ASSERT_EQUAL_INT64(st.logs[0].slot, out.slot);
+    TEST_ASSERT_FALSE(hy_act_last_log(id + 50, &out));
+    TEST_ASSERT_TRUE(hy_act_last_log(id, NULL));
+
+    /* A mark_missed replaces the cached entry. */
+    uint32_t mid = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_mark_missed(3, D0 + H(8, 0), &mid));
+    TEST_ASSERT_TRUE(mid != 0 && mid != id);
+    TEST_ASSERT_TRUE(hy_act_last_log(mid, &out));
+    TEST_ASSERT_EQUAL_INT(HY_MISSED, out.status);
+    TEST_ASSERT_EQUAL_UINT32(3, out.med_id);
+    TEST_ASSERT_FALSE(hy_act_last_log(id, &out));
+
+    /* A log edit caches the edited entry. */
+    hy_log_t e = st.logs[st.n_logs - 1];
+    e.status = HY_TAKEN;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_edit(&e));
+    TEST_ASSERT_TRUE(hy_act_last_log(mid, &out));
+    TEST_ASSERT_EQUAL_INT(HY_TAKEN, out.status);
+    TEST_ASSERT_TRUE(out.edited);
+}
+
+static void test_last_log_on_conversion_and_undo(void)
+{
+    hy_log_t m, out;
+    memset(&m, 0, sizeof m);
+    m.id = 50; m.ts = D0 + H(10, 0); strcpy(m.tz, "UTC0"); m.med_id = 1;
+    m.status = HY_MISSED; m.slot = D0 + H(8, 0); m.source = HY_SRC_AUTO;
+    st.logs[st.n_logs++] = m;
+    clk.now = D0 + H(10, 30);
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_WEB, &id));
+    TEST_ASSERT_EQUAL_UINT32(50, id);
+    TEST_ASSERT_TRUE(hy_act_last_log(50, &out));
+    TEST_ASSERT_EQUAL_INT(HY_TAKEN, out.status);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(10, 30), out.ts);
+
+    /* Undo of a conversion: the cache holds the restored missed entry. */
+    clk.now += 2;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(50));
+    TEST_ASSERT_TRUE(hy_act_last_log(50, &out));
+    TEST_ASSERT_EQUAL_INT(HY_MISSED, out.status);
+    TEST_ASSERT_EQUAL_INT64(D0 + H(10, 0), out.ts);
+    TEST_ASSERT_EQUAL_INT(HY_SRC_AUTO, out.source);
+}
+
+static void test_last_log_cleared_by_undo_and_delete(void)
+{
+    hy_log_t out;
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, &id));
+    TEST_ASSERT_TRUE(hy_act_last_log(id, &out));
+    clk.now += 2;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_undo(id));
+    TEST_ASSERT_FALSE(hy_act_last_log(id, &out));
+
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(3, 0, NULL, HY_SRC_SCREEN, &id));
+    TEST_ASSERT_TRUE(hy_act_last_log(id, &out));
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_delete(id, out.ts));
+    TEST_ASSERT_FALSE(hy_act_last_log(id, &out));
+
+    /* A failed write keeps the previous entry. */
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(2, 0, NULL, HY_SRC_SCREEN, &id));
+    st.fail_append = true;
+    TEST_ASSERT_EQUAL_INT(HY_E_IO, hy_act_log_taken(1, 0, NULL, HY_SRC_SCREEN, NULL));
+    TEST_ASSERT_TRUE(hy_act_last_log(id, &out));
+}
+
+static hy_log_t sub_seen; static bool sub_got;
+static void on_taken_read(const hy_event_t *e, void *ctx)
+{
+    (void)ctx;
+    if (e->type == HY_EV_TAKEN) sub_got = hy_act_last_log(e->log_id, &sub_seen);
+}
+
+static void test_last_log_readable_inside_publish(void)
+{
+    sub_got = false;
+    int h = hy_ev_subscribe(on_taken_read, NULL);
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(HY_OK, hy_act_log_taken(1, 0, "note", HY_SRC_WEB, &id));
+    hy_ev_unsubscribe(h);
+    TEST_ASSERT_TRUE(sub_got);
+    TEST_ASSERT_EQUAL_UINT32(id, sub_seen.id);
+    TEST_ASSERT_EQUAL_STRING("note", sub_seen.note);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1613,5 +1711,9 @@ int main(void)
     RUN_TEST(test_record_gap_without_port_member);
     RUN_TEST(test_log_import_keeps_fields);
     RUN_TEST(test_log_import_errors);
+    RUN_TEST(test_last_log_after_taken_and_missed);
+    RUN_TEST(test_last_log_on_conversion_and_undo);
+    RUN_TEST(test_last_log_cleared_by_undo_and_delete);
+    RUN_TEST(test_last_log_readable_inside_publish);
     return UNITY_END();
 }

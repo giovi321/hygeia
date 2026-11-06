@@ -36,12 +36,32 @@ static uint32_t next_med_id;   /* id the next new medicine takes; only grows, so
 static HY_EXT_BSS undo_rec_t undo[UNDO_SLOTS];
 static size_t undo_next;
 static bool inited;
+static hy_log_t last_log;       /* the entry the last successful log write left behind */
+static bool last_log_ok;
 static HY_EXT_BSS hy_log_t qbuf[QUERY_MAX];
 static HY_EXT_BSS hy_snooze_t snz[HY_MAX_MEDS];      /* archived medicines have no snooze */
 static size_t n_snz;
 static HY_EXT_BSS hy_snooze_t snz_out[HY_MAX_MEDS];
 static bool snooze_drop(uint32_t med_id, int64_t slot, hy_snooze_t *out);
 static void undo_forget(uint32_t log_id);
+
+static void last_log_set(const hy_log_t *e)
+{
+    last_log = *e;
+    last_log_ok = true;
+}
+
+static void last_log_clear(uint32_t log_id)
+{
+    if (last_log_ok && last_log.id == log_id) last_log_ok = false;
+}
+
+bool hy_act_last_log(uint32_t log_id, hy_log_t *out)
+{
+    if (!last_log_ok || last_log.id != log_id) return false;
+    if (out) *out = last_log;
+    return true;
+}
 
 /* Largest id over the medicines in a, plus one (0xFFFFFFFF stays). */
 static uint32_t id_after_max(const hy_med_t *a, size_t n)
@@ -100,6 +120,7 @@ hy_err_t hy_actions_init(const hy_store_port_t *s, void *sctx, const hy_clock_po
 {
     memset(meds, 0, sizeof meds);
     memset(undo, 0, sizeof undo);
+    last_log_ok = false;
     n_snz = 0;
     n_meds = 0;
     next_med_id = 0;
@@ -238,6 +259,7 @@ static hy_err_t remove_med_logs(uint32_t med_id, size_t *count)
     }
     for (int i = 0; i < UNDO_SLOTS; i++)
         if (undo[i].used && undo[i].med_id == med_id) undo[i].used = false;
+    if (last_log_ok && last_log.med_id == med_id) last_log_ok = false;
     *count = removed;
     return result;
 }
@@ -521,6 +543,7 @@ static hy_err_t write_entry(uint32_t med_id, hy_status_t status, int64_t ts,
     r->created = now;
 
     if (out_log_id) *out_log_id = e.id;
+    last_log_set(&e);
     publish(status == HY_TAKEN ? HY_EV_TAKEN : HY_EV_SKIPPED, ts, med_id, e.id, slot);
     return HY_OK;
 }
@@ -585,6 +608,7 @@ hy_err_t hy_act_mark_missed(uint32_t med_id, int64_t slot, uint32_t *out_log_id)
 
     snooze_drop(med_id, slot, NULL);
     if (out_log_id) *out_log_id = e.id;
+    last_log_set(&e);
     publish(HY_EV_MISSED, now, med_id, e.id, slot);
     return HY_OK;
 }
@@ -663,7 +687,11 @@ hy_err_t hy_act_undo(uint32_t log_id)
     bool dec = r->pill_dec;
     bool had_snooze = r->had_snooze;
     hy_snooze_t snooze = r->snooze;
+    bool converted = r->converted;
+    hy_log_t original = r->original;
     r->used = false;
+    if (converted) last_log_set(&original);
+    else last_log_clear(log_id);
 
     if (had_snooze && snooze.until > now) (void)snooze_set(&snooze);
 
@@ -690,6 +718,7 @@ hy_err_t hy_act_log_edit(const hy_log_t *e)
     hy_err_t ue = store->update_log(store_ctx, &upd);
     if (ue != HY_OK) return (ue == HY_E_INVALID || ue == HY_E_FULL) ? ue : HY_E_IO;
     undo_forget(upd.id);
+    last_log_set(&upd);
     publish(HY_EV_LOG_EDITED, upd.ts, upd.med_id, upd.id, upd.slot);
     return HY_OK;
 }
@@ -760,6 +789,7 @@ hy_err_t hy_act_log_delete(uint32_t log_id, int64_t ts)
     if (!inited) return HY_E_INVALID;
     if (store->delete_log(store_ctx, log_id, ts) != HY_OK) return HY_E_IO;
     undo_forget(log_id);
+    last_log_clear(log_id);
     publish(HY_EV_LOG_EDITED, ts, 0, log_id, 0);
     return HY_OK;
 }
