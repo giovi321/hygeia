@@ -224,9 +224,13 @@ static void indev_cb(lv_event_t *e)
             return;   /* LVGL searched a new widget mid-stroke: the stroke keeps its start */
         }
         s_active = true;
-        lv_display_trigger_activity(NULL);
-        hy_net_activity();   /* someone is using the device: the radio stays up on battery */
         s_waking = stroke_waking();
+        if (!s_blocked) {
+            /* only accepted input counts as activity: a stroke dropped on the dark screen (Double tap to wake off)
+             * must not keep the display timers or the radio up */
+            lv_display_trigger_activity(NULL);
+            hy_net_activity();   /* someone is using the device: the radio stays up on battery */
+        }
         if (s_gated) {
             hy_wake_gate_down(&s_gate, false, lv_tick_get(), (int16_t)p.x, (int16_t)p.y);
         } else {
@@ -449,8 +453,10 @@ void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t 
 {
     uint32_t now = lv_tick_get();
     s_active = true;
-    lv_display_trigger_activity(NULL);
     s_waking = stroke_waking();
+    if (!s_blocked) {
+        lv_display_trigger_activity(NULL);
+    }
     screen_activity();
     s_toast_press = toast_stroke_wanted();
     s_consumed = s_toast_press;
@@ -472,8 +478,10 @@ void input_debug_swipe(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t 
 void input_debug_hold(int16_t x0, int16_t y0)
 {
     s_active = true;
-    lv_display_trigger_activity(NULL);
     s_waking = stroke_waking();
+    if (!s_blocked) {
+        lv_display_trigger_activity(NULL);
+    }
     screen_activity();
     s_toast_press = toast_stroke_wanted();
     s_consumed = s_toast_press;

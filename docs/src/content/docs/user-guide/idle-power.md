@@ -15,7 +15,7 @@ After 30 seconds without a touch, and with no due card showing, a black overlay 
 
 The whole group moves by a few pixels each minute to limit burn-in on the AMOLED panel.
 
-A double tap wakes the screen: two taps within 300 ms and 40 px. A lone tap does nothing, unless Wake on single tap is on (Settings, Display, and the web UI; off by default). With Double tap to wake off, a touch does not wake a screen that is off (see Screen off and sleep). The waking taps are not passed to the screen underneath. A due card wakes the screen by itself. See [Gestures](../gestures/#waking-the-screen).
+A double tap wakes the screen: two taps within 300 ms and 40 px. A lone tap does nothing, unless Wake on single tap is on (Settings, Display, and the web UI; off by default). With Double tap to wake off, a touch does not wake a screen that is off (see Screen off and sleep). Such a touch also does not count as activity, so it does not keep the radio up on battery. The waking taps are not passed to the screen underneath. A due card wakes the screen by itself. See [Gestures](../gestures/#waking-the-screen).
 
 ## Motion sensor
 
