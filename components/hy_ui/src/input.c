@@ -226,8 +226,8 @@ static void indev_cb(lv_event_t *e)
         s_active = true;
         s_waking = stroke_waking();
         if (!s_blocked) {
-            /* only accepted input counts as activity: a stroke dropped on the dark screen (Double tap to wake off)
-             * must not keep the display timers or the radio up */
+            /* a stroke dropped on the dark screen (Double tap to wake off) does not keep the radio up; LVGL marks
+             * its own activity on every pressed read, and the screen timers do not run on an OFF screen */
             lv_display_trigger_activity(NULL);
             hy_net_activity();   /* someone is using the device: the radio stays up on battery */
         }
@@ -267,7 +267,9 @@ static void finish(int32_t x, int32_t y, uint32_t t)
 #if CONFIG_HY_DEBUG_CONSOLE
     trace_end(x, y);
 #endif
-    hy_net_activity();
+    if (!s_blocked) {
+        hy_net_activity();   /* a stroke dropped on the dark screen does not keep the radio up */
+    }
     s_st.x1 = (int16_t)x;
     s_st.y1 = (int16_t)y;
     s_st.t1_ms = t;
