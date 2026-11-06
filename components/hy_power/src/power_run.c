@@ -93,6 +93,22 @@ static hy_wake_gate_t s_wg;
 /* pwrx gesture: the held tap and the report counts (power task; RAM, since boot) */
 static hy_tap_pair_t s_tp2;
 static uint32_t s_gst_reads, s_gst_taps, s_gst_other, s_gst_fail, s_gst_wakes;
+/* sleepstat: the last WGT_N touch judgments (power task; RTC memory, since power-on). Times in ms from the judgment's begin:
+ * first poll, each finger down and up (up to two strokes), the gate state before the end, and the outcome. */
+#define WGT_N 12
+typedef struct {
+    uint16_t first_ms, polls;
+    int16_t  d1, u1, d2, u2;   /* -1: not seen */
+    uint8_t  first;            /* first poll: 0 failed, 1 no finger, 2 finger */
+    uint8_t  st_end;           /* gate state before the end: 0 idle, 1 first down, 2 gap, 3 second down */
+    char     out;              /* W wake, S not a double tap, X ended by something else */
+} wgt_t;
+#define WGT_MAGIC 0x48595754u   /* "HYWT": the trace sits in RTC memory and survives a USB or software reset */
+static RTC_NOINIT_ATTR wgt_t s_wgt[WGT_N];
+static RTC_NOINIT_ATTR uint32_t s_wgt_n, s_wgt_magic;
+static wgt_t s_wgt_cur;
+static int64_t s_wgt_t0;
+static bool s_wgt_fd;
 #endif
 static volatile bool s_wg_active, s_wg_rearm;
 static uint8_t s_exit_pending;   /* exit_sleep calls in progress; s_mux */
@@ -173,6 +189,13 @@ static const char *reset_name(esp_reset_reason_t r)
 /* Once per boot, before any ISR is armed. */
 static void ctr_init(void)
 {
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (s_wgt_magic != WGT_MAGIC || esp_reset_reason() == ESP_RST_POWERON) {
+        memset(s_wgt, 0, sizeof s_wgt);
+        s_wgt_n = 0;
+        s_wgt_magic = WGT_MAGIC;
+    }
+#endif
     if (s_ctr.magic != CTR_MAGIC || esp_reset_reason() == ESP_RST_POWERON) {
         memset(&s_ctr, 0, sizeof s_ctr);
         s_ctr.magic = CTR_MAGIC;
@@ -524,12 +547,31 @@ static void wg_begin(void)
     }
     hy_wake_gate_begin(&s_wg, (uint32_t)mono_ms());
     s_wg_rearm = false;
+#if CONFIG_HY_DEBUG_CONSOLE
+    s_wgt_cur = (wgt_t){.d1 = -1, .u1 = -1, .d2 = -1, .u2 = -1, .out = 'X'};
+    s_wgt_t0 = mono_ms();
+    s_wgt_fd = false;
+#endif
     ESP_LOGI(TAG, "touch wake: judging (double tap needed)");
 }
 
 /* Power task under s_sleep_mu. Without light sleep (USB) the touch wake was never disarmed: nothing to re-arm. */
+#if CONFIG_HY_DEBUG_CONSOLE
+static void wgt_close(char out)
+{
+    s_wgt_cur.out = out;
+    s_wgt[s_wgt_n % WGT_N] = s_wgt_cur;
+    s_wgt_n++;
+}
+#endif
+
 static void wg_end(const char *why)
 {
+#if CONFIG_HY_DEBUG_CONSOLE
+    if (s_wg_active) {
+        wgt_close(why[0] == 'n' ? 'S' : 'X');
+    }
+#endif
     s_wg_active = false;
     s_wg_rearm = s_light;   /* the touch INT wake fired and stays disarmed until the finger is up */
     s_wg_rearm_t0_ms = mono_ms();
@@ -544,7 +586,29 @@ static hy_wg_act_t wg_step(void)
     bool down = false;
     int16_t x = 0, y = 0;
     bool ok = hy_board_touch_poll(&down, &x, &y);
+#if CONFIG_HY_DEBUG_CONSOLE
+    int64_t dt = mono_ms() - s_wgt_t0;
+    int16_t t16 = (int16_t)(dt > 30000 ? 30000 : dt);
+    if (s_wgt_cur.polls == 0) {
+        s_wgt_cur.first_ms = (uint16_t)t16;
+        s_wgt_cur.first = !ok ? 0 : down ? 2 : 1;
+    }
+    s_wgt_cur.polls++;
+    if (ok && down && !s_wgt_fd) {
+        if (s_wgt_cur.d1 < 0) s_wgt_cur.d1 = t16; else if (s_wgt_cur.d2 < 0) s_wgt_cur.d2 = t16;
+    } else if (ok && !down && s_wgt_fd) {
+        if (s_wgt_cur.u1 < 0) s_wgt_cur.u1 = t16; else if (s_wgt_cur.u2 < 0) s_wgt_cur.u2 = t16;
+    }
+    if (ok) s_wgt_fd = down;
+    s_wgt_cur.st_end = s_wg.st;
+    hy_wg_act_t act = hy_wake_gate_sample(&s_wg, (uint32_t)mono_ms(), ok, down, x, y);
+    if (act == HY_WG_WAKE) {
+        wgt_close('W');
+    }
+    return act;
+#else
     return hy_wake_gate_sample(&s_wg, (uint32_t)mono_ms(), ok, down, x, y);
+#endif
 }
 
 #if CONFIG_HY_DEBUG_CONSOLE
@@ -1651,6 +1715,14 @@ void hy_power_sleep_stats(void)
     ESP_LOGI(TAG, "touch gesture reports since boot: %" PRIu32 " read (%" PRIu32 " taps, %" PRIu32 " other), %" PRIu32
              " failed reads, %" PRIu32 " wakes; gesture mode now %s",
              s_gst_reads, s_gst_taps, s_gst_other, s_gst_fail, s_gst_wakes, hy_board_touch_gesture_active() ? "on" : "off");
+    uint32_t wn = s_wgt_n;
+    ESP_LOGI(TAG, "touch judgments since power-on: %" PRIu32 " (newest last; ms from the wake: first poll, down/up 1, down/up 2; st = gate state at the end)", wn);
+    for (uint32_t i = wn > WGT_N ? wn - WGT_N : 0; i < wn; i++) {
+        const wgt_t *e = &s_wgt[i % WGT_N];
+        static const char *const fp[] = {"failed", "no finger", "finger"};
+        ESP_LOGI(TAG, "  #%" PRIu32 " %c: first poll %u ms %s, polls %u, d1 %d u1 %d d2 %d u2 %d, st %u", i + 1, e->out,
+                 e->first_ms, fp[e->first], e->polls, e->d1, e->u1, e->d2, e->u2, e->st_end);
+    }
     ls_print();
     /* Any lock other than hy_awake held while asleep keeps the chip out of light sleep. With CONFIG_PM_PROFILING (debug
      * build) this also prints the measured time per mode: LIGHT_SLEEP is the light-sleep time since boot, and the
