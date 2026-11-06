@@ -129,6 +129,7 @@ void cabinet_ui_event(const hy_cabev_t *e)
         break;
     case HY_CABEV_FAULT:
         ESP_LOGW(TAG, "cabinet: sensor fault, paused; tried again at the next screen wake or a settings change");
+        hy_web_cabinet_state();   /* a fault ends a running test without a TEST_END */
         cab_event(e);
         break;
     case HY_CABEV_MATCH:
