@@ -96,7 +96,7 @@ All behaviour lives in a core that knows nothing about screens or networks. Ever
                         └───────────┘
 ```
 
-Components (one ESP-IDF component each):
+Components (one ESP-IDF component each; the integration modules share one component and its delivery task):
 
 | Component | Responsibility |
 |---|---|
@@ -109,9 +109,9 @@ Components (one ESP-IDF component each):
 | `power` | battery state, charging, sleep, wake sources, power-off |
 | `net` | Wi-Fi client / AP / off, known networks, mDNS, captive DNS in AP mode |
 | `web` | HTTP server, REST API, WebSocket, static web UI, browser pairing |
-| `mqtt` | publish state and events, receive commands, Home Assistant discovery |
-| `webhook` | HTTP POST of events with retry |
-| `outbox` | persistent queue of events not yet delivered to MQTT or webhooks |
+| `mqtt` | publish state and events, receive commands, Home Assistant discovery; a source file of the component `hy_integ`, whose delivery task drives MQTT and webhooks |
+| `webhook` | HTTP POST of events with retry; a source file of the component `hy_integ` |
+| `outbox` | persistent queue of events not yet delivered to MQTT or webhooks; a source file of `store` |
 | `ui` | LVGL screens, theme, gestures, animations |
 | `audio` | chime playback |
 
@@ -164,7 +164,8 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - Log: append-only JSON Lines, one file per month. Edits and deletes rewrite the month file atomically. Each line about 150 bytes; 10 doses a day is about 0.5 MB a year, so the storage partition holds many years. Retention default: keep everything until the partition is 80% full, then drop the oldest month after warning on screen and in the web UI. Minimum guaranteed retention: 1 year
 - Settings: NVS
 - Cabinet open template (5 taught takes, at most 12076 bytes; a file with 3 or 4 takes from an earlier version still loads): LittleFS
-- Secrets (Wi-Fi passwords, MQTT password, webhook secret, paired-browser session tokens): NVS, never included in export unless the user ticks "include secrets"
+- Secrets (Wi-Fi passwords, MQTT password, webhook secrets, paired-browser session tokens): NVS (MQTT password and webhook secrets in namespace `integ`), never returned by the API and never included in an export unless the user ticks "include secrets"
+- Integration settings (MQTT, Home Assistant discovery, webhooks): NVS namespace `integ`
 - Export: CSV (log only) and JSON (medicines, log, settings). Import: JSON, with a preview of what changes and a choice of merge or replace
 - Backup/restore in the web UI uses the JSON export
 
@@ -176,7 +177,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - An occurrence becomes `due` at its time, `late` after `late_after_min`, `missed` after `missed_after_min`. When it becomes missed, a `missed` log entry with source `auto` is written and an event sent
 - Dose window: from `early_window_min` before the occurrence (per medicine, default 60) until the next occurrence of the same medicine. A `taken` log in that window satisfies the earliest unsatisfied occurrence; `delta_min` is negative for early doses. A log outside any window is a free log
 - Taken after missed: if a dose is logged after its occurrence was marked missed, but still before the next occurrence, the `missed` entry is converted to `taken` (with its real time and lateness) and a `taken` event is sent. The original missed event is not retracted
-- Untracked periods: while the device is off, the battery is flat, or the clock is invalid, occurrences cannot be observed. On return, occurrences in that gap are not marked missed. The store records the gap as an `untracked` interval; history draws it grey, adherence excludes it, and a single `untracked` event (start, end) is sent instead of one per occurrence. Occurrences still within their window when the device returns become due normally. Interim behaviour, until untracked intervals are persisted: slots that fall while the device was off show as untracked and are never marked missed.
+- Untracked periods: while the device is off, the battery is flat, or the clock is invalid, occurrences cannot be observed. On return, occurrences in that gap are not marked missed. The store records the gap as an `untracked` interval; history draws it grey, adherence excludes it, and a single `untracked` event (start, end) is sent instead of one per occurrence (on the device's event bus and in the web UI; MQTT and webhooks do not send it). Occurrences still within their window when the device returns become due normally. Interim behaviour, until untracked intervals are persisted: slots that fall while the device was off show as untracked and are never marked missed.
 - Snooze defaults to 15 minutes, configurable; snoozing does not extend the missed deadline
 - As-needed: logging sooner than `min_interval_min` after the previous dose shows a warning with the time since the last dose; the user can still confirm
 - The scheduler exposes the next wake time (next occurrence or deadline) to `power`, which sets the RTC alarm
@@ -195,7 +196,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - On battery: dims after 30 s, screen off after 2 min, CPU in light sleep. Wake sources: touch interrupt, RTC alarm (next due occurrence), AXP2101 interrupt (PWR key, USB plugged), user key, motion sensor interrupt (Cabinet open only). A touch wakes the CPU; the screen turns on only for a double tap unless Wake on single tap is on. The setting Double tap to wake (default on) off holds the touch controller in reset while the screen is off in light sleep, so a touch wakes nothing (about 3.0 mA instead of 7.3 mA with the screen off, USB meter 2026-11-05); then only PWR, the user key, the RTC alarm, the motion sensor (Cabinet open) and USB wake, and Wake on single tap does not apply (its row is hidden). The dimmed and lit screens take touches as usual
 - A running Cabinet open teach, check or test keeps the screen on, whatever started it (device, web UI): no dim, no off, on USB and on battery; the normal timers resume when it ends or the view closes. A screen turned off ends the teach, check or test
 - The motion sensor is read while the screen is on or dimmed. While the screen is off it is powered down, except while Cabinet open is live (on, the chime or the light switched on, and with Taught movement a movement taught): then it watches for movement in its low-power wake-on-motion mode and its interrupt is a wake source. If the sensor stops answering, the driver retries the command and resets the sensor; if that fails Cabinet open pauses itself and is tried again at the next screen wake (at most four times an hour) or at once on a settings change
-- On battery the saved Wi-Fi mode does not start by itself. Turning on Wi-Fi or the access point from the screen or the web UI starts it; it stops after 10 minutes with no web request and no touch. Plugging in USB starts the saved mode. A setting keeps Wi-Fi on while on battery. While the radio is on the CPU does not enter light sleep. Events produced while offline go to the outbox
+- On battery the saved Wi-Fi mode does not start by itself. Turning on Wi-Fi or the access point from the screen or the web UI starts it; it stops after 10 minutes with no web request and no touch. Plugging in USB starts the saved mode. A setting keeps Wi-Fi on while on battery. While the radio is on the CPU does not enter light sleep. Events produced while offline go to the outbox. MQTT and webhooks use the radio only while it is on for another reason. They never start it, never keep it on and never extend the battery idle time; an MQTT command that logs, skips or snoozes counts as activity, like a web request. While the radio is off the delivery task sleeps and wakes nothing. The live event `{"ev":"integ"}` does not make an open web page fetch again, so it does not count as activity either. They deliver only while the device is connected to a network as a client, not in access point mode. On battery Home Assistant therefore shows the device as unavailable most of the time; that is expected
 - PWR key: short press toggles the screen; long press (about 2 s) opens a power-off confirmation slider that warns "Reminders will not fire while off" if any occurrence is due in the next 24 h; confirming powers off through the AXP2101. Pressing PWR while off turns the device on (AXP2101 hardware behaviour)
 - The device turns on only with the PWR key (maintainer requirement, 2026-10-28). Plugging in USB or connecting the battery must not leave it running. Early in boot, before the display is initialised, firmware reads the AXP2101 power-on source; if the source is USB insertion or battery insertion rather than the PWR key, it powers off through the AXP2101 at once. The battery still charges while off. A software restart (OTA, crash, watchdog) is not a power-on event and keeps running. The exact register and whether the cold-boot source is reported reliably are verified on the board
 - Battery shown as a percentage only in the top bar; red below 15%, USB power indicated by a small bolt next to the number. Low battery (15%) and critical (5%) produce events
@@ -299,6 +300,7 @@ A time added or changed so that today's occurrence is already inside its dose wi
 Mockups: `design/mockups/webui.html`.
 
 - Pages: Dashboard, Medicines (list, add, edit, reorder, archive), History (30-day grid, log table with edit, delete, add, export CSV/JSON, import), Schedule (week view of all occurrences), Settings (Wi-Fi, MQTT, Home Assistant discovery, webhooks, clock, screen and sound, quiet hours, paired browsers, backup/restore, firmware update), Cabinet open (trigger, switches, sensitivity, window, teach status, test counter, sample download)
+- The MQTT, Home Assistant discovery and webhooks panels show the connection state, each webhook's last result and the outbox counters (pending, dropped when full, expired, rejected)
 - Responsive: sidebar on desktop, top menu on a phone
 - Live updates over WebSocket from the event bus
 - No open access. A browser is paired once with a 6-digit code shown on the device screen; the device then keeps a session token for that browser (at most 4 browsers, the oldest is forgotten). Paired browsers can be forgotten on the device and in the web UI. The web UI is plain HTTP on the local network by design (a design choice, not a missing feature), protected by pairing, the `X-Hygeia` header and the host allow-list; the docs say to keep it on a trusted LAN. The GitHub update download is outbound and uses HTTPS
@@ -327,13 +329,14 @@ REST API (JSON):
 | `GET /api/history?days=7\|30` | per-medicine daily grid for 7 or 30 days |
 | `GET /api/schedule?from&to` | all occurrences in a time range |
 | `GET /api/export.csv`, `GET /api/export.json`, `POST /api/import` | export and import |
-| `GET/PUT /api/settings` | settings (secrets write-only), including the Cabinet open fields and `double_tap_wake` |
+| `GET/PUT /api/settings` | settings (secrets write-only), including the Cabinet open fields and `double_tap_wake`, and the `mqtt` and `webhooks` members (MQTT password and webhook secrets write-only) |
 | `POST /api/time` | set time and zone from the browser |
 | `GET /api/wifi` | mode, status, saved networks, AP settings (no passwords) |
 | `POST /api/wifi/mode` | client, ap, off |
 | `POST/DELETE /api/wifi/networks` | add or remove a saved network |
 | `PUT /api/wifi/ap` | access point password and host name (the SSID is fixed) |
-| `POST /api/webhook/test` | send a test event |
+| `GET /api/integrations` | MQTT connection state, last result of each webhook, outbox counters |
+| `POST /api/webhook/test` | send a test event to one webhook, body `{"index":n}`; the result shows in `GET /api/integrations` |
 | `POST /api/chime/test` | play the chime |
 | `POST /api/power/off` | power off the device |
 | `POST /api/ota` | firmware upload |
@@ -348,25 +351,54 @@ REST API (JSON):
 
 ## MQTT
 
-- Broker URL, username, password, base topic (default `hygeia`), client id `hygeia-XXXX`
-- Availability: `hygeia/status` = `online`/`offline` (last will)
-- State: `hygeia/med/<id>/state` JSON per medicine (code, name, last taken, next due, status, pill count); `hygeia/device` JSON (battery, charging, Wi-Fi mode, RSSI, clock source)
-- Events: `hygeia/event` JSON, same payload as webhooks
-- Commands: `hygeia/med/<id>/log`, `hygeia/med/<id>/skip`, `hygeia/med/<id>/snooze`
+- Settings: on switch, broker URL (`mqtt://`, port 1883 by default, or `mqtts://`, 8883), username, password (write-only), base topic (default `hygeia`), Home Assistant discovery switch and discovery prefix (default `homeassistant`). Client id `hygeia-XXXX` (the last 4 hex digits of the MAC, as in the access point name), fixed. Topics below are written with the base `<base>`
+- Protocol: MQTT 3.1.1 over TCP or TLS only; no WebSocket transports and no MQTT 5, to save flash. Keepalive 60 s. Host names ending in `.local` are resolved through mDNS queries
+- TLS: `mqtts://` verifies the broker against the ESP-IDF certificate bundle (common set) only. Brokers with a self-signed or private-CA certificate are not supported in this version, and there is no switch that skips verification. Certificate dates are not checked, as for the GitHub update
+- Availability on `<base>/status`: `online` retained, QoS 1, published on connect; `offline` retained, QoS 1, published before every deliberate stop, because a clean disconnect does not fire the last will; last will `offline` retained for an unclean loss. With the 60 s keepalive Home Assistant sees a lost device within about 90 s
+- State, retained, QoS 1, published when its content changes:
+  - `<base>/med/<id>/state` per active medicine: `{"id","code","name","status","due","last_taken","next_due","pills_left"}` in that order. `status` is the tile kind of `GET /api/state` (`as_needed`, `no_dose`, `since`, `due`, `late`, `snoozed`, `missed`). `due` is true for due, late and snoozed (an open dose that can still be taken) and false for missed. `last_taken` and `next_due` are UTC ISO 8601 strings such as `2025-11-06T07:02:00Z`, or null, because Home Assistant's timestamp sensors need that form. `pills_left` is a number, or null when pill counting is off
+  - `<base>/device`: `{"battery","charging","usb","wifi_mode","rssi","clock_source","clock_valid","adherence_30d","fw"}`; `battery`, `rssi`, `clock_source` and `adherence_30d` are null when unknown
+- Events on `<base>/event`: QoS 1, not retained, the same payload as webhooks (timestamps in epoch seconds, as in the REST API), for the nine event types listed under Webhooks. `log_edited`, `meds_changed` and `untracked` are not sent as events; they only refresh the state topics
+- Commands on `<base>/med/<id>/log`, `<base>/med/<id>/skip` and `<base>/med/<id>/snooze`, subscribed with QoS 1. The medicine must exist and be active. Retained command messages are ignored. `log` accepts any payload (`PRESS` from the Home Assistant button); a JSON object may add `ts` (the web's window: not before the firmware build date and not more than 60 s ahead), `note` (at most 63 bytes) and `confirm`. A log of an as-needed medicine inside its minimum interval is refused unless `confirm` is true, as in the web UI. `snooze` takes an optional number of minutes from 1 to 120 (a plain number or `{"minutes":n}`), default the snooze setting. Results are not answered on MQTT; the state topics show the outcome. Anyone the broker lets publish on these topics can log, skip and snooze: the broker's access control is the protection
+- Session: the client uses a clean session, so the broker keeps no QoS 1 commands for the device across reconnects. A duplicate delivered within one session is acted on; the 5 s undo on the device and the editable log cover that rare case
+- Flow: at most 4 QoS 1 publishes in flight. Outbox events go one at a time, in order. A publish not acknowledged within 30 s is sent again; acknowledgements for other message ids are ignored
+- Memory: esp-mqtt's outbox data and its in and out buffers, the message queue and the command payload pool live in PSRAM; only task stacks and sockets use internal RAM. If the esp-mqtt version in use cannot place its outbox or buffers in PSRAM through its configuration, state topics and discovery configs go out QoS 0 retained, only `online` and events use QoS 1, the buffers drop to 1536 bytes, and bursts are paced at one publish per 50 ms
 - Topics and HA unique ids use the stable medicine `id`, so renaming a code or reusing it after archiving never moves or collides with entities
-- Home Assistant discovery (toggle, default off): one device "Hygeia"; per medicine a `sensor` last taken (timestamp), `sensor` next due (timestamp), `binary_sensor` due, `button` log, optional `sensor` pills left; device-level `sensor` battery, `binary_sensor` charging, `sensor` adherence 30 d; an `event` entity for due/missed. Discovery topics removed when a medicine is archived or discovery is turned off
+- Home Assistant discovery (toggle, default off): retained configs on `<prefix>/<component>/<node>/<object>/config`, node id `hygeia_<4 hex>` (from the MAC, as the access point name, lower case). One device "Hygeia", manufacturer "Waveshare", model "ESP32-S3-Touch-AMOLED-2.16", with the firmware version. Per active medicine: `sensor` last taken (timestamp), `sensor` next due (timestamp), `binary_sensor` due, `button` log (sends `PRESS` to the log command topic), and `sensor` pills left only while pill counting is on. Device-level: `sensor` battery, `binary_sensor` charging, `sensor` adherence 30 d, and an `event` entity on `<base>/event` that lists all nine event types (listing only due and missed would make Home Assistant warn on every other event). Entity names use the medicine name (for example "Antibiotic last taken"); unique ids use the medicine id (`<node>_med_<id>_<object>`). Every entity uses `<base>/status` for availability
+- Removal: on every connect a 3 s scan of the retained discovery and state topics of this node clears, with an empty retained message, what is no longer wanted: medicines archived or deleted, the pills sensor of a medicine with pill counting off, and every config when discovery is off. The scan learns about a retained message of any size (only command payloads are copied), so it also cleans up after a medicine deleted while the device was offline, with no list kept in flash. A medicine archived or deleted while connected loses its configs and state topic at once; turning discovery off while connected runs the scan at once
 
 ## Webhooks
 
-- One or more URLs, each with its own event selection: `taken`, `skipped`, `missed`, `due`, `snoozed`, `battery_low`, `battery_critical`, `clock_invalid`
-- POST JSON: `{"event", "ts", "tz", "device", "medicine": {"code", "name", "dose"}, "log": {...}, "battery"}`
-- Optional shared secret: `X-Hygeia-Signature` HMAC-SHA256 of the body
-- HTTPS supported with the ESP-IDF certificate bundle
-- Retries with backoff (1, 5, 30 min), then kept in the outbox until delivered or older than 7 days
+- At most 4 URLs (this bounds NVS, RAM and the delivery loop), `http://` or `https://`, each with its own on switch, event selection (default every type) and optional secret (write-only). A webhook keeps its slot; the web UI never reorders webhooks
+- Event types: `taken`, `skipped`, `missed`, `due`, `snoozed`, `undone`, `battery_low`, `battery_critical`, `clock_invalid`. `undone` lets a receiver that counts doses take back a dose undone within 5 s. One `clock_invalid` event is sent per boot when the device starts with an invalid clock, with `ts` null
+- POST with `Content-Type: application/json`, members in this order: `{"id","event","ts","tz","device","medicine":{"id","code","name","dose"},"slot","log","battery"}`
+  - `id`: the outbox sequence number, unique and increasing per device. It is never reused, because the outbox never deletes a segment before the state file holding the sequence is written. Receivers de-duplicate by `id`
+  - `ts`: epoch seconds of the event, null while the clock is invalid. `tz`: the IANA zone name. `device`: the client id `hygeia-XXXX`
+  - `medicine`: null for device events. `slot`: the scheduled occurrence (UTC epoch seconds) or null
+  - `log`: the stored log line as the REST API returns it, or null. For `undone` it is always `{"id":n}`
+  - `battery`: a number (percent), or null when unknown; for `battery_low` and `battery_critical` the reading that raised the event
+- Signature, when the webhook has a secret: header `X-Hygeia-Signature: sha256=<64 lowercase hex>`, HMAC-SHA256 over the exact body bytes with the secret as the key, computed with PSA (mbedTLS). The signature carries no timestamp; receivers de-duplicate by `id`
+- TLS: `https://` verifies the receiver against the ESP-IDF certificate bundle (common set) only. Receivers with a self-signed or private-CA certificate are not supported in this version, and there is no switch that skips verification. Certificate dates are not checked
+- Responses: 2xx means delivered. 408, 429, 5xx and network errors are retried. 401 and 403 pause that webhook (status "auth"; its events are kept and still age) until its settings are saved again, the network reconnects, a Test succeeds, or the debug console resets it (debug builds only). Every other status, including redirects, which are not followed, rejects that one event for that webhook; it is counted as "rejected" and delivery moves on
+- Retry after the 1st, 2nd and 3rd failure in a row: 1, 5 and 30 minutes, then every 30 minutes, until the event has been 7 days in the outbox (then it counts as "expired")
+- Attempts happen only while the device is connected to a network as a client. A new connection resets the waiting time, so queued events go out at once
+- Memory: an attempt is skipped (not counted as a failure, tried again 60 s later, status "memory") while internal free heap is below 63488 bytes for HTTPS or 45056 bytes for HTTP. With many medicines the device may hold HTTPS webhooks back while its memory is low; the web UI shows why. Attempts also wait while a firmware update, upload, export or import runs (status "busy")
+- Test (`POST /api/webhook/test`): asynchronous, answers 202; the result shows in `GET /api/integrations` and through the live event `{"ev":"integ"}`. The test event (`"id":0`, `"event":"test"`) is signed, sent to one saved webhook by index, outside the outbox, and works while that webhook is switched off. It obeys the same memory and busy checks as delivery. The web UI disables Test on a row with unsaved changes
 
 ## Outbox
 
-Persistent ring file on LittleFS for MQTT and webhook events not yet delivered (offline, Wi-Fi off on battery, broker down). Capacity 1000 events; oldest dropped when full, with a counter shown in the web UI. Delivered in order when the network returns.
+Persistent queue on LittleFS for MQTT and webhook events not yet delivered (offline, Wi-Fi off on battery, broker or receiver down, reboots in between).
+
+- Files: append-only segment files of 100 events each and a small state file, all in `/data/outbox`. A ring file with fixed slots is not used: overwriting a slot inside a large LittleFS file rewrites the file from that block onward, so it wears the flash far more than appending. The ring behaviour comes from deleting a whole segment once every destination is past it and the state file has been written
+- Capacity: 1000 events, counted from the oldest event still waiting for any destination. When full, the oldest waiting event is dropped for every destination and counted in "Dropped when full". Events reach the outbox through a capture queue of 128 events in RAM, which holds a scheduler pass that marks many doses missed at once; an overflow is counted as "lost"
+- Counters: dropped, expired, rejected and lost are shown in the web UI and never reset by the device (no reset button in this version)
+- Order is kept per destination: each destination gets its events in the order they happened, and a stuck webhook never holds back MQTT or another webhook
+- Delivery is at least once: after a crash or power cut, events acknowledged in the last 10 s can be sent again with the same `id`
+- Turning a destination off or removing a webhook discards the events waiting for it. Editing a webhook's URL keeps its slot, its secret and its waiting events, so a typo fix still delivers them. MQTT keeps its events across a broker URL change
+- Expiry: an event is dropped as expired 7 days after it entered the outbox. The time counts from the enqueue, not from the event's own time, so a dose backdated by more than 7 days is still delivered. Events enqueued while the clock is invalid never expire by age
+- Write budget: with no destination on, no event touches flash and `/data/outbox` is not opened. Otherwise each event costs one fsync'd append. On LittleFS an append to a partly filled last block copies that block into a freshly erased one, so the real cost is one 4 KB erase and up to 4 KB of programming plus a metadata commit per event, plus at most one state write per 10 s of delivery and one forced state write and segment deletion per 100 events. At 50 events a day that is about 100 erases a day, spread over about 2500 blocks by LittleFS wear levelling. No timer writes anything
+- Storage down: when the storage partition did not mount or the outbox cannot be opened, a RAM outbox takes over (its events last until a restart) and the status shows "storage"
+- Memory: the RAM outbox (one arena of about 1.1 MB), the capture queue, records and payload buffers live in PSRAM
 
 ## Partitions
 
