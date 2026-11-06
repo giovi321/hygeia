@@ -30,6 +30,7 @@
     view.appendChild(errBox);
     HY.onLeave(function () {
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
       if (HY.onCabinet === onCabinet) { HY.onCabinet = null; }
     });
 
@@ -143,9 +144,35 @@
       else if (st.checking) { testMsg.textContent = CHECKING_MSG; }
       else if (!st.testing && (testMsg.textContent === TEACHING_MSG || testMsg.textContent === CHECKING_MSG)) { testMsg.textContent = ""; }
       forgetBtn.disabled = !st.taught || st.teaching || st.checking;
-      clearTimeout(timer);
-      if (st.testing || st.teaching || st.checking) { timer = setTimeout(load, POLL_MS); }   // the test ends by itself after 10 minutes or when the screen goes off
+      schedule();
     }
+
+    // The device starts a teach, a test or a check on its own, so the page asks again every few seconds while it is
+    // visible. During a run it reloads everything (the test ends by itself after 10 minutes or when the screen goes
+    // off); otherwise it only reads the cabinet state.
+    function schedule() {
+      clearTimeout(timer);
+      if (document.hidden) { return; }
+      var running = st && (st.testing || st.teaching || st.checking);
+      timer = setTimeout(running ? load : poll, POLL_MS);
+    }
+
+    function poll() {
+      return HY.api("GET", "/api/cabinet").then(function (c) {
+        if (!HY.alive(token)) { return; }
+        if (!set) { return load(); }   // the first load failed: read the settings too
+        st = c;
+        show();
+      }, function () {
+        if (HY.alive(token)) { schedule(); }
+      });
+    }
+
+    function onVisible() {
+      if (!HY.alive(token)) { return; }
+      if (document.hidden) { clearTimeout(timer); } else { poll(); }
+    }
+    document.addEventListener("visibilitychange", onVisible);
 
     // ---- actions
 
@@ -203,7 +230,10 @@
         st = r[1];
         show();
       }, function (e) {
-        if (HY.alive(token)) { errBox.textContent = HY.errText(e) || "Could not load the settings"; }
+        if (HY.alive(token)) {
+          errBox.textContent = HY.errText(e) || "Could not load the settings";
+          schedule();
+        }
       });
     }
 
