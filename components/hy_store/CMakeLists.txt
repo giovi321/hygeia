@@ -4,6 +4,7 @@ idf_component_register(
         "src/store_mount.c"
         "src/cabinet_file.c"
         "src/settings_nvs.c"
+        "src/outbox.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -11,4 +12,5 @@ idf_component_register(
     PRIV_REQUIRES
         joltwallet__littlefs
         nvs_flash
+        heap
 )
