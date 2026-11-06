@@ -191,6 +191,17 @@ void hy_web_cabinet_event(float dist, float thr, bool match)
     }
 }
 
+/* LVGL task, when a teach, check or test started or ended */
+void hy_web_cabinet_state(void)
+{
+    hy_cab_status_t st;
+    hy_cab_run_status(&st);
+    char msg[96];
+    snprintf(msg, sizeof msg, "{\"ev\":\"cabinet\",\"state\":{\"teaching\":%s,\"checking\":%s,\"testing\":%s}}",
+             st.teaching ? "true" : "false", st.checking ? "true" : "false", st.testing ? "true" : "false");
+    web_ws_push(msg);
+}
+
 web_handler_t web_cabinet_route(hy_route_id_t id)
 {
     switch (id) {

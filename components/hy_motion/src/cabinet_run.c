@@ -126,7 +126,7 @@ static const char *ev_name(hy_cabev_kind_t k)
 {
     static const char *const n[] = {"react", "match", "other", "too small", "too long", "trigger", "teach still",
                                     "teach go", "teach take", "teach odd", "teach done", "teach fail", "fault", "test end",
-                                    "teach ready", "check end"};
+                                    "teach ready", "check end", "state"};
     return (unsigned)k < sizeof n / sizeof n[0] ? n[k] : "?";
 }
 
@@ -1013,6 +1013,7 @@ esp_err_t hy_cab_run_teach(bool start)
     if (test_off) {
         post_ev(HY_CABEV_TEST_END, 0, 0, 0);   /* the test the teach replaced ends like any other test */
     }
+    post_ev(HY_CABEV_STATE, 0, 0, 0);
     hy_motion_int_wake();
     return ESP_OK;
 }
@@ -1032,6 +1033,7 @@ esp_err_t hy_cab_run_check(bool start)
     if (!ok) {
         return ESP_ERR_INVALID_STATE;
     }
+    post_ev(HY_CABEV_STATE, 0, 0, 0);
     hy_motion_int_wake();
     return ESP_OK;
 }
@@ -1055,6 +1057,7 @@ esp_err_t hy_cab_run_test(bool on)
         return ESP_ERR_INVALID_STATE;
     }
     if (was != on) {
+        post_ev(HY_CABEV_STATE, 0, 0, 0);
         ESP_LOGI(TAG, "cabinet: test %s", on ? "on" : "off");
         if (was && !on) {
             post_ev(HY_CABEV_TEST_END, 0, 0, 0);   /* a web or console Stop updates the device view */

@@ -136,6 +136,14 @@ void cabinet_ui_event(const hy_cabev_t *e)
         hy_web_cabinet_event(e->dist, e->thr, e->kind == HY_CABEV_MATCH);
         cab_event(e);
         break;
+    case HY_CABEV_STATE:
+    case HY_CABEV_TEACH_DONE:
+    case HY_CABEV_TEACH_FAIL:
+    case HY_CABEV_CHECK_END:
+    case HY_CABEV_TEST_END:
+        hy_web_cabinet_state();   /* the Cabinet open page of the web UI follows a run started or ended here */
+        cab_event(e);
+        break;
     default:
         cab_event(e);
         break;

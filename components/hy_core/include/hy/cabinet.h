@@ -164,7 +164,8 @@ typedef enum { HY_CABEV_REACT = 0, HY_CABEV_MATCH, HY_CABEV_OTHER, HY_CABEV_TOO_
                HY_CABEV_TEACH_DONE, HY_CABEV_TEACH_FAIL, HY_CABEV_FAULT,
                HY_CABEV_TEST_END,     /* the runner ended a test: time, screen off or Forget */
                HY_CABEV_TEACH_READY,  /* a teach or check began: lead-in running ("Get ready"); take 1 */
-               HY_CABEV_CHECK_END     /* a check ended: take = hy_cab_check_t; dist, thr of the match when there was one */
+               HY_CABEV_CHECK_END,    /* a check ended: take = hy_cab_check_t; dist, thr of the match when there was one */
+               HY_CABEV_STATE         /* the teaching, checking or testing flag was set or cleared by a request */
 } hy_cabev_kind_t;
 /* Why a teach failed: the take field of a HY_CABEV_TEACH_FAIL event */
 typedef enum { HY_CAB_FAIL_STILL = 0,   /* not still for 1 s within 20 s ("Hold still") */

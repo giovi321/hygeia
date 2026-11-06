@@ -59,6 +59,10 @@ size_t    hy_web_paired_count(void);
 /* LVGL task, after each cabinet test result: pushes {"ev":"cabinet","test":{..},"last":{..}} to the open browsers
  * while a test runs. dist is INFINITY (or 0 with thr 0 for Any movement) when there is no distance. */
 void      hy_web_cabinet_event(float dist, float thr, bool match);
+/* LVGL task, when the runner's teaching, checking or testing flag changed (a start or stop, or a run that ended):
+ * pushes {"ev":"cabinet","state":{"teaching":b,"checking":b,"testing":b}} to the open browsers. A push is not a
+ * request, so it does not count as radio activity. */
+void      hy_web_cabinet_state(void);
 /* Any task. Restarts the device from the LVGL task, the only task that writes the store, so no write is cut halfway.
  * False when the restart could not be posted (no screen task, or LVGL busy for a second): the caller restarts. */
 bool      hy_web_restart(void);

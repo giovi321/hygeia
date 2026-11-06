@@ -1,5 +1,5 @@
 // Live updates: any event from the device, or a resync, refetches the current page's data. Firmware update events go to
-// HY.onUpdate (set by the Firmware page) and cabinet test results to HY.onCabinet (set by the Cabinet open page); neither refetches.
+// HY.onUpdate (set by the Firmware page) and cabinet test results and run state changes to HY.onCabinet (set by the Cabinet open page); neither refetches.
 HY.ws = (function () {
   var sock = null, stable = null, timer = null, wait = null, tries = 0, running = false;
   var delays = [1000, 2000, 5000, 10000];

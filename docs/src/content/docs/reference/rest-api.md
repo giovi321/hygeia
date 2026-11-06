@@ -79,6 +79,8 @@ During a firmware update from GitHub the device sends `{"ev":"update","state":"d
 
 While the Cabinet open test runs, every counted movement sends `{"ev":"cabinet","test":{"matches":4,"others":1},"last":{"dist":0.41,"thr":0.72,"match":true}}`. `test.matches` and `test.others` are the counts of the test so far; `last` describes the movement just counted: `dist` the distance to the taught movement (`null` when the movement was rejected before the comparison), `thr` the threshold (`null` when there is none), `match` whether it counted as a match. The web UI does not refetch on this frame.
 
+When a teach, check or test starts or ends, or a request starts or stops one, the device sends `{"ev":"cabinet","state":{"teaching":false,"checking":true,"testing":false}}`. The Cabinet open page reloads its state on this frame. Sending a frame is not a request and does not count as activity for the radio's idle limit on battery.
+
 ## Routes
 
 | Route | Use |
