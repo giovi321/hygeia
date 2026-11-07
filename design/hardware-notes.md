@@ -250,6 +250,23 @@ Scheduler evaluation and Home refresh on the board (newlib, CLIB malloc):
 
 Total 14.
 
+## Integrations
+
+Measured on the board on firmware v0.4.2-43-g1ff8e51 (debug build), 2026-11-07, 3 active medicines, with the debug-console overrides only (RAM outbox, saved settings unchanged). The test PC sat on another subnet and did not accept connections from the device (`integ tcp` to both test ports: errno 116, connect timeout), so no event reached a receiver or a broker in this run. The figures below come from delivery attempts that fail.
+
+- Flash: debug image 2561152 bytes, release image 2481216 bytes (budget 2831155). In the release image `hy_integ` takes 18587 bytes of flash, 1149 bytes of internal RAM and 178412 bytes of PSRAM; the MQTT client and its transport take 20142 bytes of flash (`espressif__mqtt` 14869, `tcp_transport` 4011, `mqtt_outbox_lib` 1070, `mqtt_utils_lib` 192)
+- Idle with no destination on: internal heap free 93455 bytes (minimum since boot 84079, largest block 31744), PSRAM free 6744712 bytes; the outbox is not open
+- Webhook override: the RAM outbox takes about 1.13 MB of PSRAM (PSRAM free 5612396 bytes); internal heap free 91487 bytes
+- Capacity: `integ fill 1005` after 2 earlier events left 1000 waiting and 7 dropped when full, with none lost in the capture ring; `integ burst 128` lost none. The internal heap minimum stayed at 84079 bytes through both, so the RAM outbox and the capture ring sit in PSRAM
+- Retry: after the first failed attempt (`timeout`) the next one was scheduled in 1 minute, after the second in 5 minutes
+- MQTT client against a broker it cannot reach: internal heap free 88919 bytes before the connect, 80631 to 81267 bytes while the client retries, minimum 75663 bytes (about 8 KB for the client task and its sockets); events wait in the outbox (`pending mqtt` counts them) and the status shows `connect`
+- Stacks: delivery task 8192 bytes, at least 5556 left unused over webhook attempts and the fill; MQTT task 6144 bytes, at least 4068 left unused over connect attempts (no session was established, so a connected session with discovery is not yet measured)
+- `integ sign` gives the HMAC-SHA256 test value of RFC 4231 case 2
+- After `integ off` and a reset: no override, outbox not open, internal heap free 93475 bytes
+- The internal heap stayed above the 35840-byte floor in every measurement
+
+Owed (board, with a receiver and a broker the device can reach): delivery and the signature seen by a receiver, the per-POST time over HTTP, rejected and paused webhooks, the order after a receiver outage, the drain time of 1000 events, MQTT state, events, commands, the clean stop and the last will, discovery and its cleanup scan, the internal minimum during a discovery burst and during a firmware update check with MQTT up, the TLS failure path, socket errors with a web UI tab open, and the live event that must not make the Dashboard refetch. File outbox: each append costs one 4 KB block erase, up to 4 KB of programming and a metadata commit on LittleFS; the time per append and any stall of the screen are not measured, because the overrides use the RAM outbox.
+
 ## Owed hardware checks
 
 Verified by hand on firmware 2530f31 (2026-10-29): repeat chimes (5 plays at 2 min intervals, then silent), Play chime in Sound settings, detail scroll, due card dots, QWERTY note keyboard. Splash 1000 to 1009 ms with a 52 ms maximum frame gap over 3 boots. RTC alarm log line: hardware fire at the programmed second, software due-now fire within 1 s.
