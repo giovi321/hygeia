@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/job.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_common
+    PRIV_REQUIRES
+        esp_timer
+        freertos
+        heap
+        hy_board
+        lvgl__lvgl
+)

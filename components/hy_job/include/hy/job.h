@@ -7,9 +7,9 @@
 #include "sdkconfig.h"
 
 /*
- * httpd to LVGL job bridge. A handler that needs the store, the scheduler snapshot or an action (all single-writer,
- * owned by the LVGL task) packs its input into the job context, runs the job, and reads the result from the same
- * context once hy_job_run returned ESP_OK.
+ * Task to LVGL job bridge. A web handler or another task that needs the store, the scheduler snapshot or an action
+ * (all single-writer, owned by the LVGL task) packs its input into the job context, runs the job, and reads the
+ * result from the same context once hy_job_run returned ESP_OK.
  *
  * Lifetime: a job starts with refcount 2, one reference for the handler and one for the LVGL side. The LVGL side
  * drops its reference after fn returned and the semaphore was given (or at once when the job was never queued or was

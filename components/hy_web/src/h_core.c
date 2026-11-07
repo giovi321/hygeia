@@ -18,7 +18,7 @@
 #include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/summary.h"
-#include "bridge.h"
+#include "hy/job.h"
 #include "web_internal.h"
 
 static const char *TAG = "web_core";

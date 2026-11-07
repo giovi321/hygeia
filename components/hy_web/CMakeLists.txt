@@ -1,7 +1,6 @@
 idf_component_register(
     SRCS
         "src/server.c"
-        "src/bridge.c"
         "src/session.c"
         "src/ws.c"
         "src/h_core.c"
@@ -20,6 +19,7 @@ idf_component_register(
         "src"
     REQUIRES
         hy_core
+        hy_job
         esp_common
     PRIV_REQUIRES
         app_update

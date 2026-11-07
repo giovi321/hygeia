@@ -1,4 +1,4 @@
-#include "bridge.h"
+#include "hy/job.h"
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -13,7 +13,7 @@
 #include "hy/board.h"
 #include "lvgl.h"
 
-static const char *TAG = "web_job";
+static const char *TAG = "job";
 
 /* QUEUED -> RUNNING (LVGL task, before fn) or QUEUED -> ABANDONED (handler, at the timeout). Exactly one of the two
  * transitions wins, so fn never runs for a handler that already answered 503 before it started. */

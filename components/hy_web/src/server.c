@@ -18,7 +18,7 @@
 #include "hy/power_run.h"
 #include "lvgl.h"
 #include "lwip/ip4_addr.h"
-#include "bridge.h"
+#include "hy/job.h"
 #include "web_internal.h"
 
 static const char *TAG = "web";

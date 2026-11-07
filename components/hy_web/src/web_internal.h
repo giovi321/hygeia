@@ -173,7 +173,7 @@ bool web_host_check(httpd_req_t *req, const web_net_t *net, bool api);
 
 /* ---- REST helpers (h_util.c) ---- */
 
-#include "bridge.h"
+#include "hy/job.h"
 #include "hy/store.h"
 
 /* A job whose context starts with "const char *body" (set to a private copy of the request body, valid as long as the
