@@ -14,7 +14,7 @@ Hygeia is a personal reminder tool. It is not a medical device and must not be t
 :::
 
 :::note[Pre-release]
-These pages describe what the firmware does today. Wi-Fi, the access point and the web UI are built. MQTT, Home Assistant and webhooks are planned and not built; they are listed on the [Roadmap](roadmap/) page only.
+These pages describe what the firmware does today. Wi-Fi, the access point, the web UI, MQTT, Home Assistant discovery and webhooks are built. Only the items on the [Roadmap](roadmap/) page are planned.
 :::
 
 ## Why a separate device
@@ -25,7 +25,7 @@ The board is small and cheap. It runs on its own battery and sleeps when the scr
 
 It also works for people who do not use a smartphone, older people in particular. Daily use comes down to tapping a tile to log a dose and answering the reminder card when it appears. A carer can do the setup (medicines, times, doses) from a browser through the web UI, which the device serves itself over Wi-Fi. Basic setup also works on the device screen.
 
-Technical users can go further and connect it to MQTT or webhooks to build automations, for example with Home Assistant. These integrations are planned and not built yet. The same device should suit both kinds of user, from someone who only taps tiles to someone wiring it into a home automation setup.
+Technical users can go further and connect it to MQTT or webhooks to build automations, for example with Home Assistant. See [MQTT](integrations/mqtt/), [Home Assistant](integrations/home-assistant/) and [Webhooks](integrations/webhooks/). The same device should suit both kinds of user, from someone who only taps tiles to someone wiring it into a home automation setup.
 
 ## What works today
 

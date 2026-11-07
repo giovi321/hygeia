@@ -68,6 +68,8 @@ WEB_PAGE = {
     "HY_R_CABINET_TEST": "Cabinet open",
     "HY_R_CABINET_SAMPLES": "Cabinet open",
     "HY_R_CABINET_DEL": "Cabinet open",
+    "HY_R_INTEG": "Settings",
+    "HY_R_WEBHOOK_TEST": "Settings",
 }
 
 ROW = re.compile(r'\{\s*HY_M_(GET|POST|PUT|DELETE)\s*,\s*"([^"]+)"\s*,\s*(HY_R_[A-Z0-9_]+)\s*,[^,]+,\s*"([^"]*)"\s*\}')

@@ -191,9 +191,13 @@ hy_err_t hy_integ_validate(const hy_integ_t *c, hy_api_err_t *err)
         char f[24];
         const hy_hook_cfg_t *h = &c->hook[i];
         hook_field(f, i, "url");
+        if (h->url[0] == '\0') {   /* a free slot: a removed webhook keeps its place so the ones after it keep theirs */
+            if (h->on || h->secret[0] != '\0') return hy_api_fail(err, HY_E_INVALID, f);
+            continue;
+        }
         if (hy_url_parse(h->url, false, &u) != HY_OK) return hy_api_fail(err, HY_E_INVALID, f);
         for (unsigned j = 0; j < i; j++)
-            if (url_same(c->hook[j].url, h->url)) return hy_api_fail(err, HY_E_INVALID, f);
+            if (c->hook[j].url[0] != '\0' && url_same(c->hook[j].url, h->url)) return hy_api_fail(err, HY_E_INVALID, f);
         if ((h->events & ~HY_IE_ALL) != 0) {
             hook_field(f, i, "events");
             return hy_api_fail(err, HY_E_INVALID, f);
@@ -291,6 +295,10 @@ static hy_err_t hook_from_json(const cJSON *it, unsigned i, hy_hook_cfg_t *h, hy
     if (!u || cJSON_IsNull(u)) return hy_api_fail(err, HY_E_INVALID, f);
     hy_err_t r = get_str(it, "url", h->url, sizeof h->url, &has, f, err);
     if (r != HY_OK) return r;
+    if (h->url[0] == '\0') {   /* a free slot: nothing else is kept, not even the secret */
+        memset(h, 0, sizeof *h);
+        return HY_OK;
+    }
 
     hook_field(f, i, "on");
     h->on = true;

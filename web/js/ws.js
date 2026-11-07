@@ -1,5 +1,7 @@
 // Live updates: any event from the device, or a resync, refetches the current page's data. Firmware update events go to
-// HY.onUpdate (set by the Firmware page) and cabinet test results and run state changes to HY.onCabinet (set by the Cabinet open page); neither refetches.
+// HY.onUpdate (set by the Firmware page), cabinet test results and run state changes to HY.onCabinet (set by the Cabinet open page)
+// and integration status changes to HY.onInteg (set by the Settings page); none of them refetches the page, and with no handler set
+// they do nothing, so no request is made.
 HY.ws = (function () {
   var sock = null, stable = null, timer = null, wait = null, tries = 0, running = false;
   var delays = [1000, 2000, 5000, 10000];
@@ -32,6 +34,10 @@ HY.ws = (function () {
       try { msg = JSON.parse(e.data); } catch (x) { msg = null; }
       if (msg && msg.ev === "cabinet") {   // a test result: the Cabinet open page shows it, nothing refetches
         if (typeof HY.onCabinet === "function") { HY.onCabinet(msg); }
+        return;
+      }
+      if (msg && msg.ev === "integ") {   // delivery status changed: only the Settings page cares
+        if (typeof HY.onInteg === "function") { HY.onInteg(msg); }
         return;
       }
       if (msg && msg.ev === "update") {   // firmware update progress: no page refetch

@@ -13,6 +13,7 @@ idf_component_register(
         "src/h_ota.c"
         "src/h_update.c"
         "src/h_cabinet.c"
+        "src/h_integ.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS

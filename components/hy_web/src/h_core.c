@@ -413,6 +413,7 @@ __attribute__((weak)) web_handler_t web_wifi_route(hy_route_id_t id) { (void)id;
 __attribute__((weak)) web_handler_t web_data_route(hy_route_id_t id) { (void)id; return NULL; }
 __attribute__((weak)) web_handler_t web_update_route(hy_route_id_t id) { (void)id; return NULL; }
 __attribute__((weak)) web_handler_t web_cabinet_route(hy_route_id_t id) { (void)id; return NULL; }
+__attribute__((weak)) web_handler_t web_integ_route(hy_route_id_t id) { (void)id; return NULL; }
 
 web_handler_t web_route_handler(hy_route_id_t id)
 {
@@ -443,6 +444,9 @@ web_handler_t web_route_handler(hy_route_id_t id)
     }
     if (!h) {
         h = web_cabinet_route(id);
+    }
+    if (!h) {
+        h = web_integ_route(id);
     }
     return h;
 }

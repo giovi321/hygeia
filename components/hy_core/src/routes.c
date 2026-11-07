@@ -49,6 +49,8 @@ static const hy_route_t TABLE[] = {
     { HY_M_POST,   "/api/cabinet/test",               HY_R_CABINET_TEST,  0, "Settings > Cabinet open > Test" },
     { HY_M_GET,    "/api/cabinet/samples.csv",        HY_R_CABINET_SAMPLES, 0, "" },
     { HY_M_DELETE, "/api/cabinet/teach",              HY_R_CABINET_DEL,   0, "Settings > Cabinet open > Forget the movement" },
+    { HY_M_GET,    "/api/integrations",               HY_R_INTEG,         0, "" },
+    { HY_M_POST,   "/api/webhook/test",               HY_R_WEBHOOK_TEST,  0, "" },
 };
 
 _Static_assert(sizeof TABLE / sizeof TABLE[0] == HY_R_COUNT, "one row per route id");

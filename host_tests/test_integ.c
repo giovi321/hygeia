@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "unity.h"
@@ -288,6 +289,55 @@ static void test_integ_put_hooks_replace(void)
                                                     "{\"url\":\"https://n8n.lan/4\"}]}",
                                                     &cur, &out, &e));
     TEST_ASSERT_EQUAL_UINT8(4, out.n_hooks);
+}
+
+/* A removed webhook leaves an empty, off slot: the hooks after it keep their index and their secret. */
+static void test_integ_put_hook_blank_slot(void)
+{
+    hy_integ_t cur, out;
+    hy_api_err_t e;
+    hy_integ_defaults(&cur);
+    cur.n_hooks = 3;
+    for (int i = 0; i < 3; i++) {
+        cur.hook[i].on = true;
+        cur.hook[i].events = HY_IE_ALL;
+        snprintf(cur.hook[i].url, sizeof cur.hook[i].url, "https://n8n.lan/%d", i);
+        snprintf(cur.hook[i].secret, sizeof cur.hook[i].secret, "s%d", i);
+    }
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_integ_from_json("{\"webhooks\":[{\"url\":\"https://n8n.lan/0\"},"
+                                                    "{\"url\":\"\",\"on\":false},{\"url\":\"https://n8n.lan/2\"}]}",
+                                                    &cur, &out, &e));
+    TEST_ASSERT_EQUAL_UINT8(3, out.n_hooks);
+    TEST_ASSERT_EQUAL_STRING("s0", out.hook[0].secret);
+    TEST_ASSERT_EQUAL_STRING("", out.hook[1].url);
+    TEST_ASSERT_FALSE(out.hook[1].on);
+    TEST_ASSERT_EQUAL_STRING("", out.hook[1].secret);   /* the slot's secret goes with the hook */
+    TEST_ASSERT_EQUAL_UINT16(0, out.hook[1].events);
+    TEST_ASSERT_EQUAL_STRING("https://n8n.lan/2", out.hook[2].url);
+    TEST_ASSERT_EQUAL_STRING("s2", out.hook[2].secret);
+    TEST_ASSERT_EQUAL(HY_OK, hy_integ_validate(&out, &e));
+    /* a new hook taking the blank slot starts without a secret; the others keep theirs */
+    hy_integ_t again;
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_integ_from_json("{\"webhooks\":[{\"url\":\"https://n8n.lan/0\"},"
+                                                    "{\"url\":\"https://n8n.lan/new\"},{\"url\":\"https://n8n.lan/2\"}]}",
+                                                    &out, &again, &e));
+    TEST_ASSERT_TRUE(again.hook[1].on);
+    TEST_ASSERT_EQUAL_STRING("", again.hook[1].secret);
+    TEST_ASSERT_EQUAL_STRING("s2", again.hook[2].secret);
+    /* two blank slots do not collide as duplicates */
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_integ_from_json("{\"webhooks\":[{\"url\":\"\"},{\"url\":\"\"},"
+                                                    "{\"url\":\"https://n8n.lan/2\"}]}", &out, &again, &e));
+    /* an empty url makes a blank slot whatever else the item says; a stored slot that is on with no url is refused */
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_integ_from_json("{\"webhooks\":[{\"url\":\"\",\"on\":true,\"secret\":\"x\"}]}",
+                                                    &out, &again, &e));
+    TEST_ASSERT_FALSE(again.hook[0].on);
+    TEST_ASSERT_EQUAL_STRING("", again.hook[0].secret);
+    again.hook[0].on = true;
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_integ_validate(&again, &e));
+    TEST_ASSERT_EQUAL_STRING("webhooks.0.url", e.field);
+    /* a duplicate url is still refused */
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_api_integ_from_json("{\"webhooks\":[{\"url\":\"https://n8n.lan/x\"},"
+                                                           "{\"url\":\"https://N8N.lan/x\"}]}", &out, &again, &e));
 }
 
 static void test_integ_put_hook_secret_stays_with_slot(void)
@@ -663,6 +713,7 @@ int main(void)
     RUN_TEST(test_integ_put_mqtt_subset);
     RUN_TEST(test_integ_put_mqtt_on_needs_url);
     RUN_TEST(test_integ_put_hooks_replace);
+    RUN_TEST(test_integ_put_hook_blank_slot);
     RUN_TEST(test_integ_put_hook_secret_stays_with_slot);
     RUN_TEST(test_integ_put_bad);
     RUN_TEST(test_iev_names_and_bus);

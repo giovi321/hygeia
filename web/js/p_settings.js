@@ -22,12 +22,21 @@ HY.settingsLinks.push({ href: "#/settings/cabinet", text: "Cabinet open", note: 
     var clockTimer = null;
     var offset = 0;   // device clock minus browser clock, ms
     var zoneNow = "";
+    var integ = null;   // the integration panels, once built
 
     var errBox = HY.h("p", { class: "msg bad", role: "alert" });
     view.appendChild(HY.h("h1", null, "Settings"));
     view.appendChild(errBox);
     view.appendChild(root);
     HY.onLeave(function () { clearInterval(clockTimer); });
+
+    // The integration panels show their own errors, so a refusal goes back to them
+    function integSave(patch) {
+      return HY.api("PUT", "/api/settings", patch).then(function (s) {
+        if (HY.alive(token)) { cur = s; sync(); }
+        return s;
+      });
+    }
 
     function save(patch) {
       return HY.api("PUT", "/api/settings", patch).then(function (s) {
@@ -43,6 +52,7 @@ HY.settingsLinks.push({ href: "#/settings/cabinet", text: "Cabinet open", note: 
     // show the stored values (the device clamps what it was sent)
     function sync() {
       if (!cur) { return; }
+      if (integ) { integ.sync(cur); }
       var k;
       for (k in ctl) {
         var c = ctl[k];
@@ -286,9 +296,7 @@ HY.settingsLinks.push({ href: "#/settings/cabinet", text: "Cabinet open", note: 
       root.appendChild(rotation());
       root.appendChild(section("Clock", clockBox));
       root.appendChild(section("Paired browsers", brBox));
-      root.appendChild(section("Integrations", [
-        HY.h("p", { class: "mut" }, "Coming in a later version"),
-        HY.h("p", { class: "mut sm" }, "MQTT, Home Assistant and webhooks")]));
+      integ = HY.integPanels(root, cur, integSave);
       root.appendChild(section("Power off", [
         HY.h("p", { class: "mut" }, "Turns the device off. It stops reminding until you switch it on."),
         HY.h("div", { class: "actions" }, HY.h("button", { class: "btn danger", type: "button", onclick: powerOff }, "Power off"))]));

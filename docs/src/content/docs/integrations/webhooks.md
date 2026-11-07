@@ -9,10 +9,30 @@ A webhook sends each event as an HTTP POST with a JSON body to a URL you choose,
 
 In the web UI, open Settings, Webhooks:
 
-- Add up to 4 webhooks. Each has a URL (`http://` or `https://`), an on switch, a choice of events (every type by default) and an optional secret
-- A webhook keeps its row. Removing one never moves the others
-- The secret is write-only: the page shows only whether one is set. Leave the field empty to keep it, or clear it to remove it
-- Save, then press Test on the row (see [The test button](#the-test-button))
+- Press Add webhook, up to 4. Each row has an address (`http://` or `https://`), an On switch, nine event checkboxes (Taken, Skipped, Missed, Due, Snoozed, Undone, Battery low, Battery critical, Clock invalid; all checked by default) and an optional secret
+- A webhook keeps its number. The rows are titled Webhook 1 to Webhook 4 after their slot, and Remove leaves the slot empty, so removing Webhook 2 does not turn Webhook 3 into Webhook 2. The events waiting for a removed webhook are discarded, and so is its secret
+- The secret field shows "Saved" when one is set and never shows the value. Type to replace it, press Clear to remove it, or leave it alone to keep it
+- Press Save. Adding, editing and removing only take effect when you save
+- Press Test on the row (see [The test button](#the-test-button)). Test is disabled while the row has unsaved changes
+- Below the panels, the Event outbox line shows how many events wait and how many were dropped when full, expired or rejected
+
+Each row shows what happened last: when it last delivered and the HTTP status, or the reason nothing goes out:
+
+| Row shows | Meaning |
+| --- | --- |
+| Waiting for free memory | not enough internal memory for a connection; retried after a minute |
+| Waiting for an update or backup to finish | a firmware update, upload, export or import is running |
+| The receiver refused the credentials. Fix them and save the webhook again | the receiver answered 401 or 403; delivery is paused |
+| Waiting for a Wi-Fi connection | the device is not connected as a client |
+| The secure connection could not be set up | the TLS handshake or the certificate check failed |
+| Could not connect | the receiver did not accept a connection |
+| The receiver did not answer in time | a timeout |
+| The receiver answered with an error | an HTTP status that is retried; the status and the time of the next try follow |
+| Storage failed, events are kept in memory only | the outbox files cannot be used; events are lost at the next restart |
+
+The same status is available as `GET /api/integrations` (see the [REST API](../../reference/rest-api/)).
+
+The same settings can be sent through the REST API, `PUT /api/settings`, with a `webhooks` array. A removed webhook is an item `{"url":"","on":false}`: an empty address makes an empty slot that keeps its position.
 
 Delivery runs only while the device is connected to a network as a client, never in access point mode. Webhooks never turn the radio on and never keep it on. On battery the radio runs only after you turn Wi-Fi on and stops after 10 minutes without a web request or a touch, so events wait in the outbox until the radio is on again. See [Idle clock and power](../../user-guide/idle-power/#the-radio-mqtt-and-webhooks).
 
@@ -94,7 +114,7 @@ return [{ json: JSON.parse(raw.toString('utf8')) }];
 
 - 2xx: delivered
 - 408, 429, 5xx, a timeout or a network error: tried again. After the 1st, 2nd and 3rd failure in a row the device waits 1, 5 and 30 minutes, then every 30 minutes
-- 401 or 403: the webhook pauses with the status "auth". Its events are kept, but nothing is sent until you save its settings again, the device reconnects to the network, or a Test succeeds
+- 401 or 403: the webhook pauses with the status "auth". Its events are kept, but nothing is sent until you change its settings and save them, the device reconnects to the network, or a Test succeeds
 - Any other status, including redirects (the device does not follow them): that one event is rejected for that webhook, counted as "rejected", and delivery moves on
 
 Up to 20 events go to one webhook per pass, in the order they happened. One slow or failing webhook never holds back another webhook or MQTT.

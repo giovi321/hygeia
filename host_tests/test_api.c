@@ -996,6 +996,26 @@ static void test_route_cabinet(void)
     TEST_ASSERT_NOT_NULL(hy_route_match(HY_M_GET, "/api/cabinet?x=1", &id));
 }
 
+static void test_routes_integ(void)
+{
+    uint32_t id = 0;
+    const hy_route_t *r = hy_route_match(HY_M_GET, "/api/integrations", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_INTEG, r->id);
+    TEST_ASSERT_EQUAL_UINT8(0, r->flags);   /* paired session */
+    TEST_ASSERT_EQUAL_STRING("", r->screen);
+    r = hy_route_match(HY_M_POST, "/api/webhook/test", &id);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL(HY_R_WEBHOOK_TEST, r->id);
+    TEST_ASSERT_EQUAL_UINT8(0, r->flags);
+    TEST_ASSERT_EQUAL_STRING("", r->screen);
+    /* methods are exact */
+    TEST_ASSERT_NULL(hy_route_match(HY_M_POST, "/api/integrations", &id));
+    TEST_ASSERT_NULL(hy_route_match(HY_M_PUT, "/api/integrations", &id));
+    TEST_ASSERT_NULL(hy_route_match(HY_M_GET, "/api/webhook/test", &id));
+    TEST_ASSERT_NOT_NULL(hy_route_match(HY_M_GET, "/api/integrations?x=1", &id));
+}
+
 static hy_cab_status_t cab_status_taught(void)
 {
     hy_cab_status_t st;
@@ -1393,6 +1413,7 @@ int main(void)
     RUN_TEST(test_api_settings_wake_tap);
     RUN_TEST(test_api_settings_double_tap_wake);
     RUN_TEST(test_route_cabinet);
+    RUN_TEST(test_routes_integ);
     RUN_TEST(test_api_cabinet_json_not_taught);
     RUN_TEST(test_api_cabinet_json_taught);
     RUN_TEST(test_api_cabinet_event_json);

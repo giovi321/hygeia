@@ -7,7 +7,9 @@ With discovery on, the device announces its entities to Home Assistant over [MQT
 
 ## Turn it on
 
-The Settings page of the web UI has no discovery switch in this version (see [Web UI](../../user-guide/web-ui/#settings)). Set it through the REST API, in the browser console of a paired browser, after MQTT is set up:
+After MQTT is set up, open Settings, Home Assistant discovery in the web UI (see [Web UI](../../user-guide/web-ui/#settings)), turn it on and press Save. The discovery prefix is `homeassistant` unless your Home Assistant uses another. Discovery is sent over MQTT, so MQTT has to be on as well.
+
+The same switch through the REST API, in the browser console of a paired browser:
 
 ```js
 fetch('/api/settings', {method: 'PUT', headers: {'X-Hygeia': '1', 'Content-Type': 'application/json'},

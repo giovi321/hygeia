@@ -29,6 +29,11 @@ uploaded image's version in /api/info.
   --cabinet MODE   Cabinet open (default taught): taught = a movement is stored, with three recent captures;
                    not-taught = nothing stored, Taught movement is refused with 409 not_taught. A test sends a
                    result as a live event every 1.5 s until stopped
+
+GET /api/integrations answers a canned status for the saved integration settings: MQTT connected when it is on, the
+first webhook that is on answers 503 and retries in 4 minutes, the others delivered. POST /api/webhook/test answers
+202, then a result 1.5 s later (200, or 503 for that first webhook) as a live {"ev":"integ"} message. Every settings
+write sends the same message. Start with WEBMOCK_VERBOSE=1 to log each request to stderr.
 """
 
 import argparse
@@ -94,6 +99,7 @@ class Device:
         self.settings = sample("settings.json")
         self.mqtt_pass = ""        # write-only: never in a response
         self.hook_secrets = []     # write-only, one per webhook slot
+        self.integ_test = {"running": False, "index": None, "status": None, "error": None, "seq": 0}
         self.wifi = {"mode": "client", "ssid": "HomeNet", "host": "hygeia", "networks": ["HomeNet"]}
         st = sample("state.json")
         self.state = st
@@ -289,6 +295,50 @@ class Device:
             self.upd.update(state="restarting", pct=100)
             self.upd_event()
 
+    def integ_event(self):
+        frame = ws_frame(json.dumps({"ev": "integ"}))
+        for c in list(self.clients):
+            try:
+                c.sendall(frame)
+            except OSError:
+                self.clients.remove(c)
+
+    def integ_status(self):
+        """Canned delivery status for the saved settings: MQTT connected when on, the first webhook that is on
+        answers 503 and retries, the others delivered."""
+        mq = self.settings["mqtt"]
+        now = int(time.time())
+        hooks, failing = [], True
+        for i, h in enumerate(self.settings["webhooks"]):
+            w = {"index": i, "last": {"at": None, "status": None, "error": None}, "pending": 0, "retry_in_s": None,
+                 "paused": False}
+            if h["url"] and h["on"]:
+                if failing:
+                    failing = False
+                    w.update(pending=3, retry_in_s=240)
+                    w["last"] = {"at": now - 60, "status": 503, "error": "http"}
+                else:
+                    w["last"] = {"at": now - 600, "status": 200, "error": None}
+            hooks.append(w)
+        t = self.integ_test
+        return {"mqtt": {"state": "connected" if mq["on"] else "off", "error": None,
+                         "since": now - 3600 if mq["on"] else None, "ha": bool(mq["on"] and mq["ha"]),
+                         "pending": 0},
+                "webhooks": hooks,
+                "outbox": {"pending": sum(w["pending"] for w in hooks), "capacity": 1000, "dropped": 0, "expired": 0,
+                           "rejected": 1, "lost": 0, "error": None},
+                "test": {"running": t["running"], "index": t["index"], "status": t["status"], "error": t["error"]}}
+
+    def integ_test_finish(self, seq, index):
+        with self.lock:
+            t = self.integ_test
+            if t["seq"] != seq:
+                return
+            first = next((i for i, h in enumerate(self.settings["webhooks"]) if h["url"] and h["on"]), None)
+            ok = index != first
+            t.update(running=False, status=200 if ok else 503, error=None if ok else "http")
+            self.integ_event()
+
     def broadcast(self, ev):
         frame = ws_frame(json.dumps({"ev": ev, "ts": int(time.time()), "med_id": 0, "log_id": 0, "slot": 0,
                                      "value": 0}))
@@ -410,6 +460,10 @@ def merge_integ(dev, body):
         new_h, new_s, seen = [], [], set()
         for i, it in enumerate(w):
             f = "webhooks.%d." % i
+            if isinstance(it, dict) and it.get("url") == "":   # a removed webhook: an empty slot that keeps its place
+                new_h.append({"on": False, "url": "", "events": [], "secret_set": False})
+                new_s.append("")
+                continue
             if not isinstance(it, dict) or not _url_ok(it.get("url"), False):
                 return bad(f + "url"), None, None, None, None
             on = it.get("on", True)
@@ -868,7 +922,25 @@ class Handler(BaseHTTPRequestHandler):
                 new["mqtt"], new["webhooks"] = mq, hooks
                 dev.mqtt_pass, dev.hook_secrets = pw, secrets
                 dev.settings = new   # "rot" is the applied rotation: never written here
+                dev.integ_event()
                 return 200, new
+
+        if path == "/api/integrations" and m == "GET":
+            return 200, dev.integ_status()
+        if path == "/api/webhook/test" and m == "POST":
+            ix = body.get("index") if isinstance(body, dict) else None
+            if isinstance(ix, bool) or not isinstance(ix, int) or not 0 <= ix <= 3:
+                return 400, err(400, "invalid", "index", 'Send the webhook number as {"index":0} to {"index":3}')[1]
+            hooks = dev.settings["webhooks"]
+            if ix >= len(hooks) or not hooks[ix]["url"]:
+                return 404, err(404, "not_found", "index", "No webhook is saved at that number")[1]
+            if dev.integ_test["running"]:
+                return 409, err(409, "busy", None, "A test or an update, upload, export or import is running")[1]
+            seq = dev.integ_test["seq"] + 1
+            dev.integ_test.update(running=True, index=ix, status=None, error=None, seq=seq)
+            dev.integ_event()
+            threading.Timer(1.5, dev.integ_test_finish, (seq, ix)).start()
+            return 202, {"started": True}
 
         if path == "/api/log":
             if m == "GET":

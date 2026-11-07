@@ -7,7 +7,9 @@ The device connects to one MQTT broker as a client. It publishes the state of ea
 
 ## Setup
 
-The Settings page of the web UI has no MQTT panel in this version (see [Web UI](../../user-guide/web-ui/#settings)). The settings are saved through the REST API, `PUT /api/settings`, by a paired browser. Open the web UI, then paste this in the browser console (developer tools) and run it:
+In the web UI, open Settings, MQTT (see [Web UI](../../user-guide/web-ui/#settings)). Turn it on, enter the broker URL, the user and password if the broker asks for them, and the base topic, then press Save. The line at the top of the panel shows the state of the connection and, when nothing goes out, the reason in plain words. The password field shows "Saved" when one is set; type to replace it, or press Clear to remove it.
+
+The same settings can be sent through the REST API, `PUT /api/settings`, from a paired browser. Paste this in the browser console (developer tools) of the web UI and run it:
 
 ```js
 fetch('/api/settings', {method: 'PUT', headers: {'X-Hygeia': '1', 'Content-Type': 'application/json'},

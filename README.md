@@ -19,7 +19,7 @@
 
 Hygeia is ESP32-S3 firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.16 that reminds you about medicine doses and logs them. Logging a dose is one tap on a tile. At scheduled times the screen shows a full-screen card and plays a chime. It works with no network, no account and no cloud. Wi-Fi and a web UI served by the device are optional.
 
-This is a pre-release. MQTT, Home Assistant and webhooks are planned and not built. The documentation is at [giovi321.github.io/hygeia](https://giovi321.github.io/hygeia/); the sources of the pages are in [`docs/src/content/docs`](docs/src/content/docs).
+This is a pre-release. MQTT, Home Assistant discovery and webhooks are built. The documentation is at [giovi321.github.io/hygeia](https://giovi321.github.io/hygeia/); the sources of the pages are in [`docs/src/content/docs`](docs/src/content/docs).
 
 <p align="center">
   <img src="docs/public/assets/mockups/01-home.png" alt="Design mockup of the Home screen" width="280" />
@@ -40,7 +40,7 @@ The board is small and cheap. It runs on its own battery and sleeps when the scr
 
 It also works for people who do not use a smartphone, older people in particular. Daily use comes down to tapping a tile to log a dose and answering the reminder card when it appears. A carer can do the setup (medicines, times, doses) from a browser through the web UI, which the device serves itself over Wi-Fi. Basic setup also works on the device screen.
 
-Technical users can go further and connect it to MQTT or webhooks to build automations, for example with Home Assistant. These integrations are planned and not built yet. The same device should suit both kinds of user, from someone who only taps tiles to someone wiring it into a home automation setup.
+Technical users can go further and connect it to MQTT or webhooks to build automations, for example with Home Assistant. See [MQTT](docs/src/content/docs/integrations/mqtt.md), [Home Assistant](docs/src/content/docs/integrations/home-assistant.md) and [Webhooks](docs/src/content/docs/integrations/webhooks.md). The same device should suit both kinds of user, from someone who only taps tiles to someone wiring it into a home automation setup.
 
 ## What works today
 
@@ -61,7 +61,7 @@ Technical users can go further and connect it to MQTT or webhooks to build autom
 
 ## What does not exist yet
 
-MQTT with Home Assistant discovery and webhooks are planned and not built. Log entries are edited and deleted in the web UI only, not on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
+MQTT, Home Assistant discovery and webhooks are set up in the web UI only, not on the device screen. Log entries are edited and deleted in the web UI only, not on the device. A fresh device holds three example medicines that you can edit or archive. See the [Roadmap](docs/src/content/docs/roadmap.md).
 
 ## Quick start
 

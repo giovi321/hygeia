@@ -40,7 +40,12 @@ The current week, Monday to Sunday: a column per day on a wide screen and a list
 - Rotation lock
 - Clock: the device time and when it was last synced, a time zone picker with the zones of the browser, and Sync from this browser. The device refuses a zone name that is not in its own table and the page says so
 - Paired browsers: the list, forget one, forget all. Forgetting this browser returns to the pairing page
-- Integrations (MQTT, Home Assistant, webhooks): "Coming in a later version". The page has no controls for them
+- MQTT: On, Broker URL, User, Password ("Saved" when one is set; typing replaces it, Clear removes it) and Base topic, with a status line (state, the reason when nothing goes out, since when) and Save. See [MQTT](../../integrations/mqtt/)
+- Home Assistant discovery: On and Discovery prefix, with a note that discovery needs MQTT on. See [Home Assistant](../../integrations/home-assistant/)
+- Webhooks: up to four rows, each with an address, On, nine event checkboxes, a Secret (as the MQTT password), Test and Remove, then Add webhook and Save. A row shows when it last delivered or why nothing goes out. A row keeps its slot number: removing one leaves an empty slot and the rows after it keep their numbers. Test is disabled while the row has unsaved changes. See [Webhooks](../../integrations/webhooks/)
+- Event outbox: "Waiting: n. Dropped when full: n. Expired: n. Rejected: n." The counters are never reset
+
+The reasons shown when nothing goes out are: waiting for free memory, waiting for an update or backup to finish, the receiver refused the credentials, waiting for a Wi-Fi connection, a failed secure connection, no connection, no answer in time, an error answer from the receiver, and a storage failure. The page asks the device for this status only while Settings is open: once at the start and after each change the device reports. Other pages never ask, so a status change does not keep the radio on.
 - Power off: asks for confirmation and warns when a dose is due within 24 hours. The device stays off, and does not remind, until you press the power button
 
 Settings links to Wi-Fi, Backup, Firmware and Cabinet open.
