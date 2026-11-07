@@ -636,6 +636,11 @@ bool hy_ob_flush(hy_ob_t *ob, bool force)
     return wrote;
 }
 
+bool hy_ob_dirty(const hy_ob_t *ob)
+{
+    return ob && ob->dirty;
+}
+
 void hy_ob_stats(const hy_ob_t *ob, hy_ob_stats_t *out)
 {
     if (!out) return;

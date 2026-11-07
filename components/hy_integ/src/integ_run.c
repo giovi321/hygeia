@@ -114,7 +114,9 @@ static bool s_ob_ram;
 static bool s_storage_err;               /* RAM fallback for the saved settings */
 static bool s_override;
 static bool s_connected;
-static bool s_ob_dirty;                  /* a done or drop since the last state write */
+static bool s_ob_dirty;                  /* the outbox owes a state write (hy_ob_dirty after each flush) */
+static bool s_ack_dirty;                 /* an ack or drop of ours not yet written: forces the write before blocking offline */
+static int64_t s_ob_fail_ms = -(HY_OB_FLUSH_S * 1000);   /* last failed state write */
 static int64_t s_ob_write_ms;            /* last state write seen */
 static hy_ob_stats_t s_st;               /* the last stats (kept while the outbox is closed) */
 static uint8_t s_test_err;
@@ -290,7 +292,7 @@ static void ob_drop(uint8_t dest)
     hy_ob_stats(s_ob, &st);
     if (st.pending[dest] > 0) {   /* a drop of nothing changes nothing and owes no state write */
         hy_ob_drop_dest(s_ob, dest);
-        s_ob_dirty = true;
+        s_ob_dirty = s_ack_dirty = true;
     }
 }
 
@@ -313,7 +315,7 @@ static void ob_close(void)
         hy_ob_stats(s_ob, &s_st);
         hy_ob_close(s_ob);
         s_ob = NULL;
-        s_ob_dirty = false;
+        s_ob_dirty = s_ack_dirty = false;
     }
 }
 
@@ -351,7 +353,7 @@ static bool ob_ensure(void)
         }
     }
     s_ob_write_ms = mono_ms();
-    s_ob_dirty = false;
+    s_ob_dirty = s_ack_dirty = false;
     ob_drop_off();
     hy_ob_stats(s_ob, &s_st);
     return true;
@@ -481,23 +483,31 @@ static void drain_ring(void)
     }
 }
 
-/* State write after a pass. Forced only before blocking while offline (and by hy_ob_close); otherwise at most one
- * write per HY_OB_FLUSH_S, and at least HY_OB_FLUSH_S after the last ack (wait_ticks wakes for it). A forced or due
- * call that writes nothing ends our dirty flag: either nothing was left to write or the write failed, and the outbox
- * keeps its own state for the next ack, so the timer does not wake forever. */
-static void ob_flush(bool force)
+/* State write after a pass. While the outbox owes one (hy_ob_dirty, also after a failed write) it is forced once
+ * HY_OB_FLUSH_S has passed since the last attempt, so there is at most one write per HY_OB_FLUSH_S and one at least
+ * HY_OB_FLUSH_S after the last ack (wait_ticks wakes for it while connected). Offline, an ack or drop of ours is also
+ * forced out before the task blocks with no timeout, at most once per HY_OB_FLUSH_S after a failure; drops when full
+ * while offline ride on the rate-limited write and never cost a write per event. A failed write is tried again
+ * HY_OB_FLUSH_S later, never in a spin. */
+static void ob_flush(void)
 {
     if (!s_ob) {
         return;
     }
     int64_t now = mono_ms();
-    bool due = s_ob_dirty && now >= s_ob_write_ms + HY_OB_FLUSH_S * 1000;
-    if (hy_ob_flush(s_ob, force || due)) {
-        s_ob_dirty = false;
+    bool due = hy_ob_dirty(s_ob) && now >= s_ob_write_ms + HY_OB_FLUSH_S * 1000;
+    bool offline = !s_connected && s_ack_dirty && now >= s_ob_fail_ms + HY_OB_FLUSH_S * 1000;
+    bool force = due || offline;
+    if (hy_ob_flush(s_ob, force)) {
         s_ob_write_ms = now;
-    } else if (force || due) {
-        s_ob_dirty = false;
+        s_ack_dirty = false;
+    } else if (force && hy_ob_dirty(s_ob)) {
+        s_ob_write_ms = now;   /* the write failed: the outbox keeps it owed */
+        s_ob_fail_ms = now;
+    } else if (force) {
+        s_ack_dirty = false;   /* nothing was owed */
     }
+    s_ob_dirty = hy_ob_dirty(s_ob);
 }
 
 /* ---------------------------------------------------------------- webhooks */
@@ -547,7 +557,7 @@ static void deliver_hook(unsigned i)
         }
         if (hy_ob_expired(s_rec.at, (int64_t)time(NULL), hy_clock_valid())) {
             hy_ob_done(s_ob, dest, s_rec.seq, HY_OBO_EXPIRED);
-            s_ob_dirty = true;
+            s_ob_dirty = s_ack_dirty = true;
             continue;
         }
         hy_integ_err_t err = HY_HE_NONE;
@@ -557,14 +567,14 @@ static void deliver_hook(unsigned i)
         switch (hy_hook_verdict(status)) {
         case HY_HV_DELIVERED:
             hy_ob_done(s_ob, dest, s_rec.seq, HY_OBO_DELIVERED);
-            s_ob_dirty = true;
+            s_ob_dirty = s_ack_dirty = true;
             hk->failures = 0;
             hk->deadline_ms = 0;
             hk->err = HY_HE_NONE;
             break;
         case HY_HV_REJECT:
             hy_ob_done(s_ob, dest, s_rec.seq, HY_OBO_REJECTED);
-            s_ob_dirty = true;
+            s_ob_dirty = s_ack_dirty = true;
             hk->err = HY_HE_HTTP;
             ESP_LOGW(TAG, "webhook %u rejected event %u (HTTP %d)", i, (unsigned)s_rec.seq, status);
             break;
@@ -602,7 +612,7 @@ static void expire_paused(void)
                 break;
             }
             hy_ob_done(s_ob, dest, s_rec.seq, HY_OBO_EXPIRED);
-            s_ob_dirty = true;
+            s_ob_dirty = s_ack_dirty = true;
         }
     }
 }
@@ -808,7 +818,7 @@ static void integ_task(void *arg)
         expire_paused();
         deliver();
         if (s_ob) {
-            ob_flush(!s_connected && s_ob_dirty);   /* forced only before blocking with no timeout while offline */
+            ob_flush();
         }
         publish_status((bits & HY_IB_TEST) != 0);
         wait = wait_ticks();

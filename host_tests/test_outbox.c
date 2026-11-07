@@ -547,6 +547,31 @@ static void test_ob_failed_unlink_does_not_force_state_writes(void)
     hy_ob_close(ob);
 }
 
+/* The caller wakes for the 10 s state write only while the outbox says it owes one: a failed write must leave it
+ * owed, a successful one must end it. */
+static void test_ob_dirty_survives_failed_state_write(void)
+{
+    hy_ob_t *ob = op(true);
+    char t[160], cmd[400];
+    snprintf(t, sizeof t, "%s/state.tmp", odir);
+    TEST_ASSERT_FALSE(hy_ob_dirty(ob));
+    add(ob, 0x01, 0);
+    TEST_ASSERT_FALSE(hy_ob_dirty(ob)); /* an append alone owes no state write */
+    deliver(ob, 0, 0);
+    TEST_ASSERT_TRUE(hy_ob_dirty(ob));
+    /* state.tmp becomes a non-empty directory: the state write fails */
+    snprintf(cmd, sizeof cmd, "mkdir '%s' && touch '%s/x'", t, t);
+    TEST_ASSERT_EQUAL_INT(0, system(cmd));
+    TEST_ASSERT_FALSE(hy_ob_flush(ob, true));
+    TEST_ASSERT_TRUE(hy_ob_dirty(ob));
+    snprintf(cmd, sizeof cmd, "rm -rf '%s'", t);
+    TEST_ASSERT_EQUAL_INT(0, system(cmd));
+    TEST_ASSERT_TRUE(hy_ob_flush(ob, true));
+    TEST_ASSERT_FALSE(hy_ob_dirty(ob));
+    TEST_ASSERT_FALSE(hy_ob_dirty(NULL));
+    hy_ob_close(ob);
+}
+
 static void test_ob_missing_segment_is_skipped(void)
 {
     hy_ob_t *ob = op(true);
@@ -614,5 +639,6 @@ int main(void)
     RUN_TEST(test_ob_unreadable_segment_skips_nothing);
     RUN_TEST(test_ob_failed_cut_never_glues_next_record);
     RUN_TEST(test_ob_failed_unlink_does_not_force_state_writes);
+    RUN_TEST(test_ob_dirty_survives_failed_state_write);
     return UNITY_END();
 }

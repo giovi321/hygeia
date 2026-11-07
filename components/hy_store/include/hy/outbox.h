@@ -48,5 +48,8 @@ void hy_ob_drop_dest(hy_ob_t *ob, uint8_t dest);
  * only when that write succeeded, deletes the deletable segments. Returns true when it wrote. */
 bool hy_ob_flush(hy_ob_t *ob, bool force);
 void hy_ob_stats(const hy_ob_t *ob, hy_ob_stats_t *out);
+/* True while a state change (an ack, a drop, a drop when full) is not yet written: also after a failed state write,
+ * false after a successful one. NULL gives false. */
+bool hy_ob_dirty(const hy_ob_t *ob);
 
 #endif /* HY_OUTBOX_H */
