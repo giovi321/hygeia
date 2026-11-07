@@ -173,6 +173,7 @@ bool web_host_check(httpd_req_t *req, const web_net_t *net, bool api);
 
 /* ---- REST helpers (h_util.c) ---- */
 
+#include "hy/integ_run.h"
 #include "hy/job.h"
 #include "hy/store.h"
 

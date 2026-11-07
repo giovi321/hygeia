@@ -19,6 +19,7 @@
 #include "hy/actions.h"
 #include "hy/cabinet_run.h"
 #include "hy/clock.h"
+#include "hy/integ_run.h"
 #include "hy/motion.h"
 #include "hy/motion_run.h"
 #include "hy/net.h"
@@ -650,6 +651,8 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "hy_sched_run_init: %s: reminders are OFF", esp_err_to_name(rerr));
     }
+    esp_err_t gerr = hy_integ_init();   /* after the store, the integration settings and the network; before the UI */
+    ESP_LOGI(TAG, "hy_integ_init: %s", esp_err_to_name(gerr));
     bool ui_ok = false;
     if (err == ESP_OK) {
         esp_err_t uerr = hy_ui_start();
@@ -716,6 +719,7 @@ void app_main(void)
     console_register("wifi", cmd_wifi);
     console_register("web", cmd_web);
     console_register("webjob", cmd_webjob);
+    console_register("integ", hy_integ_debug);
     console_register("upd", cmd_upd);
     console_register("pair", cmd_pair);
     console_register("ui", cmd_ui);

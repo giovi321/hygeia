@@ -31,6 +31,10 @@ The one exception is [Cabinet open](../cabinet-open/) while it is live: on, with
 - A running Cabinet open teach or test keeps the screen on, on USB and on battery, also when it was started from the web UI
 - Unplugging USB starts the 2 minute timer from the unplug
 
+## The radio, MQTT and webhooks
+
+MQTT and webhooks follow the battery rule of the radio. They send only while the radio is on for another reason and the device is connected to a network as a client, never in access point mode. They never turn the radio on, never keep it on, and their traffic does not count as activity, so it does not delay the 10 minute stop on battery. While the radio is off, events wait in the outbox and the delivery task sleeps without a timer, so it adds no wakeups to light sleep. On battery a receiver therefore gets events in bursts, when you next turn Wi-Fi on or plug in USB. See [Webhooks](../../integrations/webhooks/).
+
 ## PWR key
 
 - Short press: turns the screen on or off

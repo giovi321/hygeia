@@ -105,15 +105,17 @@ int hy_hook_payload(const hy_hook_ev_t *e, uint32_t seq, char *buf, size_t len)
     if (e->slot != 0) w_i64(&w, e->slot); else w_str(&w, "null");
 
     w_str(&w, ",\"log\":");
-    if (e->has_log) {
+    if (e->type == HY_IE_UNDONE) {
+        /* An undo takes the dose back: only the id of the undone entry, also when has_log is set (after an undo
+         * the last written entry can be the restored missed entry, which the receiver must not store). */
+        w_str(&w, "{\"id\":");
+        w_i64(&w, e->log_id);
+        w_str(&w, "}");
+    } else if (e->has_log) {
         if (w.bad) return -1;
         int n = hy_log_to_jsonl(&e->log, buf + w.pos, len - w.pos);
         if (n < 0) return -1;
         w.pos += (size_t)n;
-    } else if (e->type == HY_IE_UNDONE) {
-        w_str(&w, "{\"id\":");
-        w_i64(&w, e->log_id);
-        w_str(&w, "}");
     } else {
         w_str(&w, "null");
     }

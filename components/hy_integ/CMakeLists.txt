@@ -1,0 +1,29 @@
+idf_component_register(
+    SRCS
+        "src/integ_run.c"
+        "src/webhook.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "src"
+    REQUIRES
+        hy_core
+        hy_store
+        hy_job
+    PRIV_REQUIRES
+        hy_board
+        hy_net
+        hy_power
+        hy_clock
+        hy_sched
+        hy_update
+        esp_http_client
+        esp-tls
+        mbedtls
+        esp_timer
+        esp_app_format
+        bootloader_support
+        heap
+        freertos
+        lwip
+)

@@ -20,6 +20,7 @@ idf_component_register(
     REQUIRES
         hy_core
         hy_job
+        hy_integ
         esp_common
     PRIV_REQUIRES
         app_update

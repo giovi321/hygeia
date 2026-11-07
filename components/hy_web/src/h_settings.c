@@ -92,6 +92,7 @@ void web_settings_apply_json(const char *json, web_settings_t *w)
     /* A difference in struct padding only costs one extra write. */
     if (memcmp(&w->cur, &w->next, sizeof w->cur) != 0) {
         w->integ_save = hy_integ_cfg_save(&w->next);
+        hy_integ_apply(hy_integ_cfg());   /* the RAM copy is updated even when the write fails */
     }
     snapshot(w);
     if (w->now.cab_window_min != old.cab_window_min) {

@@ -14,7 +14,7 @@
 typedef struct {
     hy_iev_t type; int64_t ts; /* 0 = clock invalid */ int64_t slot; char zone[48]; char device[12];
     bool has_med; uint32_t med_id; char code[3]; char name[33]; char dose[17];
-    bool has_log; hy_log_t log; uint32_t log_id; /* undone: the id when has_log is false */
+    bool has_log; hy_log_t log; uint32_t log_id; /* undone: the id of the undone entry */
     int8_t batt_pct; /* -1 unknown */ int32_t value; /* battery events: percent */
 } hy_hook_ev_t;
 
@@ -23,8 +23,8 @@ typedef struct {
  *  "log":<codec log object>|{"id":n}|null,"battery":pct|null}
  * in this member order, no spaces, no newline. ts is null when 0, tz when the zone is empty, slot when 0.
  * battery: value for the two battery events, else batt_pct (null when negative). log: the codec object for
- * has_log, {"id":log_id} for UNDONE without has_log, else null. Length, or -1 when it does not fit or the type is
- * out of range. */
+ * has_log, else null; UNDONE always gives {"id":log_id} (has_log ignored). Length, or -1 when it does not fit or
+ * the type is out of range. */
 int hy_hook_payload(const hy_hook_ev_t *e, uint32_t seq, char *buf, size_t len);
 /* {"id":0,"event":"test","ts":ts|null,"tz":..,"device":..,"medicine":null,"slot":null,"log":null,"battery":..} */
 int hy_hook_test_payload(int64_t ts, const char *zone, const char *device, int8_t batt_pct, char *buf, size_t len);

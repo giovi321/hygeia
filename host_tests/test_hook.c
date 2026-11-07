@@ -109,6 +109,29 @@ static void test_hook_payload_undone_id_only(void)
     TEST_ASSERT_EQUAL_STRING(exp, buf);
 }
 
+/* After an undo the last written entry can be the restored missed entry: a filled log must not reach an undone
+ * payload, only the undone entry's id. */
+static void test_hook_payload_undone_ignores_log(void)
+{
+    hy_hook_ev_t e;
+    base_ev(&e, HY_IE_UNDONE);
+    med_antibiotic(&e);
+    e.slot = 1762412400LL;
+    e.log_id = 42;
+    e.has_log = true;
+    taken_log(&e.log);
+    e.log.id = 41;
+    e.log.status = HY_MISSED;
+    char buf[HY_HOOK_PAYLOAD_MAX];
+    int n = hy_hook_payload(&e, 11, buf, sizeof buf);
+    const char *exp =
+        "{\"id\":11,\"event\":\"undone\",\"ts\":1762412520,\"tz\":\"Europe/Zurich\",\"device\":\"hygeia-1A2B\","
+        "\"medicine\":{\"id\":1,\"code\":\"A\",\"name\":\"Antibiotic\",\"dose\":\"1 tab\"},"
+        "\"slot\":1762412400,\"log\":{\"id\":42},\"battery\":82}";
+    TEST_ASSERT_EQUAL_INT((int)strlen(exp), n);
+    TEST_ASSERT_EQUAL_STRING(exp, buf);
+}
+
 static void test_hook_payload_clock_invalid(void)
 {
     hy_hook_ev_t e;
@@ -254,6 +277,7 @@ int main(void)
     RUN_TEST(test_hook_payload_due_no_log);
     RUN_TEST(test_hook_payload_battery_low);
     RUN_TEST(test_hook_payload_undone_id_only);
+    RUN_TEST(test_hook_payload_undone_ignores_log);
     RUN_TEST(test_hook_payload_clock_invalid);
     RUN_TEST(test_hook_payload_escapes);
     RUN_TEST(test_hook_payload_too_small);

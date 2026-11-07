@@ -50,6 +50,12 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Integrations',
+          items: [
+            { label: 'Webhooks', link: '/integrations/webhooks/' },
+          ],
+        },
+        {
           label: 'Reference',
           items: [
             { label: 'Data model', link: '/reference/data-model/' },
