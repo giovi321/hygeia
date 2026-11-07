@@ -393,6 +393,9 @@ out:
     web_sb_free(&sb);
     heap_caps_free(line);
     heap_caps_free(pg);
+    if (h) {
+        wipe(&h->integ, sizeof h->integ);   /* the MQTT password and webhook secrets */
+    }
     heap_caps_free(h);
 }
 
