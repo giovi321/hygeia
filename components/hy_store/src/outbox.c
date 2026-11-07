@@ -425,6 +425,7 @@ hy_err_t hy_ob_open(const char *dir, int64_t (*mono_s)(void), hy_ob_t **out)
     if (!dir) {
         ob->arena = (char *)HY_OB_MALLOC((size_t)HY_OB_CAP * HY_OB_LINE_MAX);
         if (!ob->arena) { HY_OB_FREE(ob->line); HY_OB_FREE(ob); return HY_E_FULL; }
+        ob->tail = 1; /* seq 0 is never an event: the test event carries it */
         *out = ob;
         return HY_OK;
     }
@@ -443,6 +444,7 @@ hy_err_t hy_ob_open(const char *dir, int64_t (*mono_s)(void), hy_ob_t **out)
     for (size_t i = 0; i + 1 < ob->nseg; i++) ob->segs[i].count = ob->segs[i + 1].first - ob->segs[i].first;
     if (hi > ob->tail) ob->tail = hi;
     if (ob->nseg && ob->segs[ob->nseg - 1].first > ob->tail) ob->tail = ob->segs[ob->nseg - 1].first;
+    if (ob->tail == 0 && ob->nseg == 0) ob->tail = 1; /* a fresh store starts at 1: seq 0 is the test event's id */
     for (unsigned d = 0; d < HY_OB_DESTS; d++) {
         if (ob->next[d] > ob->tail) ob->next[d] = ob->tail;
         if (min_good != OB_NOSEQ && ob->next[d] < min_good) ob->next[d] = min_good;

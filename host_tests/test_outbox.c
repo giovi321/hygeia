@@ -94,15 +94,15 @@ static void test_ob_append_peek_in_order(void)
 {
     for (int f = 0; f < 2; f++) {
         hy_ob_t *ob = op(f);
-        for (unsigned i = 0; i < 3; i++) TEST_ASSERT_EQUAL_UINT32(i, add(ob, 0x03, i));
+        for (unsigned i = 0; i < 3; i++) TEST_ASSERT_EQUAL_UINT32(i + 1, add(ob, 0x03, i));
         for (uint8_t d = 0; d < 2; d++) {
-            for (uint32_t s = 0; s < 3; s++) {
+            for (uint32_t s = 1; s <= 3; s++) {
                 TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, d, &rec));
                 TEST_ASSERT_EQUAL_UINT32(s, rec.seq);
                 TEST_ASSERT_EQUAL_UINT8(0x03, rec.mask);
                 TEST_ASSERT_EQUAL_INT64(NOW, rec.at);
                 char want[24];
-                snprintf(want, sizeof want, "{\"i\":%u}", (unsigned)s);
+                snprintf(want, sizeof want, "{\"i\":%u}", (unsigned)s - 1);
                 TEST_ASSERT_EQUAL_STRING(want, rec.payload);
                 hy_ob_done(ob, d, s, HY_OBO_DELIVERED);
             }
@@ -118,9 +118,9 @@ static void test_ob_dests_independent(void)
         hy_ob_t *ob = op(f);
         hy_ob_stats_t st;
         for (unsigned i = 0; i < 3; i++) add(ob, 0x03, i);
-        for (uint32_t s = 0; s < 3; s++) deliver(ob, 0, s);
+        for (uint32_t s = 1; s <= 3; s++) deliver(ob, 0, s);
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 1, &rec));
-        TEST_ASSERT_EQUAL_UINT32(0, rec.seq);
+        TEST_ASSERT_EQUAL_UINT32(1, rec.seq);
         TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 2, &rec));
         hy_ob_stats(ob, &st);
         TEST_ASSERT_EQUAL_UINT32(0, st.pending[0]);
@@ -139,7 +139,7 @@ static void test_ob_mask_selects(void)
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 1, &rec));
         add(ob, 0x01, 1);
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 0, &rec));
-        TEST_ASSERT_EQUAL_UINT32(1, rec.seq);
+        TEST_ASSERT_EQUAL_UINT32(2, rec.seq);
         hy_ob_close(ob);
     }
 }
@@ -155,7 +155,7 @@ static void test_ob_capacity_drops_oldest(void)
         TEST_ASSERT_EQUAL_UINT32(5, st.dropped);
         TEST_ASSERT_EQUAL_UINT32(1000, st.pending[0]);
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 0, &rec));
-        TEST_ASSERT_EQUAL_UINT32(5, rec.seq);
+        TEST_ASSERT_EQUAL_UINT32(6, rec.seq);
         TEST_ASSERT_EQUAL_STRING("{\"i\":5}", rec.payload);
         hy_ob_close(ob);
     }
@@ -167,7 +167,7 @@ static void test_ob_capacity_counts_from_oldest_pending(void)
         hy_ob_t *ob = op(f);
         hy_ob_stats_t st;
         for (unsigned i = 0; i < 1000; i++) add(ob, 0x01, i);
-        for (uint32_t s = 0; s < 10; s++) deliver(ob, 0, s);
+        for (uint32_t s = 1; s <= 10; s++) deliver(ob, 0, s);
         for (unsigned i = 1000; i < 1010; i++) add(ob, 0x01, i);
         hy_ob_stats(ob, &st);
         TEST_ASSERT_EQUAL_UINT32(0, st.dropped);
@@ -185,10 +185,10 @@ static void test_ob_expire_and_reject_counters(void)
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 0, &rec));
         hy_ob_done(ob, 0, rec.seq, HY_OBO_EXPIRED);
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 0, &rec));
-        TEST_ASSERT_EQUAL_UINT32(1, rec.seq);
+        TEST_ASSERT_EQUAL_UINT32(2, rec.seq);
         hy_ob_done(ob, 0, rec.seq, HY_OBO_REJECTED);
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 0, &rec));
-        TEST_ASSERT_EQUAL_UINT32(2, rec.seq);
+        TEST_ASSERT_EQUAL_UINT32(3, rec.seq);
         /* a seq that peek did not give is ignored */
         hy_ob_done(ob, 0, 0, HY_OBO_EXPIRED);
         hy_ob_done(ob, 0, 7, HY_OBO_EXPIRED);
@@ -229,11 +229,11 @@ static void test_ob_drop_dest(void)
         TEST_ASSERT_EQUAL_UINT32(0, st.dropped);
         TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 1, &rec));
-        TEST_ASSERT_EQUAL_UINT32(0, rec.seq);
+        TEST_ASSERT_EQUAL_UINT32(1, rec.seq);
         /* new events for the dropped destination arrive again */
         add(ob, 0x01, 5);
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 0, &rec));
-        TEST_ASSERT_EQUAL_UINT32(5, rec.seq);
+        TEST_ASSERT_EQUAL_UINT32(6, rec.seq);
         hy_ob_close(ob);
     }
 }
@@ -243,14 +243,14 @@ static void test_ob_reopen_keeps_order(void)
     hy_ob_t *ob = op(true);
     hy_ob_stats_t st;
     for (unsigned i = 0; i < 150; i++) add(ob, 0x03, i);
-    for (uint32_t s = 0; s < 20; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 20; s++) deliver(ob, 0, s);
     TEST_ASSERT_TRUE(hy_ob_flush(ob, true));
     hy_ob_close(ob);
     ob = reopen();
-    TEST_ASSERT_EQUAL_UINT32(150, hy_ob_next_seq(ob));
-    deliver(ob, 0, 20);
+    TEST_ASSERT_EQUAL_UINT32(151, hy_ob_next_seq(ob));
+    deliver(ob, 0, 21);
     TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 1, &rec));
-    TEST_ASSERT_EQUAL_UINT32(0, rec.seq);
+    TEST_ASSERT_EQUAL_UINT32(1, rec.seq);
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(129, st.pending[0]);
     TEST_ASSERT_EQUAL_UINT32(150, st.pending[1]);
@@ -262,11 +262,11 @@ static void test_ob_reopen_without_flush_redelivers(void)
 {
     hy_ob_t *ob = op(true);
     for (unsigned i = 0; i < 10; i++) add(ob, 0x01, i);
-    for (uint32_t s = 0; s < 5; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 5; s++) deliver(ob, 0, s);
     hy_ob_t *ob2 = reopen();
     TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob2, 0, &rec));
-    TEST_ASSERT_EQUAL_UINT32(0, rec.seq);
-    TEST_ASSERT_EQUAL_UINT32(10, hy_ob_next_seq(ob2));
+    TEST_ASSERT_EQUAL_UINT32(1, rec.seq);
+    TEST_ASSERT_EQUAL_UINT32(11, hy_ob_next_seq(ob2));
     hy_ob_close(ob2);
     hy_ob_close(ob);
 }
@@ -276,24 +276,24 @@ static void test_ob_seq_survives_delete_without_flush(void)
     hy_ob_t *ob = op(true);
     hy_ob_stats_t st;
     for (unsigned i = 0; i < 100; i++) add(ob, 0x01, i);
-    for (uint32_t s = 0; s < 100; s++) deliver(ob, 0, s);
-    TEST_ASSERT_TRUE(exists("00000000.q"));
+    for (uint32_t s = 1; s <= 100; s++) deliver(ob, 0, s);
+    TEST_ASSERT_TRUE(exists("00000001.q"));
     hy_ob_t *ob2 = reopen();
-    TEST_ASSERT_EQUAL_UINT32(100, hy_ob_next_seq(ob2));
+    TEST_ASSERT_EQUAL_UINT32(101, hy_ob_next_seq(ob2));
     hy_ob_close(ob2); /* leaves the files as they were: nothing changed there */
-    TEST_ASSERT_TRUE(exists("00000000.q"));
+    TEST_ASSERT_TRUE(exists("00000001.q"));
     /* now the flush: state first, then the segment */
     TEST_ASSERT_TRUE(hy_ob_flush(ob, false));
     TEST_ASSERT_TRUE(exists("state.json"));
-    TEST_ASSERT_FALSE(exists("00000000.q"));
+    TEST_ASSERT_FALSE(exists("00000001.q"));
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(1, st.state_writes);
     TEST_ASSERT_EQUAL_UINT32(0, st.segments);
     hy_ob_close(ob);
     ob2 = reopen();
-    TEST_ASSERT_EQUAL_UINT32(100, hy_ob_next_seq(ob2));
+    TEST_ASSERT_EQUAL_UINT32(101, hy_ob_next_seq(ob2));
     TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob2, 0, &rec));
-    TEST_ASSERT_EQUAL_UINT32(100, add(ob2, 0x01, 100));
+    TEST_ASSERT_EQUAL_UINT32(101, add(ob2, 0x01, 100));
     hy_ob_close(ob2);
 }
 
@@ -303,22 +303,22 @@ static void test_ob_torn_last_line(void)
     for (unsigned i = 0; i < 3; i++) add(ob, 0x01, i);
     hy_ob_close(ob);
     char path[160];
-    snprintf(path, sizeof path, "%s/00000000.q", odir);
+    snprintf(path, sizeof path, "%s/00000001.q", odir);
     FILE *f = fopen(path, "a");
     TEST_ASSERT_NOT_NULL(f);
-    fputs("3\t1000\t1\t0123", f);
+    fputs("4\t1000\t1\t0123", f);
     fclose(f);
     ob = reopen();
     hy_ob_stats_t st;
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(3, st.pending[0]);
-    TEST_ASSERT_EQUAL_UINT32(3, hy_ob_next_seq(ob));
+    TEST_ASSERT_EQUAL_UINT32(4, hy_ob_next_seq(ob));
     f = fopen(path, "r");
     TEST_ASSERT_NOT_NULL(f);
     fseek(f, -1, SEEK_END);
     TEST_ASSERT_EQUAL_INT('\n', fgetc(f));
     fclose(f);
-    TEST_ASSERT_EQUAL_UINT32(3, add(ob, 0x01, 3));
+    TEST_ASSERT_EQUAL_UINT32(4, add(ob, 0x01, 3));
     hy_ob_close(ob);
     ob = reopen();
     hy_ob_stats(ob, &st);
@@ -334,7 +334,7 @@ static void test_ob_bad_crc_line_skipped(void)
     hy_ob_close(ob);
     char path[160];
     static char buf[4096];
-    snprintf(path, sizeof path, "%s/00000000.q", odir);
+    snprintf(path, sizeof path, "%s/00000001.q", odir);
     FILE *f = fopen(path, "r");
     TEST_ASSERT_NOT_NULL(f);
     size_t n = fread(buf, 1, sizeof buf - 1, f);
@@ -352,10 +352,10 @@ static void test_ob_bad_crc_line_skipped(void)
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(1, st.corrupt);
     TEST_ASSERT_EQUAL_UINT32(2, st.pending[0]);
-    deliver(ob, 0, 0);
-    deliver(ob, 0, 2);
+    deliver(ob, 0, 1);
+    deliver(ob, 0, 3);
     TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
-    TEST_ASSERT_EQUAL_UINT32(3, hy_ob_next_seq(ob));
+    TEST_ASSERT_EQUAL_UINT32(4, hy_ob_next_seq(ob));
     hy_ob_close(ob);
 }
 
@@ -364,20 +364,20 @@ static void test_ob_segments_roll_and_delete(void)
     hy_ob_t *ob = op(true);
     hy_ob_stats_t st;
     for (unsigned i = 0; i < 250; i++) add(ob, 0x01, i);
-    TEST_ASSERT_TRUE(exists("00000000.q"));
-    TEST_ASSERT_TRUE(exists("00000064.q"));
-    TEST_ASSERT_TRUE(exists("000000c8.q"));
+    TEST_ASSERT_TRUE(exists("00000001.q"));
+    TEST_ASSERT_TRUE(exists("00000065.q"));
+    TEST_ASSERT_TRUE(exists("000000c9.q"));
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(3, st.segments);
-    for (uint32_t s = 0; s < 250; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 250; s++) deliver(ob, 0, s);
     TEST_ASSERT_TRUE(hy_ob_flush(ob, false));
-    TEST_ASSERT_FALSE(exists("00000000.q"));
-    TEST_ASSERT_FALSE(exists("00000064.q"));
-    TEST_ASSERT_TRUE(exists("000000c8.q"));
+    TEST_ASSERT_FALSE(exists("00000001.q"));
+    TEST_ASSERT_FALSE(exists("00000065.q"));
+    TEST_ASSERT_TRUE(exists("000000c9.q"));
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(1, st.segments);
-    TEST_ASSERT_EQUAL_UINT32(250, st.tail);
-    TEST_ASSERT_EQUAL_UINT32(250, add(ob, 0x01, 250));
+    TEST_ASSERT_EQUAL_UINT32(251, st.tail);
+    TEST_ASSERT_EQUAL_UINT32(251, add(ob, 0x01, 250));
     hy_ob_close(ob);
 }
 
@@ -385,13 +385,13 @@ static void test_ob_seq_survives_empty_reopen(void)
 {
     hy_ob_t *ob = op(true);
     for (unsigned i = 0; i < 5; i++) add(ob, 0x01, i);
-    for (uint32_t s = 0; s < 5; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 5; s++) deliver(ob, 0, s);
     TEST_ASSERT_TRUE(hy_ob_flush(ob, true));
     hy_ob_close(ob);
     ob = reopen();
-    TEST_ASSERT_EQUAL_UINT32(5, hy_ob_next_seq(ob));
+    TEST_ASSERT_EQUAL_UINT32(6, hy_ob_next_seq(ob));
     TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
-    TEST_ASSERT_EQUAL_UINT32(5, add(ob, 0x01, 5));
+    TEST_ASSERT_EQUAL_UINT32(6, add(ob, 0x01, 5));
     hy_ob_close(ob);
 }
 
@@ -402,7 +402,7 @@ static void test_ob_state_writes_coalesced(void)
         hy_ob_t *ob = op(f);
         hy_ob_stats_t st;
         for (unsigned i = 0; i < 100; i++) add(ob, 0x01, i);
-        for (uint32_t s = 0; s < 100; s++) {
+        for (uint32_t s = 1; s <= 100; s++) {
             deliver(ob, 0, s);
             if (s % 11 == 10) fake_now++; /* 9 s in all */
             (void)hy_ob_flush(ob, false);
@@ -413,7 +413,7 @@ static void test_ob_state_writes_coalesced(void)
         uint32_t w1 = st.state_writes;
         TEST_ASSERT_EQUAL_UINT32(100, st.appends);
         add(ob, 0x01, 100);
-        deliver(ob, 0, 100);
+        deliver(ob, 0, 101);
         TEST_ASSERT_FALSE(hy_ob_flush(ob, false));
         fake_now += 10;
         TEST_ASSERT_TRUE(hy_ob_flush(ob, false));
@@ -422,6 +422,26 @@ static void test_ob_state_writes_coalesced(void)
         TEST_ASSERT_EQUAL_UINT32(101, st.appends);
         hy_ob_close(ob);
     }
+}
+
+static void test_ob_fresh_store_starts_at_one(void)
+{
+    for (int f = 0; f < 2; f++) {
+        hy_ob_t *ob = op(f);
+        TEST_ASSERT_EQUAL_UINT32(1, hy_ob_next_seq(ob));
+        TEST_ASSERT_EQUAL_UINT32(1, add(ob, 0x01, 0));
+        TEST_ASSERT_EQUAL_UINT32(2, add(ob, 0x01, 1));
+        hy_ob_close(ob);
+    }
+    /* an emptied store keeps its sequence on reopen */
+    hy_ob_t *ob = op(true);
+    TEST_ASSERT_EQUAL_UINT32(1, add(ob, 0x01, 0));
+    deliver(ob, 0, 1);
+    TEST_ASSERT_TRUE(hy_ob_flush(ob, true));
+    hy_ob_close(ob);
+    ob = reopen();
+    TEST_ASSERT_EQUAL_UINT32(2, hy_ob_next_seq(ob));
+    hy_ob_close(ob);
 }
 
 static void test_ob_payload_rules(void)
@@ -440,11 +460,11 @@ static void test_ob_payload_rules(void)
         big[1025] = '\0';
         TEST_ASSERT_EQUAL(HY_E_INVALID, hy_ob_append(ob, NOW, 1, big, &seq));
         TEST_ASSERT_EQUAL_UINT32(77, seq);
-        TEST_ASSERT_EQUAL_UINT32(0, hy_ob_next_seq(ob));
+        TEST_ASSERT_EQUAL_UINT32(1, hy_ob_next_seq(ob));
         memset(big, 'x', 1024);
         big[1024] = '\0';
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_append(ob, NOW, 1, big, &seq));
-        TEST_ASSERT_EQUAL_UINT32(0, seq);
+        TEST_ASSERT_EQUAL_UINT32(1, seq);
         TEST_ASSERT_EQUAL(HY_OK, hy_ob_peek(ob, 0, &rec));
         TEST_ASSERT_EQUAL_STRING(big, rec.payload);
         hy_ob_close(ob);
@@ -469,7 +489,7 @@ static void test_ob_ram_backend_no_files(void)
     hy_ob_t *ob = NULL;
     TEST_ASSERT_EQUAL(HY_OK, hy_ob_open(NULL, mono, &ob));
     for (unsigned i = 0; i < 20; i++) add(ob, 0x01, i);
-    for (uint32_t s = 0; s < 10; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 10; s++) deliver(ob, 0, s);
     (void)hy_ob_flush(ob, true);
     hy_ob_close(ob);
     TEST_ASSERT_EQUAL_UINT(0, count_files(base));
@@ -480,7 +500,7 @@ static void test_ob_unreadable_segment_skips_nothing(void)
     hy_ob_t *ob = op(true);
     hy_ob_stats_t st;
     char a[160], b[160];
-    snprintf(a, sizeof a, "%s/00000000.q", odir);
+    snprintf(a, sizeof a, "%s/00000001.q", odir);
     snprintf(b, sizeof b, "%s/away", odir);
     for (unsigned i = 0; i < 5; i++) add(ob, 0x01, i);
     TEST_ASSERT_EQUAL_INT(0, rename(a, b));
@@ -492,7 +512,7 @@ static void test_ob_unreadable_segment_skips_nothing(void)
     TEST_ASSERT_EQUAL_UINT32(5, st.pending[0]);
     TEST_ASSERT_EQUAL_INT(0, rmdir(a));
     TEST_ASSERT_EQUAL_INT(0, rename(b, a));
-    for (uint32_t s = 0; s < 5; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 5; s++) deliver(ob, 0, s);
     hy_ob_close(ob);
 }
 
@@ -502,19 +522,19 @@ static void test_ob_failed_cut_never_glues_next_record(void)
     for (unsigned i = 0; i < 3; i++) add(ob, 0x01, i);
     hy_ob_close(ob);
     char path[160];
-    snprintf(path, sizeof path, "%s/00000000.q", odir);
+    snprintf(path, sizeof path, "%s/00000001.q", odir);
     FILE *f = fopen(path, "a");
     TEST_ASSERT_NOT_NULL(f);
-    fputs("3\t1000\t1\t0123", f);
+    fputs("4\t1000\t1\t0123", f);
     fclose(f);
-    snprintf(path, sizeof path, "%s/00000000.tmp", odir); /* a directory in the way: the cut cannot be made */
+    snprintf(path, sizeof path, "%s/00000001.tmp", odir); /* a directory in the way: the cut cannot be made */
     TEST_ASSERT_EQUAL_INT(0, mkdir(path, 0775));
     ob = reopen();
-    TEST_ASSERT_EQUAL_UINT32(3, add(ob, 0x01, 3));
-    TEST_ASSERT_TRUE(exists("00000003.q"));
+    TEST_ASSERT_EQUAL_UINT32(4, add(ob, 0x01, 3));
+    TEST_ASSERT_TRUE(exists("00000004.q"));
     hy_ob_close(ob);
     ob = reopen();
-    for (uint32_t s = 0; s < 4; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 4; s++) deliver(ob, 0, s);
     TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
     hy_ob_close(ob);
 }
@@ -525,17 +545,17 @@ static void test_ob_failed_unlink_does_not_force_state_writes(void)
     hy_ob_t *ob = op(true);
     hy_ob_stats_t st;
     char a[160], cmd[640];
-    snprintf(a, sizeof a, "%s/00000000.q", odir);
+    snprintf(a, sizeof a, "%s/00000001.q", odir);
     for (unsigned i = 0; i < 100; i++) add(ob, 0x01, i);
-    for (uint32_t s = 0; s < 100; s++) deliver(ob, 0, s);
+    for (uint32_t s = 1; s <= 100; s++) deliver(ob, 0, s);
     /* the segment becomes a non-empty directory: unlink fails */
     snprintf(cmd, sizeof cmd, "rm -f '%s' && mkdir '%s' && touch '%s/x'", a, a, a);
     TEST_ASSERT_EQUAL_INT(0, system(cmd));
     TEST_ASSERT_TRUE(hy_ob_flush(ob, false)); /* forced by the deletable segment */
-    TEST_ASSERT_TRUE(exists("00000000.q"));
+    TEST_ASSERT_TRUE(exists("00000001.q"));
     for (unsigned i = 100; i < 105; i++) {
         add(ob, 0x01, i);
-        deliver(ob, 0, i);
+        deliver(ob, 0, i + 1);
         TEST_ASSERT_FALSE(hy_ob_flush(ob, false)); /* no write per ack while the unlink keeps failing */
     }
     hy_ob_stats(ob, &st);
@@ -557,7 +577,7 @@ static void test_ob_dirty_survives_failed_state_write(void)
     TEST_ASSERT_FALSE(hy_ob_dirty(ob));
     add(ob, 0x01, 0);
     TEST_ASSERT_FALSE(hy_ob_dirty(ob)); /* an append alone owes no state write */
-    deliver(ob, 0, 0);
+    deliver(ob, 0, 1);
     TEST_ASSERT_TRUE(hy_ob_dirty(ob));
     /* state.tmp becomes a non-empty directory: the state write fails */
     snprintf(cmd, sizeof cmd, "mkdir '%s' && touch '%s/x'", t, t);
@@ -577,15 +597,15 @@ static void test_ob_missing_segment_is_skipped(void)
     hy_ob_t *ob = op(true);
     hy_ob_stats_t st;
     char a[160];
-    snprintf(a, sizeof a, "%s/00000000.q", odir);
+    snprintf(a, sizeof a, "%s/00000001.q", odir);
     for (unsigned i = 0; i < 5; i++) add(ob, 0x01, i);
     TEST_ASSERT_EQUAL_INT(0, unlink(a));
     TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(5, st.corrupt);
     TEST_ASSERT_EQUAL_UINT32(0, st.pending[0]);
-    TEST_ASSERT_EQUAL_UINT32(5, add(ob, 0x01, 5));
-    deliver(ob, 0, 5);
+    TEST_ASSERT_EQUAL_UINT32(6, add(ob, 0x01, 5));
+    deliver(ob, 0, 6);
     hy_ob_close(ob);
 }
 
@@ -632,6 +652,7 @@ int main(void)
     RUN_TEST(test_ob_segments_roll_and_delete);
     RUN_TEST(test_ob_seq_survives_empty_reopen);
     RUN_TEST(test_ob_state_writes_coalesced);
+    RUN_TEST(test_ob_fresh_store_starts_at_one);
     RUN_TEST(test_ob_payload_rules);
     RUN_TEST(test_ob_ram_backend_no_files);
     RUN_TEST(test_ob_missing_segment_is_skipped);
