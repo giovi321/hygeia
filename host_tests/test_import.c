@@ -5,6 +5,7 @@
 #include "hy/api.h"
 #include "hy/codec.h"
 #include "hy/import.h"
+#include "hy/integ.h"
 #include "hy/settings.h"
 
 #define D0 1793145600LL /* 2026-10-28 00:00 UTC */
@@ -47,7 +48,7 @@ static const char *build(const hy_med_t *m, size_t n, const hy_log_t *logs, size
                          const uint8_t *reasons, size_t ng, const hy_settings_t *s, const hy_backup_wifi_t *w)
 {
     blen = 0;
-    hy_export_head_t h = { D0, m, n, 0, gaps, reasons, ng, s, w };
+    hy_export_head_t h = { D0, m, n, 0, gaps, reasons, ng, s, w, NULL, false };
     uint32_t mx = 0;
     for (size_t i = 0; i < n; i++) if (m[i].id > mx) mx = m[i].id;
     h.next_id = mx + 1;
@@ -401,6 +402,103 @@ static void test_deep_nesting_refused(void)
     TEST_ASSERT_EQUAL_STRING("log", e.field);
 }
 
+static void integ_sample(hy_integ_t *c)
+{
+    hy_integ_defaults(c);
+    c->mqtt.on = true;
+    strcpy(c->mqtt.url, "mqtt://broker.lan");
+    strcpy(c->mqtt.user, "hygeia");
+    strcpy(c->mqtt.pass, "example-secret");
+    c->n_hooks = 2;
+    c->hook[0].on = true; strcpy(c->hook[0].url, "https://n8n.lan/hook"); c->hook[0].events = HY_IE_ALL;
+    strcpy(c->hook[0].secret, "example-secret");
+    c->hook[1].on = false; strcpy(c->hook[1].url, "http://192.168.1.23/in"); c->hook[1].events = 1;
+}
+
+static const char *build_integ(const hy_med_t *m, size_t n, const hy_integ_t *ic, bool secrets)
+{
+    hy_settings_t s;
+    hy_settings_defaults(&s);
+    blen = 0;
+    hy_export_head_t h = { D0, m, n, m[0].id + 1, NULL, NULL, 0, &s, NULL, ic, secrets };
+    char *head = hy_export_head_json(&h);
+    TEST_ASSERT_NOT_NULL(head);
+    put(head);
+    free(head);
+    put(HY_EXPORT_TAIL);
+    return buf;
+}
+
+static void test_export_no_integ_secrets(void)
+{
+    hy_integ_t ic; integ_sample(&ic);
+    hy_med_t f[1] = { cur[0] };
+    const char *js = build_integ(f, 1, &ic, false);
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"mqtt\""));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"webhooks\""));
+    TEST_ASSERT_NULL(strstr(js, "\"password\""));
+    TEST_ASSERT_NULL(strstr(js, "\"secret\""));
+    TEST_ASSERT_NULL(strstr(js, "example-secret"));
+    TEST_ASSERT_NOT_NULL(strstr(js, "\"password_set\":true"));
+    hy_import_diff_t d; hy_api_err_t e;
+    TEST_ASSERT_EQUAL(HY_OK, hy_import_plan(js, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_TRUE(d.settings);
+    TEST_ASSERT_FALSE(d.secrets);
+}
+
+static void test_export_with_integ_secrets_roundtrip(void)
+{
+    hy_integ_t ic; integ_sample(&ic);
+    hy_med_t f[1] = { cur[0] };
+    const char *js = build_integ(f, 1, &ic, true);
+    TEST_ASSERT_NOT_NULL(strstr(js, "example-secret"));
+    hy_api_err_t e;
+    TEST_ASSERT_EQUAL(HY_OK, hy_import_parse(js, &imp, &e));
+    TEST_ASSERT_NOT_NULL(imp.settings);
+    TEST_ASSERT_TRUE(imp.integ_secrets);
+    hy_integ_t def, back;
+    hy_integ_defaults(&def);
+    TEST_ASSERT_EQUAL(HY_OK, hy_api_integ_from_json(imp.settings, &def, &back, &e));
+    TEST_ASSERT_EQUAL_MEMORY(&ic.mqtt, &back.mqtt, sizeof ic.mqtt);
+    TEST_ASSERT_EQUAL_UINT8(2, back.n_hooks);
+    for (int i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_INT(ic.hook[i].on, back.hook[i].on);
+        TEST_ASSERT_EQUAL_STRING(ic.hook[i].url, back.hook[i].url);
+        TEST_ASSERT_EQUAL_UINT16(ic.hook[i].events, back.hook[i].events);
+        TEST_ASSERT_EQUAL_STRING(ic.hook[i].secret, back.hook[i].secret);
+    }
+    char *saved = imp.settings;
+    hy_import_free(&imp);
+    TEST_ASSERT_NULL(imp.settings);
+    (void)saved;
+}
+
+static void test_import_diff_secrets_from_integ(void)
+{
+    hy_import_diff_t d; hy_api_err_t e;
+    const char *js = "{\"v\":1,\"meds\":[],\"settings\":{\"webhooks\":[{\"url\":\"https://n8n.lan/a\",\"secret\":\"example-secret\"}]}}";
+    TEST_ASSERT_EQUAL(HY_OK, hy_import_plan(js, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_TRUE(d.settings);
+    TEST_ASSERT_TRUE(d.secrets);
+    js = "{\"v\":1,\"meds\":[],\"settings\":{\"mqtt\":{\"password\":\"example-secret\"}}}";
+    TEST_ASSERT_EQUAL(HY_OK, hy_import_plan(js, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_TRUE(d.secrets);
+    js = "{\"v\":1,\"meds\":[],\"settings\":{\"webhooks\":[{\"url\":\"https://n8n.lan/a\"}]}}";
+    TEST_ASSERT_EQUAL(HY_OK, hy_import_plan(js, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_FALSE(d.secrets);
+}
+
+static void test_import_bad_integ_fails_preview(void)
+{
+    hy_import_diff_t d; hy_api_err_t e;
+    const char *js = "{\"v\":1,\"meds\":[],\"settings\":{\"webhooks\":[{\"url\":\"ftp://n8n.lan\"}]}}";
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_import_plan(js, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_EQUAL_STRING("webhooks.0.url", e.field);
+    js = "{\"v\":1,\"meds\":[],\"settings\":{\"mqtt\":{\"on\":true}}}";
+    TEST_ASSERT_EQUAL(HY_E_INVALID, hy_import_plan(js, HY_IMPORT_MERGE, cur, 3, exists_cb, NULL, &d, &e));
+    TEST_ASSERT_EQUAL_STRING("mqtt.url", e.field);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -416,6 +514,10 @@ int main(void)
     RUN_TEST(test_import_roundtrip);
     RUN_TEST(test_too_many_meds);
     RUN_TEST(test_deep_nesting_refused);
+    RUN_TEST(test_export_no_integ_secrets);
+    RUN_TEST(test_export_with_integ_secrets_roundtrip);
+    RUN_TEST(test_import_diff_secrets_from_integ);
+    RUN_TEST(test_import_bad_integ_fails_preview);
     free(buf);
     return UNITY_END();
 }

@@ -67,6 +67,10 @@ bool hy_api_integ_add(struct cJSON *obj, const hy_integ_t *c, bool secrets);
  * LVGL task only. */
 hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_integ_t *out, hy_api_err_t *err);
 
+/* Same rules as hy_api_integ_from_json onto the defaults, result discarded; uses its own heap scratch, so any task
+ * may call it. HY_E_IO when out of memory. */
+hy_err_t hy_api_integ_check_json(const char *body, hy_api_err_t *err);
+
 /* Overwrites the "mqtt"."password" and "webhooks"[]."secret" strings of a parsed settings body. Call it on every
  * tree parsed from a settings body before cJSON_Delete, so no secret stays in freed heap. NULL is fine. */
 void hy_api_integ_wipe_tree(struct cJSON *root);

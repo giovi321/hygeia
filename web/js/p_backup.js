@@ -16,7 +16,7 @@ HY.settingsLinks.push({ href: "#/settings/backup", text: "Backup", note: "Export
     lines.push("Log entries: " + (l.add | 0) + " new, " + (l.dup | 0) + " already on the device" +
       (l.skip ? ", " + (l.skip | 0) + " skipped because their medicine is not in the file" : ""));
     if (g.add) { lines.push("Untracked periods: " + (g.add | 0) + " new"); }
-    if (r.settings) { lines.push("The file holds settings" + (r.secrets ? " and Wi-Fi passwords" : "")); }
+    if (r.settings) { lines.push("The file holds settings" + (r.secrets ? " and passwords" : "")); }
     return lines;
   }
 
@@ -40,8 +40,8 @@ HY.settingsLinks.push({ href: "#/settings/backup", text: "Backup", note: "Export
       HY.h("p", { class: "mut" }, "CSV holds the log and opens in a spreadsheet. JSON holds the medicines, the log and the settings and can be imported again."),
       HY.h("div", { class: "actions" },
         HY.h("a", { class: "btn", href: "/api/export.csv", download: "" }, "Download CSV"), jsonLink),
-      HY.h("label", { class: "check", for: "b-secrets" }, pw, "Include Wi-Fi passwords"),
-      HY.h("div", { class: "hint" }, "Off by default. When ticked, the JSON file holds the saved Wi-Fi passwords and the access point password in plain text: keep the file private.")));
+      HY.h("label", { class: "check", for: "b-secrets" }, pw, "Include passwords"),
+      HY.h("div", { class: "hint" }, "Off by default. When ticked, the JSON file holds the saved Wi-Fi passwords, the access point password, the MQTT password and the webhook secrets in plain text: keep the file private.")));
 
     // ---- import ----
     var pick = HY.h("input", { id: "b-file", type: "file", accept: ".json,application/json" });

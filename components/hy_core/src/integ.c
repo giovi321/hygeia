@@ -354,7 +354,8 @@ void hy_api_integ_wipe_tree(struct cJSON *o)
  * hy_api_integ_from_json, so one copy is enough. */
 static HY_EXT_BSS hy_integ_t merge_scratch;
 
-hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_integ_t *out, hy_api_err_t *err)
+static hy_err_t integ_merge(const char *body, const hy_integ_t *cur, hy_integ_t *out, hy_integ_t *scratch,
+                            hy_api_err_t *err)
 {
     if (!body || !cur || !out) return hy_api_fail(err, HY_E_INVALID, NULL);
     cJSON *o = cJSON_ParseWithOpts(body, NULL, true);
@@ -362,7 +363,7 @@ hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_inte
         cJSON_Delete(o);
         return hy_api_fail(err, HY_E_INVALID, NULL);
     }
-    hy_integ_t *w = &merge_scratch;
+    hy_integ_t *w = scratch;
     *w = *cur;
     hy_err_t r = hy_api_reject_dups(o, err);
 
@@ -390,6 +391,22 @@ hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_inte
     wipe(w, sizeof *w);
     hy_api_integ_wipe_tree(o);
     cJSON_Delete(o);
+    return r;
+}
+
+hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_integ_t *out, hy_api_err_t *err)
+{
+    return integ_merge(body, cur, out, &merge_scratch, err);
+}
+
+hy_err_t hy_api_integ_check_json(const char *body, hy_api_err_t *err)
+{
+    hy_integ_t *v = malloc(3 * sizeof *v);   /* defaults, result, scratch: off the stack */
+    if (!v) return hy_api_fail(err, HY_E_IO, NULL);
+    hy_integ_defaults(&v[0]);
+    hy_err_t r = integ_merge(body, &v[0], &v[1], &v[2], err);
+    wipe(v, 3 * sizeof *v);
+    free(v);
     return r;
 }
 

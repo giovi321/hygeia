@@ -193,6 +193,7 @@ typedef struct {
     uint8_t reasons[HY_IMPORT_GAPS_MAX];
     size_t n_gaps;
     hy_settings_t settings;
+    hy_integ_t integ;      /* may hold the MQTT password and webhook secrets: wiped with the rest */
 } xhead_t;
 
 static void job_export_head(void *arg)
@@ -209,6 +210,7 @@ static void job_export_head(void *arg)
     c->next_id = st->load_next_id ? st->load_next_id(NULL) : 0;
     c->n_gaps = st->query_gaps ? st->query_gaps(NULL, LOG_FROM, LOG_TO, c->gaps, c->reasons, HY_IMPORT_GAPS_MAX) : 0;
     c->settings = *hy_settings();
+    c->integ = *hy_integ_cfg();
 }
 
 typedef struct {
@@ -315,6 +317,7 @@ static void do_export(wjob_t *w)
             .meds = h->meds, .n_meds = h->n_meds, .next_id = h->next_id,
             .gaps = h->gaps, .gap_reasons = h->reasons, .n_gaps = h->n_gaps,
             .settings = &h->settings, .wifi = wifi,
+            .integ = &h->integ, .integ_secrets = w->secrets,
         };
         head = hy_export_head_json(&eh);
         if (wifi) {
@@ -536,35 +539,18 @@ static void job_stored_gaps(void *arg)
     c->n = st->query_gaps ? st->query_gaps(NULL, LOG_FROM, LOG_TO, c->gaps, NULL, HY_IMPORT_GAPS_MAX) : 0;
 }
 
-/* Settings from the file merged onto the live ones, as PUT /api/settings does. */
+/* Settings from the file merged onto the live ones, the integration members included, by the rules of
+ * PUT /api/settings: a missing secret keeps the stored one, and the running integrations pick up the result. */
 typedef struct {
-    char json[1024];
-    bool failed;
-    esp_err_t save;
+    char json[4096];
+    web_settings_t w;
 } iset_t;
 
 static void job_settings(void *arg)
 {
     iset_t *c = arg;
-    hy_settings_t old = *hy_settings();
-    hy_settings_t next;
-    hy_api_err_t ae;
-    if (hy_api_settings_from_json(c->json, &old, &next, &ae) != HY_OK) {
-        c->failed = true;
-        return;
-    }
-    next.rot = old.rot;
-    c->save = hy_settings_update(&next);
-    hy_settings_t now = *hy_settings();
-    if (now.cab_window_min != old.cab_window_min) {
-        hy_sched_run_invalidate();   /* the attention instant depends on the window */
-    }
-    hy_audio_set_volume(now.volume);
-    hy_net_set_keep_batt(now.wifi_keep_batt);
-    const hy_web_ui_t *ui = web_ui();
-    if (ui && ui->settings_applied) {
-        ui->settings_applied(&old, &now);
-    }
+    web_settings_apply_json(c->json, &c->w);
+    wipe(c->json, sizeof c->json);
 }
 
 /* ---------------------------------------------------------------- import: merge commit */
@@ -1030,9 +1016,11 @@ static void apply_settings(iwork_t *k, bool *settings_ok, bool *secrets_ok)
         iset_t *c = &k->u.set;
         memset(c, 0, sizeof *c);
         strcpy(c->json, imp->settings);
-        *settings_ok = run_job(job_settings, c, sizeof *c, WRITE_JOB_MS) == ESP_OK && !c->failed && c->save == ESP_OK;
+        *settings_ok = run_job(job_settings, c, sizeof *c, WRITE_JOB_MS) == ESP_OK && !c->w.failed &&
+                       !c->w.not_taught && c->w.save == ESP_OK && c->w.integ_save == ESP_OK;
+        wipe(c, sizeof *c);
     }
-    if (imp->has_wifi) {
+    if (imp->has_wifi || imp->integ_secrets) {
         bool ok = true;
         for (size_t i = 0; i < imp->wifi.n; i++) {
             if (hy_net_add(imp->wifi.ssid[i], imp->wifi.pass[i]) != ESP_OK) {
@@ -1040,6 +1028,9 @@ static void apply_settings(iwork_t *k, bool *settings_ok, bool *secrets_ok)
             }
         }
         if (imp->wifi.ap_pass[0] && hy_net_ap_pass_set(imp->wifi.ap_pass) != ESP_OK) {
+            ok = false;
+        }
+        if (imp->integ_secrets && !*settings_ok) {
             ok = false;
         }
         *secrets_ok = ok;

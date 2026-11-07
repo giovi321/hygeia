@@ -69,7 +69,7 @@ The mode (Off, Wi-Fi, Access point), the saved networks with Forget, a form to a
 Export:
 
 - Download CSV: the log for a spreadsheet. A note that starts with `=`, `+`, `-` or `@` gets a leading `'` so a spreadsheet does not run it
-- Download JSON: medicines, log, untracked periods and settings. The box "Include Wi-Fi passwords" is off by default. When it is on, the file holds the saved Wi-Fi passwords and the access point password in plain text: keep that file private
+- Download JSON: medicines, log, untracked periods and settings, including the MQTT and webhook settings. The box "Include passwords" is off by default. When it is on, the file also holds the saved Wi-Fi passwords, the access point password, the MQTT password and the webhook secrets in plain text: keep that file private. Without the box the file shows only whether a password or secret is set
 
 Import takes a JSON file from Export:
 
@@ -77,7 +77,7 @@ Import takes a JSON file from Export:
 2. Tap Preview. The device counts new, changed and unchanged medicines and new and duplicate log entries, and changes nothing
 3. Tap Import. For Replace the page first shows "Everything on the device is replaced. The current data is kept in a backup folder until the next import" and asks for confirmation
 
-If the file holds settings or Wi-Fi networks, a box offers to apply them too. Dose entries made while a replace runs make it stop with "changed": nothing is replaced, and you preview and import again. The device accepts files up to 4 MB.
+If the file holds settings or Wi-Fi networks, a box offers to apply them too. The MQTT and webhook settings follow the same rules as saving them in Settings: a file without passwords keeps the MQTT password and each webhook's secret already on the device, a webhook list in the file replaces the list slot by slot, and the integrations use the new values at once. Dose entries made while a replace runs make it stop with "changed": nothing is replaced, and you preview and import again. The device accepts files up to 4 MB.
 
 ## Firmware
 

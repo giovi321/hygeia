@@ -166,7 +166,7 @@ Snoozes are not log entries; they are scheduler state, and are published as even
 - Cabinet open template (5 taught takes, at most 12076 bytes; a file with 3 or 4 takes from an earlier version still loads): LittleFS
 - Secrets (Wi-Fi passwords, MQTT password, webhook secrets, paired-browser session tokens): NVS (MQTT password and webhook secrets in namespace `integ`), never returned by the API and never included in an export unless the user ticks "include secrets"
 - Integration settings (MQTT, Home Assistant discovery, webhooks): NVS namespace `integ`
-- Export: CSV (log only) and JSON (medicines, log, settings). Import: JSON, with a preview of what changes and a choice of merge or replace
+- Export: CSV (log only) and JSON (medicines, log, settings including the `mqtt` and `webhooks` members; their password and secrets only with "include secrets"). An import applies those members by the settings PUT rules. Import: JSON, with a preview of what changes and a choice of merge or replace
 - Backup/restore in the web UI uses the JSON export
 
 ## Scheduling

@@ -292,15 +292,33 @@ static hy_err_t parse_head(const cJSON *root, hy_import_t *imp, hy_api_err_t *er
         hy_api_err_t se;
         hy_settings_defaults(&base);
         char *txt = cJSON_IsObject(set) ? cJSON_PrintUnformatted(set) : NULL;
-        if (!txt || hy_api_settings_from_json(txt, &base, &out, &se) != HY_OK) {
+        hy_api_err_t ie;
+        hy_err_t sr = !txt ? HY_E_INVALID : hy_api_settings_from_json(txt, &base, &out, &se);
+        if (sr == HY_OK) {
+            /* the mqtt and webhooks members: a bad one fails the preview with its field */
+            sr = hy_api_integ_check_json(txt, &ie);
+            if (sr != HY_OK) {
+                if (txt) wipe(txt, strlen(txt));
+                cJSON_free(txt);
+                return hy_api_fail(err, sr, sr == HY_E_INVALID ? ie.field : NULL);
+            }
+        }
+        if (sr != HY_OK) {
+            if (txt) wipe(txt, strlen(txt));
             cJSON_free(txt);
             return hy_api_fail(err, HY_E_INVALID, "settings");
         }
         size_t n = strlen(txt);
         imp->settings = malloc(n + 1);
         if (imp->settings) memcpy(imp->settings, txt, n + 1);
+        wipe(txt, n);
         cJSON_free(txt);
         if (!imp->settings) return hy_api_fail(err, HY_E_IO, NULL);
+        const cJSON *mq = member(set, "mqtt");
+        imp->integ_secrets = cJSON_IsObject(mq) && cJSON_IsString(member(mq, "password"));
+        const cJSON *wh = member(set, "webhooks"), *h;
+        cJSON_ArrayForEach(h, wh)
+            if (cJSON_IsObject(h) && cJSON_IsString(member(h, "secret"))) imp->integ_secrets = true;
     }
 
     cJSON *w = member(root, "wifi");
@@ -315,8 +333,10 @@ static hy_err_t parse_head(const cJSON *root, hy_import_t *imp, hy_api_err_t *er
 void hy_import_free(hy_import_t *imp)
 {
     if (!imp) return;
+    if (imp->settings) wipe(imp->settings, strlen(imp->settings));   /* it can hold the MQTT password and secrets */
     free(imp->settings);
     imp->settings = NULL;
+    imp->integ_secrets = false;
     wipe(&imp->wifi, sizeof imp->wifi);
     imp->has_wifi = false;
 }
@@ -350,6 +370,7 @@ hy_err_t hy_import_parse(const char *json, hy_import_t *imp, hy_api_err_t *err)
     hy_err_t r = hy_api_reject_dups(root, err);
     if (r == HY_OK) r = parse_head(root, imp, err);
     wipe_strings(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
+    hy_api_integ_wipe_tree(cJSON_GetObjectItemCaseSensitive(root, "settings"));
     cJSON_Delete(root);
     if (r != HY_OK) {
         hy_import_free(imp);
@@ -433,7 +454,7 @@ hy_err_t hy_import_plan_parsed(hy_import_t *imp, hy_import_mode_t mode, const hy
     if (!imp || !diff || (n_cur && !cur) || n_cur > HY_MAX_STORED) return hy_api_fail(err, HY_E_INVALID, NULL);
     memset(diff, 0, sizeof *diff);
     diff->settings = imp->settings != NULL;
-    diff->secrets = imp->has_wifi;
+    diff->secrets = imp->has_wifi || imp->integ_secrets;
     diff->gaps_add = imp->n_gaps;
 
     /* the resulting medicine list, for the rule check */
@@ -595,8 +616,10 @@ static bool build_head(cJSON *root, const hy_export_head_t *h)
         cJSON_AddItemToArray(gaps, g);
     }
     if (h->settings) {
-        char *s = hy_api_settings_json(h->settings);
+        char *s = h->integ ? hy_api_settings_full_json(h->settings, h->integ, h->integ_secrets)
+                           : hy_api_settings_json(h->settings);
         cJSON *so = s ? cJSON_Parse(s) : NULL;
+        if (s) wipe(s, strlen(s));   /* it can hold the MQTT password and webhook secrets */
         free(s);
         if (!so) return false;
         cJSON_AddItemToObject(root, "settings", so);
@@ -612,6 +635,7 @@ char *hy_export_head_json(const hy_export_head_t *h)
     if (!root) return NULL;
     char *txt = build_head(root, h) ? cJSON_PrintUnformatted(root) : NULL;
     wipe_strings(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
+    hy_api_integ_wipe_tree(cJSON_GetObjectItemCaseSensitive(root, "settings"));
     cJSON_Delete(root);
     if (!txt) return NULL;
     size_t n = strlen(txt);

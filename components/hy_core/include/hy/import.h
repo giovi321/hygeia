@@ -7,6 +7,7 @@
 #include "hy/actions.h"
 #include "hy/api.h"
 #include "hy/gap.h"
+#include "hy/integ.h"
 #include "hy/netcfg.h"
 #include "hy/settings.h"
 #include "hy/types.h"
@@ -14,7 +15,8 @@
 /*
  * Backup file (export and import), one JSON object:
  *   {"v":1,"api":1,"exported":<epoch s>,"meds":[<codec medicine>...],"next_id":n,
- *    "gaps":[{"s","e","r"}...],"settings":{<hy_api_settings_json>},
+ *    "gaps":[{"s","e","r"}...],"settings":{<hy_api_settings_full_json>: the settings plus "mqtt" and "webhooks"; their password and secrets only
+ *    with secrets},
  *    "wifi":{"networks":[{"ssid","pass"}],"ap_pass":".."} (only in an export with secrets),
  *    "log":[<codec log line>...]}
  * The export writes "log" as the last member so it can be streamed one entry at a time. The import parses
@@ -67,7 +69,8 @@ typedef struct {
     hy_gap_t gaps[HY_IMPORT_GAPS_MAX];
     uint8_t gap_reasons[HY_IMPORT_GAPS_MAX];
     size_t n_gaps;
-    char *settings;      /* the "settings" object as JSON text (malloc'd), NULL when absent */
+    char *settings;      /* the "settings" object as JSON text (malloc'd), NULL when absent; may hold secrets */
+    bool integ_secrets;  /* the settings carry mqtt.password or a webhooks[i].secret */
     bool has_wifi;
     hy_backup_wifi_t wifi;
     const char *log;     /* the '[' of the log array inside the parsed text, NULL when absent */
@@ -129,6 +132,8 @@ typedef struct {
     size_t n_gaps;
     const hy_settings_t *settings;       /* NULL: no "settings" member */
     const hy_backup_wifi_t *wifi;        /* NULL: no "wifi" member (an export without secrets) */
+    const hy_integ_t *integ;             /* NULL: no "mqtt" and "webhooks" members; needs settings */
+    bool integ_secrets;                  /* integ: write the MQTT password and webhook secrets too */
 } hy_export_head_t;
 
 /* Everything before the log entries: '{' ... ,"log":[ (malloc'd, release with free()). The entries follow as
