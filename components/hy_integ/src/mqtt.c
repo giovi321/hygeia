@@ -1202,7 +1202,16 @@ static void ha_check(const hy_mq_ctx_t *c)
         return;
     }
     if (strcmp(s_pfx, c->cfg->ha_prefix) != 0) {
-        if (s_ha && !s_req_old) {   /* what was published under the old prefix is removed by a scan of it */
+        if (s_ha && s_req_old && strcmp(s_old_pfx, c->cfg->ha_prefix) == 0) {
+            /* Back to the prefix whose removal is still pending: keep that prefix, and remove what was published under
+             * the one just left. A running scan of the former judges nothing wrong (its topics no longer match the
+             * prefix) and runs again for the new one. */
+            strlcpy(s_old_pfx, s_pfx, sizeof s_old_pfx);
+            s_scan_rounds = 0;
+            if (s_scan_ph != SC_IDLE && s_scan_old) {
+                s_scan_redo = true;
+            }
+        } else if (s_ha && !s_req_old) {   /* what was published under the old prefix is removed by a scan of it */
             strlcpy(s_old_pfx, s_pfx, sizeof s_old_pfx);
             s_req_old = true;
             s_scan_rounds = 0;
