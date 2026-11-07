@@ -9,6 +9,7 @@
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -50,8 +51,7 @@ static const char *TAG = "integ_mq";
 #define MQ_HOLD_MS        5000    /* the client refused a publish */
 #define MQ_IO_MS          10000   /* a transient outbox read failure */
 #define MQ_EV_BATCH       20      /* expired records passed over per pass */
-#define MQ_QLEN           32      /* a webhook POST holds the delivery task about 10 s; see post_data for the reserve */
-#define MQ_RESERVE        12      /* queue slots kept for commands and acknowledgements: other messages stop at the rest */
+#define MQ_QLEN           32      /* a webhook POST holds the delivery task about 10 s; the pump empties it between steps */
 #define MQ_SETTLE_MS      1500    /* the scheduler snapshot is rewritten at the next tick after an event */
 #define MQ_STATE_MS       60000   /* state job period while connected */
 #define MQ_DEVICE_MS      300000  /* the device state goes out at least this often (the RSSI changes without a trigger) */
@@ -59,6 +59,12 @@ static const char *TAG = "integ_mq";
 #define MQ_TOO_SOON_ROWS  32
 #define MQ_POOL           4
 #define MQ_CMD_MAX        512     /* bytes of a command payload */
+#define MQ_PACE_MS        50      /* one discovery or cleanup publish per this time */
+#define MQ_SCAN_MS        3000    /* the cleanup scan listens this long */
+#define MQ_SCAN_ARENA     32768   /* PSRAM: the retained topics of one scan (about 300 fit for 50 medicines) */
+#define MQ_SCAN_ROUNDS    6       /* scans in a row that may follow a full arena or a lost clear */
+#define MQ_ADH_MS         (30 * 60 * 1000)   /* adherence is computed at most this often after an event */
+#define MQ_NDMED          (2 * HY_MAX_MEDS)  /* medicines with discovery state: active ones and those being cleared */
 
 /* ---------------------------------------------------------------- shared with the MQTT task */
 
@@ -83,13 +89,22 @@ static HY_EXT_BSS char s_pool[MQ_POOL][MQ_CMD_MAX + 1];
 static atomic_uint s_pool_free = (1u << MQ_POOL) - 1;   /* bit i: slot i free */
 static atomic_uint s_link;                      /* (generation << 1) | connected; written by the handler only */
 static atomic_uint s_link_err;                  /* hy_integ_err_t of the last ERROR event, cleared on CONNECTED */
-static atomic_uint s_q_drops, s_cmd_drops, s_scan_drops;
+static atomic_uint s_q_drops, s_cmd_drops;
 static atomic_uint s_stack_min = UINT32_MAX;    /* MQTT task stack high-water mark, bytes */
 static char s_base[HY_INTEG_TOPIC_MAX + 1];     /* base of the running client, read by the handler */
 
+/* The cleanup scan stores every retained topic it receives here, in the handler, so none is lost to the queue:
+ * [length byte][topic bytes] records. s_scan_on, s_arena_len and the arena are written under s_scan_mux while
+ * s_scan_on is true; the delivery task reads the arena only after it cleared s_scan_on under the same lock. */
+static portMUX_TYPE s_scan_mux = portMUX_INITIALIZER_UNLOCKED;
+static HY_EXT_BSS uint8_t s_arena[MQ_SCAN_ARENA];
+static size_t s_arena_len;
+static bool s_scan_on;
+static atomic_bool s_scan_over;                 /* a record did not fit: the scan is incomplete */
+
 /* ---------------------------------------------------------------- delivery task state */
 
-enum { MQF_FREE = 0, MQF_ONLINE, MQF_EVENT, MQF_STATE };
+enum { MQF_FREE = 0, MQF_ONLINE, MQF_EVENT, MQF_STATE, MQF_DISC, MQF_CLEAR };
 #define MQ_DEVICE_ID UINT32_MAX   /* seq of a MQF_STATE flight that carries the device state */
 /* Work owed after a connect, retried when a publish or subscribe is refused. */
 enum { TODO_ONLINE = 1u << 0, TODO_SUB0 = 1u << 1, TODO_SUBS = 7u << 1 };
@@ -98,8 +113,8 @@ typedef struct {
     int msg_id;
     uint8_t kind;
     int64_t sent_ms;
-    uint32_t seq;          /* MQF_EVENT: the outbox record */
-    uint32_t epoch;        /* MQF_EVENT: the outbox open it came from */
+    uint32_t seq;          /* MQF_EVENT: the outbox record; MQF_STATE: the medicine id; MQF_DISC: the medicine id */
+    uint32_t epoch;        /* MQF_EVENT: the outbox open it came from; MQF_DISC: object, DISC_DEV and DISC_RETRACT bits */
 } mq_flight_t;
 
 static esp_mqtt_client_handle_t s_cl;
@@ -148,9 +163,11 @@ static int64_t s_state_at;                      /* next state job (monotonic); 0
 static bool s_dev_have;
 static uint32_t s_dev_hash;
 static int64_t s_dev_at;
+static char s_node[16];                         /* discovery node id hygeia_<4 hex> */
+static int16_t s_adh_pct = -1;                  /* 30 day adherence of the last pass, -1 unknown */
 
 #if CONFIG_HY_DEBUG_CONSOLE
-static const char *const k_flight_name[] = {"", "online", "event", "state"};
+static const char *const k_flight_name[] = {"", "online", "event", "state", "config", "clear"};
 typedef struct {
     hy_mqtt_state_t state;
     uint8_t err;
@@ -161,6 +178,10 @@ typedef struct {
     int ids[MQ_INFLIGHT];
     uint8_t kinds[MQ_INFLIGHT];
     uint32_t heap_before;
+    bool ha;
+    uint8_t scan_ph, scan_rounds;
+    unsigned arena_len, scan_cleared, cfg_sent, cfg_wanted;
+    int16_t adh;
 } mq_dbg_t;
 static portMUX_TYPE s_dbg_mux = portMUX_INITIALIZER_UNLOCKED;
 static HY_EXT_BSS mq_dbg_t s_dbg;
@@ -225,8 +246,9 @@ static void post(const mq_msg_t *m)
     hy_integ_notify(HY_IB_MQTT);
 }
 
-/* One queue message per received message: topic (up to HY_MQTT_TOPIC_LEN bytes), retain flag and length, for
- * every topic; the payload only for a command topic, at most MQ_CMD_MAX bytes. */
+/* A command topic goes to the queue with its payload (at most MQ_CMD_MAX bytes). Any other topic is a retained one
+ * of the cleanup scan: while a scan listens, its topic is stored in the arena (not in the queue); otherwise it is
+ * ignored. */
 static void post_data(const esp_mqtt_event_t *ev)
 {
     if (ev->current_data_offset != 0) {
@@ -251,32 +273,41 @@ static void post_data(const esp_mqtt_event_t *ev)
     uint32_t id;
     hy_mqtt_cmd_t cmd;
     bool is_cmd = !m.trunc && tl && hy_mqtt_parse_cmd(s_base, m.topic, tl, &id, &cmd);
-    if (!is_cmd && s_q && uxQueueMessagesWaiting(s_q) + MQ_RESERVE >= MQ_QLEN) {
-        /* Any other message (a retained topic of the cleanup scan) stops short of the slots kept for commands and
-         * acknowledgements. The count is shown and logged by the delivery task. */
-        atomic_fetch_add(&s_scan_drops, 1);
+    if (!is_cmd) {
+        /* A retained topic of the cleanup scan: stored whole, never queued. */
+        if (m.retain && m.total_len > 0 && !m.trunc && tl) {
+            portENTER_CRITICAL(&s_scan_mux);
+            if (s_scan_on) {
+                if (s_arena_len + tl + 1 <= sizeof s_arena) {
+                    s_arena[s_arena_len++] = (uint8_t)tl;
+                    memcpy(s_arena + s_arena_len, m.topic, tl);
+                    s_arena_len += tl;
+                } else {
+                    atomic_store(&s_scan_over, true);
+                }
+            }
+            portEXIT_CRITICAL(&s_scan_mux);
+        }
         return;
     }
-    if (is_cmd) {
-        m.cmd = true;
-        if (m.total_len > MQ_CMD_MAX || ev->data_len != ev->total_data_len) {
-            atomic_fetch_add(&s_cmd_drops, 1);
-            ESP_LOGW(TAG, "command payload of %u bytes dropped (at most %d)", (unsigned)m.total_len, MQ_CMD_MAX);
-            return;
-        }
-        int k = pool_take();
-        if (k < 0) {
-            atomic_fetch_add(&s_cmd_drops, 1);
-            ESP_LOGW(TAG, "command dropped: no free payload slot");
-            return;
-        }
-        if (ev->data_len > 0) {
-            memcpy(s_pool[k], ev->data, (size_t)ev->data_len);
-        }
-        s_pool[k][ev->data_len > 0 ? ev->data_len : 0] = '\0';
-        m.pool = (int8_t)k;
-        m.pay_len = (uint16_t)(ev->data_len > 0 ? ev->data_len : 0);
+    m.cmd = true;
+    if (m.total_len > MQ_CMD_MAX || ev->data_len != ev->total_data_len) {
+        atomic_fetch_add(&s_cmd_drops, 1);
+        ESP_LOGW(TAG, "command payload of %u bytes dropped (at most %d)", (unsigned)m.total_len, MQ_CMD_MAX);
+        return;
     }
+    int k = pool_take();
+    if (k < 0) {
+        atomic_fetch_add(&s_cmd_drops, 1);
+        ESP_LOGW(TAG, "command dropped: no free payload slot");
+        return;
+    }
+    if (ev->data_len > 0) {
+        memcpy(s_pool[k], ev->data, (size_t)ev->data_len);
+    }
+    s_pool[k][ev->data_len > 0 ? ev->data_len : 0] = '\0';
+    m.pool = (int8_t)k;
+    m.pay_len = (uint16_t)(ev->data_len > 0 ? ev->data_len : 0);
     post(&m);
 }
 
@@ -350,6 +381,16 @@ static bool fl_has_event(void)
 {
     for (int i = 0; i < MQ_INFLIGHT; i++) {
         if (s_fl[i].kind == MQF_EVENT) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool fl_has(uint8_t kind)
+{
+    for (int i = 0; i < MQ_INFLIGHT; i++) {
+        if (s_fl[i].kind == kind) {
             return true;
         }
     }
@@ -498,14 +539,9 @@ static void run_cmd(const hy_mq_ctx_t *x, uint32_t id, hy_mqtt_cmd_t cmd, const 
 
 /* ---------------------------------------------------------------- received messages */
 
-/* A message on a subscribed topic. A command that is not retained runs; other topics (the retained topics of the
- * cleanup scan) are not handled here. */
+/* A command message. One that is not retained runs. */
 static void on_message(hy_mq_ctx_t *c, const mq_msg_t *m, const char *payload)
 {
-    if (!m->cmd) {
-        ESP_LOGD(TAG, "other message, %u bytes", (unsigned)m->total_len);
-        return;
-    }
     uint32_t id;
     hy_mqtt_cmd_t cmd;
     if (!hy_mqtt_cmd_accept(m->retain) || !hy_mqtt_parse_cmd(s_base, m->topic, m->topic_len, &id, &cmd)) {
@@ -516,6 +552,9 @@ static void on_message(hy_mq_ctx_t *c, const mq_msg_t *m, const char *payload)
 
 static void state_lost(uint32_t seq);
 static void state_reset(void);
+static void disc_state_reset(void);
+static void disc_sync(void);
+static void flight_lost(const mq_flight_t *f);
 
 /* One queue message: an acknowledgement (PUBLISHED or DELETED) or a received message. */
 static void handle(hy_mq_ctx_t *c, const mq_msg_t *m)
@@ -535,12 +574,7 @@ static void handle(hy_mq_ctx_t *c, const mq_msg_t *m)
     }
     /* DELETED of the event in flight: the record stays at the head and goes out again with a new msg id */
     if (m->kind == MQK_DELETED) {
-        if (f->kind == MQF_ONLINE) {
-            s_todo |= TODO_ONLINE;
-            s_todo_at = 0;
-        } else if (f->kind == MQF_STATE) {
-            state_lost(f->seq);
-        }
+        flight_lost(f);
     }
     memset(f, 0, sizeof *f);
 }
@@ -550,11 +584,11 @@ static void drain(hy_mq_ctx_t *c)
     while (s_q && xQueueReceive(s_q, &s_msg, 0) == pdTRUE) {
         handle(c, &s_msg);
     }
-    unsigned d = atomic_load(&s_q_drops) + atomic_load(&s_cmd_drops) + atomic_load(&s_scan_drops);
+    unsigned d = atomic_load(&s_q_drops) + atomic_load(&s_cmd_drops);
     if (d != s_drops_seen) {   /* logged here, not in the MQTT task */
         s_drops_seen = d;
-        ESP_LOGW(TAG, "messages dropped so far: queue %u, command %u, other %u", (unsigned)atomic_load(&s_q_drops),
-                 (unsigned)atomic_load(&s_cmd_drops), (unsigned)atomic_load(&s_scan_drops));
+        ESP_LOGW(TAG, "messages dropped so far: queue %u, command %u", (unsigned)atomic_load(&s_q_drops),
+                 (unsigned)atomic_load(&s_cmd_drops));
     }
 }
 
@@ -642,6 +676,7 @@ static void mq_start(hy_mq_ctx_t *c)
     }
     memcpy(&s_run, c->cfg, sizeof s_run);
     strlcpy(s_base, s_run.base, sizeof s_base);
+    hy_disc_node_id(c->client_id, s_node);
     hy_url_canon(s_run.url, s_uri, sizeof s_uri);
     memset(&s_mc, 0, sizeof s_mc);
     s_mc.broker.address.uri = s_uri;
@@ -829,6 +864,7 @@ static void state_publish(void)
     }
     /* The device: when anything but the RSSI changed, and at least every MQ_DEVICE_MS for the RSSI. */
     hy_mqtt_device_t d = s_sctx.dev;
+    d.adherence = s_adh_pct;
     int8_t rssi = d.rssi;
     d.rssi = 0;
     int n = hy_mqtt_device_state(&d, s_jbuf, sizeof s_jbuf);
@@ -875,6 +911,7 @@ static void state_pass(const hy_mq_ctx_t *c)
         }
         if (ok) {
             s_have_ctx = true;
+            disc_sync();
             s_st_pend = true;
             s_pend_at = 0;
             s_state_at = now + MQ_STATE_MS;
@@ -896,6 +933,553 @@ static void state_reset(void)
     s_pend_at = 0;
     s_state_at = 0;
     s_dev_have = false;
+    disc_state_reset();
+}
+
+/* ---------------------------------------------------------------- Home Assistant discovery */
+
+/* Per medicine: the objects wanted now (want), those that may sit retained at the broker (held) and those published
+ * on this connection with the current name (sent). held minus want is cleared with an empty retained publish, want
+ * minus sent is published. The configs go out one per MQ_PACE_MS through the in-flight table. */
+#define DISC_MED_ALL ((1u << HY_DO_MED_COUNT) - 1)
+#define DISC_DEV_ALL ((1u << HY_DO_DEV_COUNT) - 1)
+#define DISC_DEV     0x100u   /* epoch of a MQF_DISC flight: a device object */
+#define DISC_RETRACT 0x200u   /* ... an empty publish */
+
+typedef struct {
+    uint32_t id, hash;
+    uint8_t want, held, sent;
+    bool gone, pills;
+    char name[33];
+} mq_dmed_t;
+
+static HY_EXT_BSS mq_dmed_t s_dmed[MQ_NDMED];
+static size_t s_n_dmed;
+static uint8_t s_ddev_sent;                     /* device objects published on this connection */
+static HY_EXT_BSS hy_disc_med_t s_dm[HY_MAX_MEDS];   /* the active medicines of the last state job, for the rules */
+static size_t s_n_dm;
+static bool s_ha, s_ha_init;                    /* discovery on, and whether it was read on this connection */
+static char s_pfx[HY_INTEG_TOPIC_MAX + 1];      /* discovery prefix in use */
+static char s_old_pfx[HY_INTEG_TOPIC_MAX + 1];  /* a prefix that was in use, its configs still to be removed */
+static bool s_disc_ctx;                         /* s_dmed was synced with a state job of this connection */
+static bool s_disc_go;                          /* online and the first state went out: configs may follow */
+static int64_t s_disc_at;                       /* no discovery or clear publish before (monotonic) */
+static HY_EXT_BSS char s_t_cfg[HY_MQTT_TOPIC_LEN + 1];
+
+/* Cleanup scan. Phases: idle, subscribing, listening (MQ_SCAN_MS), clearing. */
+enum { SC_IDLE = 0, SC_SUB, SC_WAIT, SC_DEL };
+static uint8_t s_scan_ph;
+static bool s_req_new, s_req_old;               /* a scan of the current prefix / of s_old_pfx is wanted */
+static bool s_scan_old;                         /* the running scan is the one of s_old_pfx */
+static bool s_scan_redo;                        /* a clear was lost: scan again */
+static unsigned s_scan_subs;                    /* bit i: filter i subscribed */
+static uint8_t s_scan_rounds;
+static int64_t s_scan_at;                       /* deadline of the phase, or no start before */
+static size_t s_scan_cur;                       /* read position in the arena while clearing */
+static unsigned s_scan_cleared;                 /* clears published by the running scan */
+static HY_EXT_BSS char s_t_scan[2][HY_MQTT_TOPIC_LEN + 1];
+
+static mq_dmed_t *dmed_find(uint32_t id)
+{
+    for (size_t i = 0; i < s_n_dmed; i++) {
+        if (s_dmed[i].id == id) {
+            return &s_dmed[i];
+        }
+    }
+    return NULL;
+}
+
+static uint8_t med_want(const mq_dmed_t *e)
+{
+    if (!s_ha || e->gone) {
+        return 0;
+    }
+    return (uint8_t)(e->pills ? DISC_MED_ALL : DISC_MED_ALL & ~(1u << HY_DO_PILLS));
+}
+
+static void disc_rewant(void)
+{
+    for (size_t i = 0; i < s_n_dmed; i++) {
+        s_dmed[i].want = med_want(&s_dmed[i]);
+    }
+}
+
+/* Nothing of ours is retained any more as far as the device knows (discovery off, or the prefix changed). */
+static void disc_forget(void)
+{
+    for (size_t i = 0; i < s_n_dmed; i++) {
+        s_dmed[i].held = s_dmed[i].sent = 0;
+    }
+    s_ddev_sent = 0;
+}
+
+static void disc_reset(void)
+{
+    s_n_dmed = 0;
+    s_n_dm = 0;
+    s_ddev_sent = 0;
+    s_ha_init = false;
+    s_disc_ctx = false;
+    s_disc_go = false;
+    s_disc_at = 0;
+}
+
+/* After a state job of this connection: the medicines now active, their names and pill switches. A new medicine has
+ * nothing at the broker yet, except on the first sync after a connect, where the scan keeps what is wanted. */
+static void disc_sync(void)
+{
+    bool first = !s_disc_ctx;
+    s_n_dm = 0;
+    for (size_t i = 0; i < s_n_dmed; i++) {
+        s_dmed[i].gone = true;
+    }
+    for (size_t i = 0; i < s_sctx.n && s_n_dm < HY_MAX_MEDS; i++) {
+        const hy_api_tile_t *t = &s_sctx.tiles[i];
+        s_dm[s_n_dm].id = t->id;
+        s_dm[s_n_dm].pills = t->pills;
+        s_n_dm++;
+        uint32_t h = fnv1a(t->name, strlen(t->name));
+        mq_dmed_t *e = dmed_find(t->id);
+        if (!e) {
+            if (s_n_dmed >= MQ_NDMED) {
+                continue;   /* cleared entries are freed within seconds; this one is picked up at the next sync */
+            }
+            e = &s_dmed[s_n_dmed++];
+            memset(e, 0, sizeof *e);
+            e->id = t->id;
+            e->hash = h;
+            e->pills = t->pills;
+            e->want = med_want(e);
+            e->held = first ? e->want : 0;
+        } else {
+            e->gone = false;
+            e->pills = t->pills;
+            e->want = med_want(e);
+            if (h != e->hash) {
+                e->hash = h;
+                e->sent &= (uint8_t)~e->want;   /* the name is in every config: publish them again */
+            }
+        }
+        strlcpy(e->name, t->name, sizeof e->name);
+    }
+    for (size_t i = 0; i < s_n_dmed;) {   /* archived or deleted: everything it held is cleared, then it goes */
+        mq_dmed_t *e = &s_dmed[i];
+        if (e->gone) {
+            e->want = 0;
+            if (e->held == 0) {
+                *e = s_dmed[--s_n_dmed];
+                continue;
+            }
+        }
+        i++;
+    }
+    s_disc_ctx = true;
+}
+
+typedef struct {
+    bool dev, retract;
+    unsigned obj;
+    mq_dmed_t *e;
+} disc_act_t;
+
+/* The next discovery publish: clears first, then medicine configs, then the device objects. */
+static bool disc_find(disc_act_t *a)
+{
+    for (size_t i = 0; i < s_n_dmed; i++) {
+        unsigned r = (unsigned)(s_dmed[i].held & ~s_dmed[i].want);
+        if (r) {
+            *a = (disc_act_t){false, true, (unsigned)__builtin_ctz(r), &s_dmed[i]};
+            return true;
+        }
+    }
+    for (size_t i = 0; i < s_n_dmed; i++) {
+        unsigned p = (unsigned)(s_dmed[i].want & ~s_dmed[i].sent);
+        if (p) {
+            *a = (disc_act_t){false, false, (unsigned)__builtin_ctz(p), &s_dmed[i]};
+            return true;
+        }
+    }
+    if (s_ha) {
+        unsigned p = DISC_DEV_ALL & ~(unsigned)s_ddev_sent;
+        if (p) {
+            *a = (disc_act_t){true, false, (unsigned)__builtin_ctz(p), NULL};
+            return true;
+        }
+    }
+    return false;
+}
+
+static void disc_pass(void)
+{
+    if (!s_disc_go) {
+        if (!(s_up && s_disc_ctx && !s_st_pend && !(s_todo & TODO_ONLINE))) {
+            return;   /* online and the first state go out before the configs */
+        }
+        s_disc_go = true;
+    }
+    int64_t now = mono_ms();
+    disc_act_t a;
+    if (now < s_disc_at || fl_free_slot() < 0 || !disc_find(&a)) {
+        return;
+    }
+    int n;
+    if (a.dev) {
+        n = hy_disc_dev_topic(s_pfx, s_node, (hy_disc_dev_obj_t)a.obj, s_t_cfg, sizeof s_t_cfg);
+    } else {
+        n = hy_disc_med_topic(s_pfx, s_node, a.e->id, (hy_disc_med_obj_t)a.obj, s_t_cfg, sizeof s_t_cfg);
+    }
+    unsigned bit = 1u << a.obj;
+    if (n < 0) {   /* cannot be built: nothing can be published for it */
+        if (a.dev) {
+            s_ddev_sent |= (uint8_t)bit;
+        } else if (a.retract) {
+            a.e->held &= (uint8_t)~bit;
+        } else {
+            a.e->sent |= (uint8_t)bit;
+        }
+        return;
+    }
+    char *json = NULL;
+    if (!a.retract) {
+        hy_disc_ctx_t dc = {s_run.base, s_node, esp_app_get_description()->version};
+        json = a.dev ? hy_disc_dev_config(&dc, (hy_disc_dev_obj_t)a.obj)
+                     : hy_disc_med_config(&dc, a.e->id, a.e->name, (hy_disc_med_obj_t)a.obj);
+        if (!json) {
+            s_disc_at = now + MQ_HOLD_MS;   /* no memory: later */
+            return;
+        }
+    }
+    uint32_t meta = a.obj | (a.dev ? DISC_DEV : 0u) | (a.retract ? DISC_RETRACT : 0u);
+    int id = pub1(s_t_cfg, json ? json : "", json ? (int)strlen(json) : 0, true, MQF_DISC, a.dev ? 0 : a.e->id, meta);
+    free(json);
+    if (id < 0) {
+        s_disc_at = now + MQ_HOLD_MS;
+        return;
+    }
+    s_disc_at = now + MQ_PACE_MS;
+    if (a.dev) {
+        s_ddev_sent |= (uint8_t)bit;
+    } else if (a.retract) {
+        a.e->held &= (uint8_t)~bit;
+        a.e->sent &= (uint8_t)~bit;
+        if (a.e->gone && a.e->held == 0) {
+            *a.e = s_dmed[--s_n_dmed];
+        }
+    } else {
+        a.e->held |= (uint8_t)bit;
+        a.e->sent |= (uint8_t)bit;
+    }
+}
+
+/* A discovery publish was lost (DELETED, or not acknowledged in time): it is sent again. */
+static void disc_lost(const mq_flight_t *f)
+{
+    unsigned bit = 1u << (f->epoch & 0xffu);
+    if (f->epoch & DISC_DEV) {
+        s_ddev_sent &= (uint8_t)~bit;
+        return;
+    }
+    mq_dmed_t *e = dmed_find(f->seq);
+    if (!e) {
+        return;
+    }
+    if (f->epoch & DISC_RETRACT) {
+        e->held |= (uint8_t)bit;
+    } else {
+        e->sent &= (uint8_t)~bit;
+    }
+}
+
+/* Discovery switched on or off, or its prefix changed, while connected. */
+static void ha_check(const hy_mq_ctx_t *c)
+{
+    bool ha = c->cfg->ha;
+    if (!s_ha_init) {
+        s_ha_init = true;
+        s_ha = ha;
+        strlcpy(s_pfx, c->cfg->ha_prefix, sizeof s_pfx);
+        disc_rewant();
+        return;
+    }
+    if (strcmp(s_pfx, c->cfg->ha_prefix) != 0) {
+        if (s_ha && !s_req_old) {   /* what was published under the old prefix is removed by a scan of it */
+            strlcpy(s_old_pfx, s_pfx, sizeof s_old_pfx);
+            s_req_old = true;
+            s_scan_rounds = 0;
+        }
+        strlcpy(s_pfx, c->cfg->ha_prefix, sizeof s_pfx);
+        disc_forget();
+    }
+    if (ha != s_ha) {
+        s_ha = ha;
+        if (!ha) {   /* the scan removes every config of this node */
+            disc_forget();
+            s_req_new = true;
+            s_scan_rounds = 0;
+            if (s_scan_ph != SC_IDLE && !s_scan_old) {
+                s_scan_redo = true;   /* the running scan listened before this: it cannot have seen our configs */
+            }
+        }
+    }
+    disc_rewant();
+}
+
+/* ---------------------------------------------------------------- cleanup scan */
+
+static void scan_stop_listening(void)
+{
+    portENTER_CRITICAL(&s_scan_mux);
+    s_scan_on = false;
+    portEXIT_CRITICAL(&s_scan_mux);
+}
+
+static void scan_reset(void)
+{
+    scan_stop_listening();
+    s_scan_ph = SC_IDLE;
+    s_req_new = s_req_old = s_scan_old = s_scan_redo = false;
+    s_scan_subs = 0;
+    s_scan_rounds = 0;
+    s_scan_at = 0;
+    s_scan_cur = 0;
+    s_arena_len = 0;
+    atomic_store(&s_scan_over, false);
+}
+
+/* Is the retained topic one that should not exist? Config topics of this node that the rules refuse, and state topics of
+ * medicines that are not active. Each topic is judged alone, so a scan that missed some topics can only leave stale
+ * ones behind; it never clears a wanted one. */
+static bool scan_stale(const char *t, size_t n, bool ha, const char *pfx)
+{
+    char obj[32];
+    if (hy_disc_parse_topic(pfx, s_node, t, n, obj)) {
+        return !hy_disc_wanted(obj, ha, s_dm, s_n_dm);
+    }
+    return hy_mqtt_state_stale(s_run.base, t, n, s_dm, s_n_dm);
+}
+
+static void scan_pass(void)
+{
+    int64_t now = mono_ms();
+    if (s_scan_ph == SC_IDLE) {
+        if ((!s_req_old && !s_req_new) || now < s_scan_at || !s_up) {
+            return;
+        }
+        s_scan_old = s_req_old;
+        const char *spfx = s_scan_old ? s_old_pfx : s_pfx;
+        if (snprintf(s_t_scan[0], sizeof s_t_scan[0], "%s/+/%s/+/config", spfx, s_node) >= (int)sizeof s_t_scan[0] ||
+            hy_mqtt_topic(s_run.base, "med/+/state", s_t_scan[1], sizeof s_t_scan[1]) < 0) {
+            s_req_old = s_req_new = false;
+            return;
+        }
+        portENTER_CRITICAL(&s_scan_mux);
+        s_arena_len = 0;
+        s_scan_on = true;
+        portEXIT_CRITICAL(&s_scan_mux);
+        atomic_store(&s_scan_over, false);
+        s_scan_subs = 0;
+        s_scan_cleared = 0;
+        s_scan_ph = SC_SUB;
+    }
+    if (s_scan_ph == SC_SUB) {
+        if (now < s_scan_at) {
+            return;
+        }
+        unsigned want = s_scan_old ? 1u : 3u;   /* a scan of a former prefix looks at its configs only */
+        for (unsigned i = 0; i < 2; i++) {
+            if (!(want & (1u << i)) || (s_scan_subs & (1u << i))) {
+                continue;
+            }
+            if (esp_mqtt_client_subscribe_single(s_cl, s_t_scan[i], 1) < 0) {
+                s_scan_at = now + MQ_HOLD_MS;   /* refused: tried again */
+                return;
+            }
+            s_scan_subs |= 1u << i;
+        }
+        s_scan_at = now + MQ_SCAN_MS;
+        s_scan_ph = SC_WAIT;
+        return;
+    }
+    if (s_scan_ph == SC_WAIT) {
+        if (now < s_scan_at) {
+            return;
+        }
+        scan_stop_listening();
+        for (unsigned i = 0; i < 2; i++) {
+            if ((s_scan_subs & (1u << i)) && esp_mqtt_client_unsubscribe(s_cl, s_t_scan[i]) < 0) {
+                ESP_LOGW(TAG, "scan unsubscribe %u failed", i);   /* its messages are ignored from now on */
+            }
+        }
+        if (!s_disc_ctx) {   /* no list of medicines yet: nothing can be judged, the scan runs again */
+            ESP_LOGW(TAG, "cleanup scan postponed: no medicine list yet");
+            s_scan_ph = SC_IDLE;
+            s_scan_at = now + MQ_JOB_RETRY_MS;
+            return;
+        }
+        s_scan_cur = 0;
+        s_scan_ph = SC_DEL;
+    }
+    /* SC_DEL: the stale topics, paced like the configs. The listening has ended, so the arena is read without a lock. */
+    const char *pfx = s_scan_old ? s_old_pfx : s_pfx;
+    bool ha = s_scan_old ? false : s_ha;
+    while (s_scan_cur < s_arena_len) {
+        size_t n = s_arena[s_scan_cur];
+        const char *t = (const char *)s_arena + s_scan_cur + 1;
+        if (!scan_stale(t, n, ha, pfx)) {
+            s_scan_cur += n + 1;
+            continue;
+        }
+        if (now < s_disc_at || fl_free_slot() < 0) {
+            return;   /* the pace timer or an acknowledgement wakes the task */
+        }
+        memcpy(s_t_cfg, t, n);
+        s_t_cfg[n] = '\0';
+        if (pub1(s_t_cfg, "", 0, true, MQF_CLEAR, 0, 0) < 0) {
+            s_disc_at = now + MQ_HOLD_MS;
+            return;
+        }
+        s_scan_cleared++;
+        s_disc_at = now + MQ_PACE_MS;
+        s_scan_cur += n + 1;
+        return;   /* one per pace */
+    }
+    if (fl_has(MQF_CLEAR)) {
+        return;   /* a lost clear is only known when its acknowledgement is missing */
+    }
+    bool over = atomic_load(&s_scan_over);
+    bool again = over || s_scan_redo;
+    s_scan_redo = false;
+    s_scan_ph = SC_IDLE;
+    if (again && s_scan_rounds + 1 < MQ_SCAN_ROUNDS) {
+        s_scan_rounds++;   /* the request stays: another scan follows, with fewer stale topics left */
+        s_scan_at = now + MQ_PACE_MS;
+        ESP_LOGI(TAG, "cleanup scan %s: %u topics cleared, scanning again", over ? "incomplete" : "had a lost clear",
+                 s_scan_cleared);
+        return;
+    }
+    if (again) {
+        ESP_LOGW(TAG, "cleanup scan incomplete after %d rounds: stale topics may remain until the next connect",
+                 MQ_SCAN_ROUNDS);
+    } else if (s_scan_cleared) {
+        ESP_LOGI(TAG, "cleanup scan: %u topics cleared", s_scan_cleared);
+    }
+    if (s_scan_old) {
+        s_req_old = false;
+    } else {
+        s_req_new = false;
+    }
+    s_scan_rounds = 0;
+}
+
+static void flight_lost(const mq_flight_t *f)
+{
+    switch (f->kind) {
+    case MQF_ONLINE:
+        s_todo |= TODO_ONLINE;
+        s_todo_at = 0;
+        break;
+    case MQF_STATE:
+        state_lost(f->seq);
+        break;
+    case MQF_DISC:
+        disc_lost(f);
+        break;
+    case MQF_CLEAR:
+        s_scan_redo = true;
+        break;
+    default:
+        break;
+    }
+}
+
+/* ---------------------------------------------------------------- adherence */
+
+typedef struct {
+    uint32_t id;
+    hy_log_t *rows;
+    bool ok;
+    hy_adherence_t ad;
+} mq_adh_ctx_t;
+
+static HY_EXT_BSS hy_log_t s_adh_rows[HY_SCHED_ADH_ROWS];   /* scratch of the adherence jobs, owned by the delivery task */
+static uint32_t s_adh_ids[HY_MAX_MEDS];
+static size_t s_adh_n, s_adh_i;
+static uint32_t s_adh_taken, s_adh_resolved;
+static bool s_adh_busy;                         /* a pass is running: one medicine per step */
+static bool s_adh_dirty;                        /* an event may have changed it */
+static int64_t s_adh_at;                        /* next step of the pass, 0 none */
+static int64_t s_adh_last;                      /* monotonic end of the last pass on this connection, 0 none */
+
+static void job_adh(void *arg)
+{
+    mq_adh_ctx_t *c = arg;
+    c->ok = hy_sched_med_adherence(c->id, c->rows, HY_SCHED_ADH_ROWS, &c->ad);
+}
+
+/* Delivery task, connected: computed once after a connect, then at most every MQ_ADH_MS after a taken, skipped,
+ * missed or undone event. One job per active medicine, one per step. */
+static void adh_pass(const hy_mq_ctx_t *c)
+{
+    if (c->adh_req) {
+        s_adh_dirty = true;
+    }
+    int64_t now = mono_ms();
+    if (!s_adh_busy) {
+        bool due = s_adh_last == 0 ? s_have_ctx : (s_adh_dirty && now - s_adh_last >= MQ_ADH_MS);
+        if (!due) {
+            return;
+        }
+        s_adh_n = 0;
+        for (size_t i = 0; i < s_sctx.n; i++) {
+            s_adh_ids[s_adh_n++] = s_sctx.tiles[i].id;
+        }
+        s_adh_i = 0;
+        s_adh_taken = s_adh_resolved = 0;
+        s_adh_busy = true;
+        s_adh_dirty = false;
+        s_adh_at = 0;
+    }
+    if (now < s_adh_at) {
+        return;
+    }
+    if (s_adh_i < s_adh_n) {
+        hy_job_t *j = hy_job_new(job_adh, sizeof(mq_adh_ctx_t));
+        bool ok = false;
+        if (j) {
+            mq_adh_ctx_t *x = hy_job_ctx(j);
+            x->id = s_adh_ids[s_adh_i];
+            x->rows = s_adh_rows;
+            if (hy_job_run(j, HY_JOB_TIMEOUT_MS) == ESP_OK) {
+                ok = true;
+                if (x->ok) {
+                    s_adh_taken += x->ad.taken;
+                    s_adh_resolved += x->ad.resolved;
+                }
+            }
+            hy_job_put(j);   /* a job that timed out may still use the scratch: the retry waits MQ_JOB_RETRY_MS */
+        }
+        s_adh_at = now + (ok ? MQ_PACE_MS : MQ_JOB_RETRY_MS);
+        if (ok) {
+            s_adh_i++;
+        }
+        return;
+    }
+    s_adh_pct = hy_mqtt_adherence_pct(s_adh_taken, s_adh_resolved);
+    s_adh_busy = false;
+    s_adh_at = 0;
+    s_adh_last = now;
+    s_st_pend = true;   /* the device state carries it */
+    s_pend_at = 0;
+}
+
+static void disc_state_reset(void)
+{
+    disc_reset();
+    scan_reset();
+    s_adh_busy = false;
+    s_adh_dirty = false;
+    s_adh_at = 0;
+    s_adh_last = 0;
 }
 
 /* "online" and the three command subscriptions. A refused one is logged once and retried every MQ_HOLD_MS until it
@@ -952,6 +1536,7 @@ static void mq_connected(void)
     s_todo_logged = false;
     state_reset();
     s_state_at = mono_ms();   /* the first state job runs at once */
+    s_req_new = true;         /* the cleanup scan of this connection */
     s_ev_at = 0;
     conn_todo();
     ESP_LOGI(TAG, "connected");
@@ -981,11 +1566,7 @@ static void timeouts(void)
     int64_t now = mono_ms();
     for (int i = 0; i < MQ_INFLIGHT; i++) {
         if (s_fl[i].kind != MQF_FREE && now - s_fl[i].sent_ms >= MQ_ACK_MS) {
-            if (s_fl[i].kind == MQF_ONLINE) {
-                s_todo |= TODO_ONLINE;
-            } else if (s_fl[i].kind == MQF_STATE) {
-                state_lost(s_fl[i].seq);
-            }
+            flight_lost(&s_fl[i]);
             memset(&s_fl[i], 0, sizeof s_fl[i]);   /* an event goes out again with a new msg id */
         }
     }
@@ -1075,6 +1656,18 @@ static void dbg_publish(void)
         s_dbg.kinds[i] = s_fl[i].kind;
     }
     s_dbg.heap_before = s_heap_before;
+    s_dbg.ha = s_ha;
+    s_dbg.scan_ph = s_scan_ph;
+    s_dbg.scan_rounds = s_scan_rounds;
+    s_dbg.arena_len = (unsigned)s_arena_len;
+    s_dbg.scan_cleared = s_scan_cleared;
+    s_dbg.adh = s_adh_pct;
+    s_dbg.cfg_sent = (unsigned)__builtin_popcount(s_ddev_sent);
+    s_dbg.cfg_wanted = s_ha ? HY_DO_DEV_COUNT : 0;
+    for (size_t i = 0; i < s_n_dmed; i++) {
+        s_dbg.cfg_sent += (unsigned)__builtin_popcount(s_dmed[i].sent);
+        s_dbg.cfg_wanted += (unsigned)__builtin_popcount(s_dmed[i].want);
+    }
     portEXIT_CRITICAL(&s_dbg_mux);
 }
 #endif
@@ -1106,10 +1699,14 @@ void hy_mq_step(hy_mq_ctx_t *c)
         drain(c);       /* acknowledgements received before a link change still count */
         link_check();
         if (s_up) {
+            ha_check(c);
             timeouts();
             conn_todo();
             send_events(c);   /* before the state: a freed slot goes to the event first */
             state_pass(c);
+            disc_pass();
+            scan_pass();
+            adh_pass(c);
         }
     }
     state_update(c);
@@ -1146,6 +1743,19 @@ int64_t hy_mq_next_ms(void)
     }
     if (s_st_pend && s_pend_at && s_pend_at < next) {
         next = s_pend_at;
+    }
+    int64_t now = mono_ms();
+    disc_act_t a;
+    if (((s_disc_go && disc_find(&a)) || s_scan_ph == SC_DEL) && s_disc_at > now && s_disc_at < next) {
+        next = s_disc_at;   /* the next discovery or clear publish */
+    }
+    if ((s_scan_ph != SC_IDLE || s_req_new || s_req_old) && s_scan_at > now && s_scan_at < next) {
+        next = s_scan_at;   /* end of the listening, a retry, or the earliest start */
+    }
+    if (s_adh_busy && s_adh_at && s_adh_at < next) {
+        next = s_adh_at;
+    } else if (!s_adh_busy && s_adh_last && s_adh_dirty && s_adh_last + MQ_ADH_MS < next) {
+        next = s_adh_last + MQ_ADH_MS;
     }
     return next;
 }
@@ -1190,5 +1800,11 @@ void hy_mq_debug_print(void)
     }
     printf("; queue drops %u, command drops %u\n", (unsigned)atomic_load(&s_q_drops),
            (unsigned)atomic_load(&s_cmd_drops));
+    static const char *const phases[] = {"idle", "subscribing", "listening", "clearing"};
+    printf("integ: discovery %s, configs sent %u of %u wanted; cleanup scan %s, arena %u of %d bytes%s, cleared %u, "
+           "round %u; adherence 30 days %d\n",
+           d.ha ? "on" : "off", d.cfg_sent, d.cfg_wanted, d.scan_ph < 4 ? phases[d.scan_ph] : "?", d.arena_len,
+           MQ_SCAN_ARENA, atomic_load(&s_scan_over) ? " (full)" : "", d.scan_cleared, (unsigned)d.scan_rounds + 1u,
+           (int)d.adh);
 }
 #endif

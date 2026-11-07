@@ -634,6 +634,47 @@ size_t hy_sched_tiles(hy_api_tile_t *out, size_t max)
     return nt;
 }
 
+size_t hy_sched_log_window(uint32_t med_id, int64_t from, int64_t to, hy_log_t *out, size_t cap)
+{
+    const hy_store_port_t *st = hy_store_port();
+    for (;;) {
+        size_t n = st->query_log(NULL, from, to, med_id, out, cap);
+        if (n < cap || to - from <= 3600) {
+            return n;
+        }
+        hy_log_t probe[2];   /* exactly cap: full only when something follows the last entry */
+        if (st->query_log(NULL, out[n - 1].ts, to, med_id, probe, 2) < 2) {
+            return n;
+        }
+        ESP_LOGW(TAG, "log window of med %u filled %u entries: keeping the newest half", (unsigned)med_id,
+                 (unsigned)cap);
+        from += (to - from) / 2;
+    }
+}
+
+bool hy_sched_med_adherence(uint32_t med_id, hy_log_t *scratch, size_t scratch_rows, hy_adherence_t *out)
+{
+    const hy_snapshot_t *sn = &s_snap;
+    if (!scratch || !out || scratch_rows < HY_SCHED_ADH_ROWS || s_gen == 0 || !sn->tracking) {
+        return false;
+    }
+    const hy_med_t *m = NULL;
+    for (size_t k = 0; k < sn->in.n_meds; k++) {
+        if (sn->in.meds[k].id == med_id && !sn->in.meds[k].archived) {
+            m = &sn->in.meds[k];
+        }
+    }
+    if (!m) {
+        return false;
+    }
+    int32_t first = hy_date_add(hy_local_date(sn->in.now, sn->in.tz), -29);
+    hy_sched_in_t din = sn->in;
+    din.logs = scratch;
+    din.n_logs = hy_sched_log_window(m->id, sn->in.now - 32 * 86400, sn->in.now + 1, scratch, scratch_rows);
+    hy_adherence(m->id, first, 30, &din, sn->sched, out);
+    return true;
+}
+
 uint32_t hy_sched_generation(void)
 {
     return s_gen;

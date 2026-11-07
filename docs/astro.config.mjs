@@ -53,6 +53,7 @@ export default defineConfig({
           label: 'Integrations',
           items: [
             { label: 'MQTT', link: '/integrations/mqtt/' },
+            { label: 'Home Assistant', link: '/integrations/home-assistant/' },
             { label: 'Webhooks', link: '/integrations/webhooks/' },
           ],
         },

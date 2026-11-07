@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "hy/api.h"
 #include "hy/sched.h"
+#include "hy/summary.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +45,17 @@ uint32_t  hy_sched_generation(void);  /* +1 per evaluation */
 /* LVGL task: the tiles of GET /api/state, one per active medicine in store order, from the last evaluation (the
    snapshot) and the live medicines; at most max. Returns the count. */
 size_t    hy_sched_tiles(hy_api_tile_t *out, size_t max);
+/* LVGL task. The log of one medicine in [from, to) read through hy_store_port()->query_log into out (cap rows). When
+   the window fills cap rows and entries follow, the older half of the window is dropped and the read repeats, so the
+   newest entries are kept. Returns the count. */
+size_t    hy_sched_log_window(uint32_t med_id, int64_t from, int64_t to, hy_log_t *out, size_t cap);
+/* Rows of scratch that hy_sched_med_adherence needs (the window the History page reads). */
+#define HY_SCHED_ADH_ROWS 512
+/* LVGL task. The 30-day adherence of one active medicine as GET /api/history?days=30 computes it: the medicine's last
+   32 days read through hy_sched_log_window into scratch, then hy_adherence from the local date 29 days before today.
+   The History handler calls this function, so the two numbers cannot drift. false when the medicine is not active,
+   tracking has not started or scratch_rows is below HY_SCHED_ADH_ROWS. */
+bool      hy_sched_med_adherence(uint32_t med_id, hy_log_t *scratch, size_t scratch_rows, hy_adherence_t *out);
 /* Returns the latched flash request and clears it (the UI calls it when it starts the flash). */
 bool      hy_sched_take_flash(void);
 

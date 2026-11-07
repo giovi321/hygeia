@@ -21,6 +21,7 @@
 #define HY_IB_MQTT  (1u << 4)   /* the MQTT queue has messages */
 #define HY_IB_TEST  (1u << 5)   /* a test request; the index sits in an atomic */
 #define HY_IB_KICK  (1u << 6)   /* debug: reset every hook's failures, deadline and pause */
+#define HY_IB_ADH   (1u << 7)   /* a dose was taken, skipped, missed or undone: the adherence may have changed */
 
 /* Capture ring: single producer (the LVGL task), single consumer (the delivery task). head and tail are free-running
  * counters; a slot is (counter % HY_INTEG_RING). The producer fills the slot at head in place, then publishes head + 1;
@@ -68,6 +69,7 @@ typedef struct {
     const char *client_id;      /* hygeia-<4 hex> */
     bool acked;                 /* out: hy_ob_done was called, the outbox owes a state write */
     bool state_req;             /* the STATE bit was set: something that shows in the state may have changed */
+    bool adh_req;               /* the ADH bit was set */
     bool dry;                   /* a debug override is in force: commands are logged and do nothing */
 } hy_mq_ctx_t;
 

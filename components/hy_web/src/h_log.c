@@ -376,7 +376,13 @@ static void job_hist_chunk(void *arg)
                 c->prog[i] = prog;
             }
         }
-        hy_adherence(m->id, c->first, c->days, in, sn->sched, &c->ad[i]);
+        if (buf) {   /* the same function the integrations use, so the 30 day numbers cannot drift */
+            if (!hy_sched_med_adherence(m->id, buf, DEEP_ROWS, &c->ad[i])) {
+                c->gone[i] = true;
+            }
+        } else {
+            hy_adherence(m->id, c->first, c->days, in, sn->sched, &c->ad[i]);
+        }
     }
     heap_caps_free(buf);
 }

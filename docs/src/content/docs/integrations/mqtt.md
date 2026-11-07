@@ -7,12 +7,19 @@ The device connects to one MQTT broker as a client. It publishes the state of ea
 
 ## Setup
 
-In the web UI, open Settings, MQTT:
+The Settings page of the web UI has no MQTT panel in this version (see [Web UI](../../user-guide/web-ui/#settings)). The settings are saved through the REST API, `PUT /api/settings`, by a paired browser. Open the web UI, then paste this in the browser console (developer tools) and run it:
 
-- Turn MQTT on and enter the broker URL: `mqtt://broker.lan` (port 1883) or `mqtts://broker.lan` (port 8883). A port can follow the host, for example `mqtt://192.168.1.23:1884`
-- Enter a user name and a password if the broker needs them. The password is write-only: the page shows only whether one is set
-- Leave the base topic at `hygeia`, or change it. Every topic below starts with the base topic, written here as `<base>`
-- Save. The panel shows the connection state (waiting, connecting, connected or an error) and the time of the last change
+```js
+fetch('/api/settings', {method: 'PUT', headers: {'X-Hygeia': '1', 'Content-Type': 'application/json'},
+  body: JSON.stringify({mqtt: {on: true, url: 'mqtt://broker.lan', user: 'hygeia', password: 'example-secret',
+  base: 'hygeia'}})}).then(r => r.json()).then(console.log)
+```
+
+- `on` turns MQTT on. `url` is `mqtt://broker.lan` (port 1883) or `mqtts://broker.lan` (port 8883). A port can follow the host, for example `mqtt://192.168.1.23:1884`
+- `user` and `password` are needed only if the broker asks. The password is write-only: `GET /api/settings` shows only `password_set`. Leave `password` out to keep the one that is set, send `""` to clear it
+- `base` is the base topic, `hygeia` by default. Every topic below starts with it, written here as `<base>`
+- `ha` and `ha_prefix` switch on [Home Assistant discovery](../home-assistant/)
+- Members you leave out keep their value. See [REST API](../../reference/rest-api/) for the whole `mqtt` member
 
 The client id is `hygeia-` and the last 4 hex digits of the MAC address, the same as the access point name. It cannot be changed. MQTT 3.1.1 over TCP or TLS is the only transport: there are no WebSocket transports and no MQTT 5.
 
@@ -67,7 +74,9 @@ The state is checked after every event and every 60 s, and published only when i
 {"battery":82,"charging":false,"usb":false,"wifi_mode":"client","rssi":-61,"clock_source":"ntp","clock_valid":true,"adherence_30d":null,"fw":"1.4.0"}
 ```
 
-Published when anything except `rssi` changed, and at least every 5 minutes so that `rssi` stays current. `battery`, `rssi` and `clock_source` are `null` when unknown. `adherence_30d` is `null` until the adherence figure is available.
+Published when anything except `rssi` changed, and at least every 5 minutes so that `rssi` stays current. `battery`, `rssi` and `clock_source` are `null` when unknown.
+
+`adherence_30d` is the share of resolved doses in the last 30 days that were taken, in percent, over all active medicines. It uses the same count as the 30-day History page. The device computes it after each connect and then at most every 30 minutes after a dose was taken, skipped, missed or undone, and never while disconnected. It is `null` until the figure exists, and when no dose in the window is resolved.
 
 ### Events
 
@@ -90,8 +99,10 @@ mosquitto_pub -h broker.lan -t hygeia/med/1/log -m PRESS
 A JSON object adds options:
 
 ```
-mosquitto_pub -h broker.lan -t hygeia/med/1/log -m '{"note":"with food","ts":1762412520}'
+mosquitto_pub -h broker.lan -t hygeia/med/1/log -m '{"note":"with food","ts":1794038520}'
 ```
+
+The example `ts` is 2026-11-07 08:02 UTC. Use a time after the build date of your firmware and not more than 60 s ahead of now; `date +%s` prints the current time.
 
 - `note`: up to 63 bytes
 - `ts`: epoch seconds of the dose. Same window as the web UI: not before the firmware build date and not more than 60 s ahead. A value outside it makes the command fail
@@ -116,4 +127,6 @@ The device uses a clean session, so the broker keeps no commands for it while it
 
 ### Access control
 
-Anyone the broker lets publish on these topics can log, skip and snooze doses. The broker's access control is the only protection. Give the device its own user, allow it to publish under `<base>/` and subscribe to `<base>/med/+/#`, and allow only the users that should act on doses to publish commands.
+Anyone the broker lets publish on these topics can log, skip and snooze doses. The broker's access control is the only protection. Give the device its own user, allow it to publish under `<base>/` and under the discovery prefix, subscribe to `<base>/med/+/#`, and allow only the users that should act on doses to publish commands.
+
+On every connect the device also listens for 3 seconds to the retained messages under `<prefix>/+/<node>/+/config` and `<base>/med/+/state`, to remove entities and state topics that are no longer wanted (see [Home Assistant](../home-assistant/#removal)). Allow it to subscribe to those too. This runs with discovery off as well, so that turning discovery off removes the entities.

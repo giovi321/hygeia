@@ -7,10 +7,8 @@
 #include <string.h>
 
 #include "esp_heap_caps.h"
-#include "esp_log.h"
+#include "hy/sched_run.h"
 #include "web_internal.h"
-
-static const char *TAG = "web_rest";
 
 /* ---------------------------------------------------------------- jobs */
 
@@ -142,20 +140,7 @@ bool web_query_get(const web_req_t *r, const char *key, char *out, size_t len)
 
 size_t web_log_window(uint32_t med_id, int64_t from, int64_t to, hy_log_t *out, size_t cap)
 {
-    const hy_store_port_t *st = hy_store_port();
-    for (;;) {
-        size_t n = st->query_log(NULL, from, to, med_id, out, cap);
-        if (n < cap || to - from <= 3600) {
-            return n;
-        }
-        hy_log_t probe[2];   /* exactly cap: full only when something follows the last entry */
-        if (st->query_log(NULL, out[n - 1].ts, to, med_id, probe, 2) < 2) {
-            return n;
-        }
-        ESP_LOGW(TAG, "log window of med %u filled %u entries: keeping the newest half", (unsigned)med_id,
-                 (unsigned)cap);
-        from += (to - from) / 2;
-    }
+    return hy_sched_log_window(med_id, from, to, out, cap);
 }
 
 /* ---------------------------------------------------------------- text buffer */

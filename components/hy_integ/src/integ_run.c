@@ -73,6 +73,10 @@ static atomic_bool s_ovr_active;               /* fire, fill and burst are allow
 #endif
 enum { OVR_NONE = 0, OVR_ON, OVR_OFF };
 static int s_ovr_cmd;
+#if CONFIG_HY_DEBUG_CONSOLE
+enum { HA_NONE = 0, HA_ON, HA_OFF };
+static int s_ha_cmd;                           /* integ ha: discovery on or off in the active override */
+#endif
 static HY_EXT_BSS hy_integ_status_t s_status;
 static int64_t s_retry_at_ms[HY_HOOK_MAX];     /* monotonic; 0 none */
 static bool s_pub_connected;
@@ -205,7 +209,11 @@ static void on_bus(const hy_event_t *ev, void *ctx)
 {
     (void)ctx;
     if (atomic_load(&s_mq_on)) {
-        notify(HY_IB_STATE);   /* any event may change a state topic, also the types no destination wants */
+        /* any event may change a state topic, also the types no destination wants; a dose taken, skipped, missed or
+         * undone may change the adherence */
+        bool adh = ev->type == HY_EV_TAKEN || ev->type == HY_EV_SKIPPED || ev->type == HY_EV_MISSED ||
+                   ev->type == HY_EV_UNDONE;
+        notify(adh ? HY_IB_STATE | HY_IB_ADH : HY_IB_STATE);
     }
     hy_iev_t t;
     if (!hy_iev_from_bus(ev->type, &t) || !(atomic_load(&g_integ_wanted) & (1u << t))) {
@@ -454,6 +462,10 @@ static void take_pending(void)
     }
     ovr = s_ovr_cmd;
     s_ovr_cmd = OVR_NONE;
+#if CONFIG_HY_DEBUG_CONSOLE
+    int ha_cmd = s_ha_cmd;
+    s_ha_cmd = HA_NONE;
+#endif
     xSemaphoreGive(s_mx);
 #if CONFIG_HY_DEBUG_CONSOLE
     if (ovr == OVR_OFF && s_override) {
@@ -467,6 +479,9 @@ static void take_pending(void)
 #if CONFIG_HY_DEBUG_CONSOLE
     if (ovr == OVR_ON) {
         override_on();
+    }
+    if (ha_cmd != HA_NONE && s_override) {
+        s_cfg.mqtt.ha = ha_cmd == HA_ON;   /* the MQTT client reads it at its next pass */
     }
 #else
     (void)ovr;
@@ -525,7 +540,7 @@ static void ob_flush(void)
 
 /* ---------------------------------------------------------------- MQTT */
 
-static void mqtt_ctx(hy_mq_ctx_t *c, bool state_req)
+static void mqtt_ctx(hy_mq_ctx_t *c, bool state_req, bool adh_req)
 {
     memset(c, 0, sizeof *c);
     c->cfg = &s_cfg.mqtt;
@@ -535,13 +550,14 @@ static void mqtt_ctx(hy_mq_ctx_t *c, bool state_req)
     c->rec = &s_rec;
     c->client_id = s_device;
     c->state_req = state_req;
+    c->adh_req = adh_req;
     c->dry = s_override;
 }
 
-static void mqtt_pass(bool state_req)
+static void mqtt_pass(bool state_req, bool adh_req)
 {
     hy_mq_ctx_t c;
-    mqtt_ctx(&c, state_req);
+    mqtt_ctx(&c, state_req, adh_req);
     hy_mq_step(&c);
     if (c.acked) {
         s_ob_dirty = s_ack_dirty = true;
@@ -553,7 +569,7 @@ static void mqtt_pass(bool state_req)
 static void mqtt_pump(void)
 {
     hy_mq_ctx_t c;
-    mqtt_ctx(&c, false);
+    mqtt_ctx(&c, false, false);
     hy_mq_pump(&c);
     if (c.acked) {
         s_ob_dirty = s_ack_dirty = true;
@@ -864,7 +880,7 @@ static void integ_task(void *arg)
             }
         }
         drain_ring();
-        mqtt_pass((bits & HY_IB_STATE) != 0);   /* before the webhooks: a slow POST never holds back an acknowledgement */
+        mqtt_pass((bits & HY_IB_STATE) != 0, (bits & HY_IB_ADH) != 0);   /* before the webhooks: a slow POST never holds back an acknowledgement */
         if (bits & HY_IB_TEST) {
             run_test();
         }
@@ -1216,6 +1232,18 @@ void hy_integ_debug(const char *args)
             notify(HY_IB_APPLY);
             printf("integ: override mqtt %s://%s:%u base %s, discovery off\n", u.tls ? "mqtts" : "mqtt", u.host,
                    (unsigned)u.port, base);
+        }
+    } else if (strcmp(cmd, "ha") == 0) {
+        const char *arg = next_word(&rest);
+        bool on = strcmp(arg, "on") == 0;
+        if (!on && strcmp(arg, "off") != 0) {
+            printf("integ: usage: integ ha <on|off>\n");
+        } else if (need_override()) {
+            xSemaphoreTake(s_mx, portMAX_DELAY);
+            s_ha_cmd = on ? HA_ON : HA_OFF;
+            xSemaphoreGive(s_mx);
+            notify(HY_IB_APPLY);
+            printf("integ: override discovery %s\n", on ? "on" : "off");
         }
     } else if (strcmp(cmd, "off") == 0) {
         atomic_store(&s_ovr_active, false);
