@@ -117,7 +117,7 @@ return [{ json: JSON.parse(raw.toString('utf8')) }];
 - 401 or 403: the webhook pauses with the status "auth". Its events are kept, but nothing is sent until you save the webhook list again (unchanged is enough), the device reconnects to the network, or a Test succeeds
 - Any other status, including redirects (the device does not follow them): that one event is rejected for that webhook, counted as "rejected", and delivery moves on
 
-Up to 20 events go to one webhook per pass, in the order they happened. One slow or failing webhook never holds back another webhook or MQTT.
+Up to 20 events go to one webhook per pass, in the order they happened, but a webhook gets about 2 seconds per pass: after that MQTT and the other webhooks run, and the webhook continues on the next pass. One slow or failing webhook never holds back another webhook or MQTT.
 
 ## Delivery and expiry
 

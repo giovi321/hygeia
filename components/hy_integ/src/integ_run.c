@@ -43,6 +43,7 @@ static const char *TAG = "integ";
 #define TASK_STACK      8192
 #define TASK_PRIO       4          /* the web backup worker's priority, below the LVGL task */
 #define HOOK_BATCH      20         /* records per hook per pass */
+#define HOOK_BUDGET_MS  2000       /* time per hook per pass: then MQTT and the other hooks get their turn */
 #define WAIT_MEMORY_MS  60000      /* heap under the gate: not a failure */
 #define WAIT_BUSY_MS    10000      /* heavy-job slot held: not a failure */
 #define WAIT_IO_MS      10000      /* a transient outbox read failure */
@@ -599,8 +600,12 @@ static void deliver_hook(unsigned i)
     uint8_t dest = (uint8_t)(1 + i);
     bool tls = false;
     hy_wh_target(h->url, &tls, NULL);
+    int64_t start = mono_ms();
     for (int k = 0; k < HOOK_BATCH; k++) {
         int64_t now = mono_ms();
+        if (k > 0 && now - start >= HOOK_BUDGET_MS) {
+            return;   /* the deadline stays 0: the next loop runs MQTT first, then continues here */
+        }
         if (hy_heavy_owner()) {
             hk->err = HY_HE_BUSY;
             hk->deadline_ms = now + WAIT_BUSY_MS;
