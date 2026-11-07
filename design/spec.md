@@ -377,7 +377,7 @@ REST API (JSON):
 - At most 4 URLs (this bounds NVS, RAM and the delivery loop), `http://` or `https://`, each with its own on switch, event selection (default every type) and optional secret (write-only). A webhook keeps its slot; the web UI never reorders webhooks. Removing one sends an empty slot (`"url":""`, off, no secret, no events) at the same index, so the webhooks after it keep their index, their secret and their waiting events
 - Event types: `taken`, `skipped`, `missed`, `due`, `snoozed`, `undone`, `battery_low`, `battery_critical`, `clock_invalid`. `undone` lets a receiver that counts doses take back a dose undone within 5 s. One `clock_invalid` event is sent per boot when the device starts with an invalid clock, with `ts` null
 - POST with `Content-Type: application/json`, members in this order: `{"id","event","ts","tz","device","medicine":{"id","code","name","dose"},"slot","log","battery"}`
-  - `id`: the outbox sequence number, unique and increasing per device. It is never reused, because the outbox never deletes a segment before the state file holding the sequence is written. Receivers de-duplicate by `id`
+  - `id`: the outbox sequence number, unique and increasing per device, starting at 1 (0 is only the id of the test event). It is never reused, because the outbox never deletes a segment before the state file holding the sequence is written. Receivers de-duplicate by `id`
   - `ts`: epoch seconds of the event, null while the clock is invalid. `tz`: the IANA zone name. `device`: the client id `hygeia-XXXX`
   - `medicine`: null for device events. `slot`: the scheduled occurrence (UTC epoch seconds) or null
   - `log`: the stored log line as the REST API returns it, or null. For `undone` it is always `{"id":n}`

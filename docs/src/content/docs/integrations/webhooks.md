@@ -64,7 +64,7 @@ Editing or deleting a log entry, changing medicines and untracked periods are no
 
 The device sends it on one line, with no spaces, in this member order.
 
-- `id`: a number that is unique per device and only grows. A receiver de-duplicates by it
+- `id`: a number that is unique per device and only grows, starting at 1. A receiver de-duplicates by it. The id 0 is used only by the test event
 - `event`: one of the names above
 - `ts`: epoch seconds of the event, `null` while the clock is invalid. `tz`: the IANA zone name
 - `device`: the device name, `hygeia-` and 4 hex digits, the same as the access point name
@@ -129,7 +129,7 @@ Up to 20 events go to one webhook per pass, in the order they happened. One slow
 
 ## The test button
 
-Test sends one event `{"id":0,"event":"test",...}` to the saved URL of that row, signed with its secret. It does not go through the outbox and does not change the retry state, and it also works while the webhook is switched off. The result (HTTP status or error) shows on the row a moment later. A successful test ends an "auth" pause. Test is disabled on a row with unsaved changes, and it needs the device connected as a client.
+Test sends one event `{"id":0,"event":"test",...}` (real events start at id 1, so 0 never collides with one) to the saved URL of that row, signed with its secret. It does not go through the outbox and does not change the retry state, and it also works while the webhook is switched off. The result (HTTP status or error) shows on the row a moment later. A successful test ends an "auth" pause. Test is disabled on a row with unsaved changes, and it needs the device connected as a client.
 
 ## TLS
 
