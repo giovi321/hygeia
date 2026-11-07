@@ -1,7 +1,7 @@
 #pragma once
 
-/* Hand-off inside hy_integ: notification bits of the delivery task, the capture ring, the wanted mask and the
- * webhook transport. */
+/* Hand-off inside hy_integ: notification bits of the delivery task, the capture ring, the wanted mask, the webhook
+ * transport and the MQTT client. */
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -10,6 +10,8 @@
 
 #include "hy/hook.h"
 #include "hy/integ.h"
+#include "hy/outbox.h"
+#include "sdkconfig.h"
 
 /* Notification bits of the delivery task (xTaskNotify with eSetBits). */
 #define HY_IB_EV    (1u << 0)   /* the capture ring has data */
@@ -34,6 +36,9 @@ extern atomic_uint g_integ_wanted;
 #define HY_WH_HEAP_HTTPS 63488
 #define HY_WH_HEAP_HTTP  45056
 
+/* Sets notification bits of the delivery task (any task; nothing happens before the task exists). */
+void hy_integ_notify(uint32_t bits);
+
 /* Scheme and host of a hook URL (for gates and logs; the path is never logged). False when the URL does not parse. */
 bool hy_wh_target(const char *url, bool *tls, char host[65]);
 /* Internal free heap at or above the gate for the scheme. */
@@ -44,3 +49,38 @@ bool hy_wh_sign(const char *secret, const char *body, size_t len, char out[72]);
  * error with *err set (HY_HE_CONNECT, HY_HE_TLS, HY_HE_TIMEOUT, HY_HE_MEMORY). The response body is read (at most
  * 1 KB) and discarded. Blocking, at most about 10 s per step. Delivery task only. */
 int  hy_wh_post(const char *url, const char *secret, const char *body, size_t len, hy_integ_err_t *err);
+/* The URL with scheme and host lower-cased (the path keeps its case), cut to len - 1 bytes. url has passed
+ * hy_url_parse (no userinfo), so the authority runs from "://" to the first '/'. */
+void hy_url_canon(const char *url, char *out, size_t len);
+
+/* ---- MQTT client (mqtt.c) ---- */
+
+/* Internal free heap needed to start the client (bytes). */
+#define HY_MQ_HEAP_MIN 45056
+
+/* One pass of the delivery task. */
+typedef struct {
+    const hy_mqtt_cfg_t *cfg;   /* the MQTT settings in force */
+    bool net;                   /* connected as a client */
+    hy_ob_t *ob;                /* the outbox, NULL while closed */
+    uint32_t ob_epoch;          /* counts outbox opens: an acknowledgement from before a reopen is not applied */
+    hy_ob_rec_t *rec;           /* scratch record (PSRAM) */
+    const char *client_id;      /* hygeia-<4 hex> */
+    bool acked;                 /* out: hy_ob_done was called, the outbox owes a state write */
+} hy_mq_ctx_t;
+
+/* Delivery task only. Creates and starts the client when MQTT is on and the network is connected as a client
+ * (internal free at least HY_MQ_HEAP_MIN, else error "memory", tried again at a later wake); stops and destroys it
+ * when the network leaves that state, MQTT is turned off or its broker, credentials or base change (publishing
+ * "offline" first while connected). Takes the acknowledgements and messages the esp-mqtt task queued, publishes
+ * "online" and subscribes to the command topics on every connect, and sends the MQTT outbox records one at a time. */
+void    hy_mq_step(hy_mq_ctx_t *c);
+/* Monotonic ms of the next deadline of the client (an in-flight timeout, a start retry, a held send), INT64_MAX
+ * when none. Delivery task only. */
+int64_t hy_mq_next_ms(void);
+/* State for the status view, as of the last hy_mq_step. Delivery task only. */
+void    hy_mq_status(hy_mqtt_state_t *st, uint8_t *err, int64_t *since);
+#if CONFIG_HY_DEBUG_CONSOLE
+/* "integ" status lines of the client (any task): state, broker host, in-flight ids, heap and stack numbers. */
+void    hy_mq_debug_print(void);
+#endif

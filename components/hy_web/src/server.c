@@ -423,7 +423,9 @@ static httpd_handle_t server_start(void)
     c.server_port = 80;
     c.stack_size = 6144;
     c.task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    c.max_open_sockets = 7;   /* + 3 internal sockets, captive DNS and one spare within LWIP_MAX_SOCKETS 12 */
+    /* Socket budget, CONFIG_LWIP_MAX_SOCKETS 14: httpd 7, lwIP internal 3, captive DNS 1 (access point only), MQTT 1,
+     * a webhook POST or the GitHub update 1, the debug "integ tcp" or spare 1 */
+    c.max_open_sockets = 7;
     c.lru_purge_enable = true;
     c.max_uri_handlers = 12;
     c.max_req_hdr_len = 2048;

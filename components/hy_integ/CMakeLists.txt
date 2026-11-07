@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/integ_run.c"
+        "src/mqtt.c"
         "src/webhook.c"
     INCLUDE_DIRS
         "include"
@@ -10,6 +11,7 @@ idf_component_register(
         hy_core
         hy_store
         hy_job
+        espressif__mqtt
     PRIV_REQUIRES
         hy_board
         hy_net
@@ -21,6 +23,7 @@ idf_component_register(
         esp-tls
         mbedtls
         esp_timer
+        esp_event
         esp_app_format
         bootloader_support
         heap

@@ -1,7 +1,7 @@
 #pragma once
 
-/* Integration delivery on the device: event capture from the bus, the outbox, webhooks. One delivery task drives
- * every destination. It runs only while the radio is on for another reason and connected as a client: it never
+/* Integration delivery on the device: event capture from the bus, the outbox, the MQTT client, webhooks. One
+ * delivery task drives every destination. It runs only while the radio is on for another reason and connected as a client: it never
  * starts the radio, never keeps it on and never counts as activity. */
 
 #include <stdint.h>
@@ -35,8 +35,9 @@ int       hy_integ_subscribe(void (*cb)(void *ctx), void *ctx);
 
 #if CONFIG_HY_DEBUG_CONSOLE
 /* "integ" console command: status, and RAM-only overrides that persist nothing:
- * hook <url> [secret] | fire <event> [code] | fill <n> | burst <n> | kick | sign <secret> <text> | tcp <host> <port>
- * | off */
+ * hook <url> [secret] | mqtt <url> [base] | fire <event> [code] | fill <n> | burst <n> | kick | sign <secret> <text>
+ * | tcp <host> <port> | off. "mqtt" turns MQTT on with discovery off, base "hygeia-test" by default; like "hook" it
+ * replaces the whole override. A console line holds 127 bytes, so only short URLs fit. */
 void      hy_integ_debug(const char *args);
 #endif
 

@@ -92,22 +92,23 @@ bool hy_wh_sign(const char *secret, const char *body, size_t len, char out[72])
     return ok;
 }
 
-/* The URL with scheme and host lower-cased (the path keeps its case). The validated URL has no userinfo, so the
- * authority runs from "://" to the first '/'. */
-static void canonical_url(const char *url)
+void hy_url_canon(const char *url, char *out, size_t len)
 {
-    size_t n = strlen(url);
-    if (n >= sizeof s_url) {
-        n = sizeof s_url - 1;
+    if (len == 0) {
+        return;
     }
-    memcpy(s_url, url, n);
-    s_url[n] = '\0';
-    char *p = strstr(s_url, "://");
+    size_t n = strlen(url);
+    if (n >= len) {
+        n = len - 1;
+    }
+    memcpy(out, url, n);
+    out[n] = '\0';
+    char *p = strstr(out, "://");
     char *end = p ? strchr(p + 3, '/') : NULL;
     if (!end) {
-        end = s_url + n;
+        end = out + n;
     }
-    for (char *q = s_url; q < end; q++) {
+    for (char *q = out; q < end; q++) {
         *q = (char)tolower((unsigned char)*q);
     }
 }
@@ -144,7 +145,7 @@ int hy_wh_post(const char *url, const char *secret, const char *body, size_t len
         *err = HY_HE_MEMORY;
         return -1;
     }
-    canonical_url(url);
+    hy_url_canon(url, s_url, sizeof s_url);
     const esp_http_client_config_t cfg = {
         .url = s_url,
         .method = HTTP_METHOD_POST,

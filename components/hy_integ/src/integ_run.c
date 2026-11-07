@@ -1,4 +1,5 @@
-/* Delivery task, event capture, outbox ownership and the debug overrides.
+/* Delivery task, event capture, outbox ownership and the debug overrides. The MQTT client (mqtt.c) and the
+ * webhooks (webhook.c) are driven from this task.
  *
  * Threads: the capture runs in the LVGL task (bus callback) and only fills the ring; the delivery task owns the
  * outbox, the active config and the retry state; hy_integ_apply, hy_integ_status, hy_integ_test and the debug command
@@ -110,6 +111,7 @@ static HY_EXT_BSS char s_payload[HY_HOOK_PAYLOAD_MAX + 1];
 static HY_EXT_BSS hy_ob_rec_t s_rec;
 static hook_rt_t s_hk[HY_HOOK_MAX];
 static hy_ob_t *s_ob;
+static uint32_t s_ob_epoch;              /* counts outbox opens (an MQTT acknowledgement names the open it belongs to) */
 static bool s_ob_ram;
 static bool s_storage_err;               /* RAM fallback for the saved settings */
 static bool s_override;
@@ -135,6 +137,11 @@ static void notify(uint32_t bits)
     if (s_task) {
         xTaskNotify(s_task, bits, eSetBits);
     }
+}
+
+void hy_integ_notify(uint32_t bits)
+{
+    notify(bits);
 }
 
 static int8_t batt_pct(void)
@@ -352,6 +359,7 @@ static bool ob_ensure(void)
             return false;
         }
     }
+    s_ob_epoch++;
     s_ob_write_ms = mono_ms();
     s_ob_dirty = s_ack_dirty = false;
     ob_drop_off();
@@ -508,6 +516,24 @@ static void ob_flush(void)
         s_ack_dirty = false;   /* nothing was owed */
     }
     s_ob_dirty = hy_ob_dirty(s_ob);
+}
+
+/* ---------------------------------------------------------------- MQTT */
+
+static void mqtt_pass(void)
+{
+    hy_mq_ctx_t c = {
+        .cfg = &s_cfg.mqtt,
+        .net = s_connected,
+        .ob = s_ob,
+        .ob_epoch = s_ob_epoch,
+        .rec = &s_rec,
+        .client_id = s_device,
+    };
+    hy_mq_step(&c);
+    if (c.acked) {
+        s_ob_dirty = s_ack_dirty = true;
+    }
 }
 
 /* ---------------------------------------------------------------- webhooks */
@@ -683,7 +709,7 @@ static void publish_status(bool force_notify)
     }
     hy_integ_status_t prev, st;
     memset(&st, 0, sizeof st);
-    st.mqtt = s_cfg.mqtt.on ? HY_MQS_WAITING : HY_MQS_OFF;
+    hy_mq_status(&st.mqtt, &st.mqtt_err, &st.mqtt_since);
     st.ha = s_cfg.mqtt.on && s_cfg.mqtt.ha;
     st.mqtt_pending = s_st.pending[0];
     st.n_hooks = s_cfg.n_hooks;
@@ -757,16 +783,17 @@ static void publish_status(bool force_notify)
 
 /* ---------------------------------------------------------------- the task */
 
-/* Ticks until the earliest retry deadline or the state write that the outbox owes (the 10 s redelivery bound needs
- * a flush at least HY_OB_FLUSH_S after the last write even when nothing else happens). Only while connected as a
- * client; otherwise no timeout, so the task adds no wakeups while offline. */
+/* Ticks until the earliest retry deadline, the next deadline of the MQTT client (an in-flight timeout, a start retry)
+ * or the state write that the outbox owes (the 10 s redelivery bound needs a flush at least HY_OB_FLUSH_S after the
+ * last write even when nothing else happens). Only while connected as a client; otherwise no timeout, so the task
+ * adds no wakeups while offline. */
 static TickType_t wait_ticks(void)
 {
     if (!s_connected) {
         return portMAX_DELAY;
     }
     int64_t now = mono_ms();
-    int64_t next = INT64_MAX;
+    int64_t next = hy_mq_next_ms();
     if (s_ob) {
         for (unsigned i = 0; i < HY_HOOK_MAX; i++) {
             if (hook_on(&s_cfg, i) && !s_hk[i].paused && s_st.pending[1 + i] && s_hk[i].deadline_ms < next) {
@@ -812,6 +839,7 @@ static void integ_task(void *arg)
             }
         }
         drain_ring();
+        mqtt_pass();   /* before the webhooks: a slow POST never holds back an acknowledgement */
         if (bits & HY_IB_TEST) {
             run_test();
         }
@@ -986,9 +1014,8 @@ static void dbg_print(void)
     xSemaphoreTake(s_mx, portMAX_DELAY);
     __typeof__(s_dbg) d = s_dbg;
     xSemaphoreGive(s_mx);
-    printf("integ: mqtt %s, error %s; override %s; connected %s\n",
-           st.mqtt == HY_MQS_OFF ? "off" : "on (no client yet)", hy_integ_err_name((hy_integ_err_t)st.mqtt_err),
-           st.override ? "yes" : "no", s_pub_connected ? "yes" : "no");
+    hy_mq_debug_print();
+    printf("integ: override %s; connected %s\n", st.override ? "yes" : "no", s_pub_connected ? "yes" : "no");
     for (unsigned i = 0; i < d.n_hooks && i < HY_HOOK_MAX; i++) {
         const dbg_hook_t *h = &d.hook[i];
         printf("integ: hook %u host %s, on %s, events 0x%03x, secret set %s, failures %u, retry in %d s, paused %s, "
@@ -1067,7 +1094,7 @@ static unsigned synth_push(hy_iev_t type, const char *code, unsigned n)
 static bool need_override(void)
 {
     if (!atomic_load(&s_ovr_active)) {
-        printf("integ: override first (integ hook <url> [secret])\n");
+        printf("integ: override first (integ hook <url> [secret] or integ mqtt <url> [base])\n");
         return false;
     }
     return true;
@@ -1143,6 +1170,28 @@ void hy_integ_debug(const char *args)
             notify(HY_IB_APPLY);
             printf("integ: override hook %s://%s%s\n", tls ? "https" : "http", host, secret[0] ? ", secret set" : "");
         }
+    } else if (strcmp(cmd, "mqtt") == 0) {
+        const char *url = next_word(&rest);
+        const char *base = next_word(&rest);
+        if (!base[0]) {
+            base = "hygeia-test";
+        }
+        hy_url_t u;
+        if (hy_url_parse(url, true, &u) != HY_OK || hy_integ_check_topic(base) != HY_OK) {
+            printf("integ: usage: integ mqtt <mqtt(s)://host[:port]> [base]\n");
+        } else {
+            xSemaphoreTake(s_mx, portMAX_DELAY);
+            hy_integ_defaults(&s_ovr_pending);
+            s_ovr_pending.mqtt.on = true;
+            strlcpy(s_ovr_pending.mqtt.url, url, sizeof s_ovr_pending.mqtt.url);
+            strlcpy(s_ovr_pending.mqtt.base, base, sizeof s_ovr_pending.mqtt.base);
+            s_ovr_pending.mqtt.ha = false;
+            s_ovr_cmd = OVR_ON;
+            xSemaphoreGive(s_mx);
+            notify(HY_IB_APPLY);
+            printf("integ: override mqtt %s://%s:%u base %s, discovery off\n", u.tls ? "mqtts" : "mqtt", u.host,
+                   (unsigned)u.port, base);
+        }
     } else if (strcmp(cmd, "off") == 0) {
         atomic_store(&s_ovr_active, false);
         xSemaphoreTake(s_mx, portMAX_DELAY);
@@ -1210,8 +1259,8 @@ void hy_integ_debug(const char *args)
             dbg_tcp(host, port);
         }
     } else {
-        printf("integ: commands: (status) | hook <url> [secret] | fire <event> [code] | fill <n> | burst <n> | kick | "
-               "sign <secret> <text> | tcp <host> <port> | off\n");
+        printf("integ: commands: (status) | hook <url> [secret] | mqtt <url> [base] | fire <event> [code] | fill <n> | "
+               "burst <n> | kick | sign <secret> <text> | tcp <host> <port> | off\n");
     }
     dbg_wipe(buf, sizeof buf);   /* the line may hold a secret */
 }
