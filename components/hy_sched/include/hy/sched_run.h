@@ -1,9 +1,11 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "hy/api.h"
 #include "hy/sched.h"
 
 #ifdef __cplusplus
@@ -39,6 +41,9 @@ esp_err_t hy_sched_run_init(void);
 void      hy_sched_run_tick(void);
 const hy_snapshot_t *hy_sched_snapshot(void);
 uint32_t  hy_sched_generation(void);  /* +1 per evaluation */
+/* LVGL task: the tiles of GET /api/state, one per active medicine in store order, from the last evaluation (the
+   snapshot) and the live medicines; at most max. Returns the count. */
+size_t    hy_sched_tiles(hy_api_tile_t *out, size_t max);
 /* Returns the latched flash request and clears it (the UI calls it when it starts the flash). */
 bool      hy_sched_take_flash(void);
 

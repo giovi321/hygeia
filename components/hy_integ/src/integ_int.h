@@ -67,6 +67,8 @@ typedef struct {
     hy_ob_rec_t *rec;           /* scratch record (PSRAM) */
     const char *client_id;      /* hygeia-<4 hex> */
     bool acked;                 /* out: hy_ob_done was called, the outbox owes a state write */
+    bool state_req;             /* the STATE bit was set: something that shows in the state may have changed */
+    bool dry;                   /* a debug override is in force: commands are logged and do nothing */
 } hy_mq_ctx_t;
 
 /* Delivery task only. Creates and starts the client when MQTT is on and the network is connected as a client
@@ -75,6 +77,9 @@ typedef struct {
  * "offline" first while connected). Takes the acknowledgements and messages the esp-mqtt task queued, publishes
  * "online" and subscribes to the command topics on every connect, and sends the MQTT outbox records one at a time. */
 void    hy_mq_step(hy_mq_ctx_t *c);
+/* Delivery task only. Takes the messages the MQTT task queued (acknowledgements, commands) without the other work of
+ * a step. Called between webhook requests, so a slow POST does not let the queue fill. */
+void    hy_mq_pump(hy_mq_ctx_t *c);
 /* Monotonic ms of the next deadline of the client (an in-flight timeout, a start retry, a held send), INT64_MAX
  * when none. Delivery task only. */
 int64_t hy_mq_next_ms(void);

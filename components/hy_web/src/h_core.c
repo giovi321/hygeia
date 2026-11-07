@@ -133,16 +133,6 @@ typedef struct {
     hy_api_due_t due[HY_SCHED_MAX_OPEN];
 } state_ctx_t;
 
-static const hy_med_t *snap_med(const hy_snapshot_t *sn, const hy_med_t *live)
-{
-    for (size_t i = 0; i < sn->in.n_meds; i++) {
-        if (sn->in.meds[i].id == live->id) {
-            return &sn->in.meds[i];
-        }
-    }
-    return live;
-}
-
 /* LVGL task: the scheduler snapshot, the medicines, the clock, the battery and the network in one consistent copy */
 static void job_state(void *arg)
 {
@@ -176,40 +166,8 @@ static void job_state(void *arg)
     }
     strlcpy(s->host, ns.host, sizeof s->host);
 
-    const hy_med_t *ms;
-    size_t n = hy_meds(&ms);
-    int64_t now = sn->in.now ? sn->in.now : (int64_t)(s->utc_ms / 1000);
-    size_t nt = 0;
-    for (size_t i = 0; i < n && nt < HY_MAX_MEDS; i++) {
-        if (ms[i].archived) {
-            continue;
-        }
-        hy_api_tile_t *t = &c->tiles[nt++];
-        const hy_med_t *m = &ms[i];
-        t->id = m->id;
-        strlcpy(t->code, m->code, sizeof t->code);
-        strlcpy(t->name, m->name, sizeof t->name);
-        t->color = m->color;
-        t->pills = m->pills_enabled;
-        t->pills_left = m->pills_left;
-        if (sn->in.tz && sn->in.now) {
-            hy_tile_view_t tv;
-            hy_tile_view(snap_med(sn, m), &sn->in, sn->sched, &tv);
-            t->kind = (uint8_t)tv.kind;
-            t->ring = tv.ring;
-            t->last_taken = tv.last_taken;
-        } else {   /* no evaluation yet (clock invalid): no state to show */
-            t->kind = m->type == HY_SCHED_AS_NEEDED ? HY_TILE_AS_NEEDED : HY_TILE_NO_DOSE;
-        }
-        if (s->clock_valid && m->type == HY_SCHED_FIXED && sn->in.tz) {
-            int64_t next;
-            if (hy_occurrences(m, now + 1, now + 8 * 86400 + 1, sn->in.tz, &next, 1) == 1) {
-                t->next_due = next;
-            }
-        }
-    }
+    s->n_tiles = hy_sched_tiles(c->tiles, HY_MAX_MEDS);
     s->tiles = c->tiles;
-    s->n_tiles = nt;
 
     size_t nd = 0;
     for (size_t i = 0; i < sn->out.n_open && nd < HY_SCHED_MAX_OPEN; i++) {

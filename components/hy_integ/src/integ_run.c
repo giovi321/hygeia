@@ -55,6 +55,7 @@ HY_EXT_BSS hy_hook_ev_t g_integ_ring[HY_INTEG_RING];
 atomic_uint g_integ_head, g_integ_tail, g_integ_lost;
 atomic_uint g_integ_wanted;
 static atomic_bool s_any_on;       /* a destination is on: network changes wake the delivery task */
+static atomic_bool s_mq_on;        /* MQTT is on: every bus event asks for a state refresh */
 
 static TaskHandle_t s_task;
 static char s_device[12];          /* the access point name hygeia-<4 hex>, fixed per device */
@@ -203,6 +204,9 @@ static bool fill_med(hy_hook_ev_t *e, uint32_t id, const char *code)
 static void on_bus(const hy_event_t *ev, void *ctx)
 {
     (void)ctx;
+    if (atomic_load(&s_mq_on)) {
+        notify(HY_IB_STATE);   /* any event may change a state topic, also the types no destination wants */
+    }
     hy_iev_t t;
     if (!hy_iev_from_bus(ev->type, &t) || !(atomic_load(&g_integ_wanted) & (1u << t))) {
         return;
@@ -278,6 +282,7 @@ static void publish_wanted(void)
     }
     atomic_store(&g_integ_wanted, w & HY_IE_ALL);
     atomic_store(&s_any_on, any_on(&s_cfg));
+    atomic_store(&s_mq_on, s_cfg.mqtt.on);
 }
 
 static void hook_reset(unsigned i)
@@ -520,17 +525,36 @@ static void ob_flush(void)
 
 /* ---------------------------------------------------------------- MQTT */
 
-static void mqtt_pass(void)
+static void mqtt_ctx(hy_mq_ctx_t *c, bool state_req)
 {
-    hy_mq_ctx_t c = {
-        .cfg = &s_cfg.mqtt,
-        .net = s_connected,
-        .ob = s_ob,
-        .ob_epoch = s_ob_epoch,
-        .rec = &s_rec,
-        .client_id = s_device,
-    };
+    memset(c, 0, sizeof *c);
+    c->cfg = &s_cfg.mqtt;
+    c->net = s_connected;
+    c->ob = s_ob;
+    c->ob_epoch = s_ob_epoch;
+    c->rec = &s_rec;
+    c->client_id = s_device;
+    c->state_req = state_req;
+    c->dry = s_override;
+}
+
+static void mqtt_pass(bool state_req)
+{
+    hy_mq_ctx_t c;
+    mqtt_ctx(&c, state_req);
     hy_mq_step(&c);
+    if (c.acked) {
+        s_ob_dirty = s_ack_dirty = true;
+    }
+}
+
+/* Between webhook requests: a POST can take about 10 s, so the queue of the MQTT task is emptied after each one
+ * (acknowledgements, commands). Nothing else of a step runs here. */
+static void mqtt_pump(void)
+{
+    hy_mq_ctx_t c;
+    mqtt_ctx(&c, false);
+    hy_mq_pump(&c);
     if (c.acked) {
         s_ob_dirty = s_ack_dirty = true;
     }
@@ -588,6 +612,7 @@ static void deliver_hook(unsigned i)
         }
         hy_integ_err_t err = HY_HE_NONE;
         int status = hy_wh_post(h->url, h->secret, s_rec.payload, strlen(s_rec.payload), &err);
+        mqtt_pump();
         hk->at = wall_now();
         hk->http = status > 0 ? (int16_t)status : 0;
         switch (hy_hook_verdict(status)) {
@@ -839,7 +864,7 @@ static void integ_task(void *arg)
             }
         }
         drain_ring();
-        mqtt_pass();   /* before the webhooks: a slow POST never holds back an acknowledgement */
+        mqtt_pass((bits & HY_IB_STATE) != 0);   /* before the webhooks: a slow POST never holds back an acknowledgement */
         if (bits & HY_IB_TEST) {
             run_test();
         }

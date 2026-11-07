@@ -52,6 +52,7 @@ export default defineConfig({
         {
           label: 'Integrations',
           items: [
+            { label: 'MQTT', link: '/integrations/mqtt/' },
             { label: 'Webhooks', link: '/integrations/webhooks/' },
           ],
         },

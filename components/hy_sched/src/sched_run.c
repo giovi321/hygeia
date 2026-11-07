@@ -17,6 +17,7 @@
 #include "hy/power_run.h"
 #include "hy/sched_run.h"
 #include "hy/store.h"
+#include "hy/summary.h"
 #include "hy/tzlock.h"
 
 static const char *TAG = "sched";
@@ -581,6 +582,56 @@ void hy_sched_run_tick(void)
 const hy_snapshot_t *hy_sched_snapshot(void)
 {
     return &s_snap;
+}
+
+static const hy_med_t *snap_med(const hy_snapshot_t *sn, const hy_med_t *live)
+{
+    for (size_t i = 0; i < sn->in.n_meds; i++) {
+        if (sn->in.meds[i].id == live->id) {
+            return &sn->in.meds[i];
+        }
+    }
+    return live;
+}
+
+size_t hy_sched_tiles(hy_api_tile_t *out, size_t max)
+{
+    const hy_snapshot_t *sn = &s_snap;
+    const hy_med_t *ms;
+    size_t n = hy_meds(&ms);
+    bool valid = hy_clock_valid();
+    int64_t now = sn->in.now ? sn->in.now : (valid ? (int64_t)time(NULL) : 0);
+    size_t nt = 0;
+    for (size_t i = 0; i < n && nt < max; i++) {
+        if (ms[i].archived) {
+            continue;
+        }
+        hy_api_tile_t *t = &out[nt++];
+        const hy_med_t *m = &ms[i];
+        memset(t, 0, sizeof *t);
+        t->id = m->id;
+        strlcpy(t->code, m->code, sizeof t->code);
+        strlcpy(t->name, m->name, sizeof t->name);
+        t->color = m->color;
+        t->pills = m->pills_enabled;
+        t->pills_left = m->pills_left;
+        if (sn->in.tz && sn->in.now) {
+            hy_tile_view_t tv;
+            hy_tile_view(snap_med(sn, m), &sn->in, sn->sched, &tv);
+            t->kind = (uint8_t)tv.kind;
+            t->ring = tv.ring;
+            t->last_taken = tv.last_taken;
+        } else {   /* no evaluation yet (clock invalid): no state to show */
+            t->kind = m->type == HY_SCHED_AS_NEEDED ? HY_TILE_AS_NEEDED : HY_TILE_NO_DOSE;
+        }
+        if (valid && m->type == HY_SCHED_FIXED && sn->in.tz) {
+            int64_t next;
+            if (hy_occurrences(m, now + 1, now + 8 * 86400 + 1, sn->in.tz, &next, 1) == 1) {
+                t->next_due = next;
+            }
+        }
+    }
+    return nt;
 }
 
 uint32_t hy_sched_generation(void)
