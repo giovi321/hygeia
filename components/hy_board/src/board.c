@@ -722,7 +722,14 @@ static esp_err_t board_init_once(void)
         ESP_LOGE(TAG, "lvgl adapter start: %s", esp_err_to_name(err));
         return err;
     }
-    bsp_display_brightness_set(50);
+    /* the LVGL task may already be flushing: same SPI device, so under the LVGL lock (see hy_board_set_brightness) */
+    if (hy_board_lock(1000)) {
+        bsp_display_brightness_set(50);
+        hy_board_unlock();
+    } else {
+        ESP_LOGW(TAG, "brightness: LVGL lock not taken in 1 s, sending anyway");
+        bsp_display_brightness_set(50);
+    }
 
     ESP_LOGI(TAG, "heap free: internal %u, dma %u, psram %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -1427,7 +1434,21 @@ void hy_board_set_brightness(uint8_t pct)
     if (s_panel_off || s_bri_hold) {
         return;   /* applied by the wake once the first frame is sent */
     }
+    /* The brightness goes to the panel over the same SPI device as the LVGL flushes. Two tasks acquiring that device
+     * at once can leave one waiting for ever (seen once at boot: app_main's brightness against the splash's first
+     * frame), so a caller outside the LVGL task takes the LVGL lock first; the panel IO then waits for the queued
+     * colour transfers itself. The lock is recursive, so a caller that already holds it is fine. */
+    bool locked = false;
+    if (!hy_board_in_lvgl_task()) {
+        locked = hy_board_lock(1000);
+        if (!locked) {
+            ESP_LOGW(TAG, "brightness: LVGL lock not taken in 1 s, sending anyway");
+        }
+    }
     bsp_display_brightness_set(pct);
+    if (locked) {
+        hy_board_unlock();
+    }
 }
 
 bool hy_board_in_lvgl_task(void)

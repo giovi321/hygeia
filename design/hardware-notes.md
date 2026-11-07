@@ -8,6 +8,7 @@ Observed on the Waveshare ESP32-S3-Touch-AMOLED-2.16 with the registry BSP (wave
 - The panel driver logs three warnings (commands 3Ah, 36h, 29h overwritten by the external init sequence); expected with the BSP init table
 - Panel creation and init take about 1.3 s after boot (log 0.6 s to 1.9 s)
 - Registry BSP path was sufficient: full 480-wide flushes, even-aligned, no custom init sequence needed
+- Brightness and LVGL flushes share one SPI device. Two tasks acquiring it at once can leave one waiting for ever: one boot (2026-11-07) stopped after the splash with the main task blocked in its brightness write while the LVGL task sent the first frame; no watchdog line, the LVGL task kept reading touches. A brightness write from outside the LVGL task now takes the LVGL lock first (recursive, 1 s, a warning and a send without it on timeout). 12 resets after the change all booted
 
 ## Resolution and flush areas
 
