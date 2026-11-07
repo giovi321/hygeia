@@ -33,7 +33,7 @@ The one exception is [Cabinet open](../cabinet-open/) while it is live: on, with
 
 ## The radio, MQTT and webhooks
 
-MQTT and webhooks follow the battery rule of the radio. They send only while the radio is on for another reason and the device is connected to a network as a client, never in access point mode. They never turn the radio on, never keep it on, and their traffic does not count as activity, so it does not delay the 10 minute stop on battery. While the radio is off, events wait in the outbox and the delivery task sleeps without a timer, so it adds no wakeups to light sleep. On battery a receiver therefore gets events in bursts, when you next turn Wi-Fi on or plug in USB. See [Webhooks](../../integrations/webhooks/).
+MQTT and webhooks follow the battery rule of the radio. They send only while the radio is on for another reason and the device is connected to a network as a client, never in access point mode. They never turn the radio on, never keep it on, and their traffic does not count as activity, so it does not delay the 10 minute stop on battery. The status request that an open Settings page makes when the integration status changes does not count either. While the radio is off, events wait in the outbox and the delivery task sleeps without a timer, so it adds no wakeups to light sleep. On battery a receiver therefore gets events in bursts, when you next turn Wi-Fi on or plug in USB. See [Webhooks](../../integrations/webhooks/).
 
 ## PWR key
 

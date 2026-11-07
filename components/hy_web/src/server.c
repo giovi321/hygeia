@@ -296,7 +296,9 @@ static esp_err_t api_handler(httpd_req_t *req)
         web_send_err(&r, 409, "busy", NULL, "An import is running, try again when it is done");
         goto done;
     }
-    hy_net_activity();
+    if (rt->id != HY_R_INTEG) {
+        hy_net_activity();   /* the Settings page reads the integration status by itself: not someone acting */
+    }
 
     web_handler_t h = web_route_handler(rt->id);
     if (!h) {
