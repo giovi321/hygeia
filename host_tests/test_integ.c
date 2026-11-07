@@ -570,6 +570,7 @@ static void test_settings_full_json(void)
 
 static const char *s_needle;
 static unsigned s_leaks;
+static bool s_zero;   /* models the device's json_free, which zeroes every block before freeing it */
 
 static void *track_malloc(size_t n)
 {
@@ -584,12 +585,13 @@ static void track_free(void *q)
     if (!q) return;
     size_t *p = (size_t *)((char *)q - 16);
     size_t n = p[0], k = strlen(s_needle);
+    if (s_zero) memset(q, 0, n);
     for (size_t i = 0; i + k <= n; i++)
         if (memcmp((char *)q + i, s_needle, k) == 0) s_leaks++;
     free(p);
 }
 
-static unsigned leaks_of(const char *body, const char *needle, bool settings_parse)
+static unsigned leaks_of_mode(const char *body, const char *needle, bool settings_parse, bool zero)
 {
     hy_settings_t cur, next;
     hy_integ_t ic = cfg_with_secrets(), io;
@@ -598,6 +600,7 @@ static unsigned leaks_of(const char *body, const char *needle, bool settings_par
     hy_settings_defaults(&cur);
     s_needle = needle;
     s_leaks = 0;
+    s_zero = zero;
     cJSON_InitHooks(&h);
     if (settings_parse) (void)hy_api_settings_from_json(body, &cur, &next, &e);
     else (void)hy_api_integ_from_json(body, &ic, &io, &e);
@@ -605,21 +608,40 @@ static unsigned leaks_of(const char *body, const char *needle, bool settings_par
     return s_leaks;
 }
 
+static unsigned leaks_of(const char *body, const char *needle, bool settings_parse)
+{
+    return leaks_of_mode(body, needle, settings_parse, false);
+}
+
 static void test_secrets_wiped_before_free(void)
 {
-    const char *body = "{\"volume\":50,\"mqtt\":{\"on\":true,\"url\":\"mqtt://broker.lan\",\"password\":\"pw-hunter2\"},"
-                       "\"webhooks\":[{\"url\":\"https://n8n.lan/webhook/hygeia\",\"secret\":\"hook-secret-1\"}]}";
+    const char *body = "{\"volume\":50,\"mqtt\":{\"on\":true,\"url\":\"mqtt://broker.lan\",\"password\":\"example-secret\"},"
+                       "\"webhooks\":[{\"url\":\"https://n8n.lan/webhook/hygeia\",\"secret\":\"example-secret-2\"}]}";
     /* the settings parse builds its own tree from the same body */
-    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "pw-hunter2", true));
-    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "hook-secret-1", true));
-    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "pw-hunter2", false));
-    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "hook-secret-1", false));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "example-secret", true));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "example-secret-2", true));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "example-secret", false));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(body, "example-secret-2", false));
     /* a body that fails to merge still wipes */
-    const char *bad = "{\"volume\":\"x\",\"mqtt\":{\"password\":\"pw-hunter2\"}}";
-    TEST_ASSERT_EQUAL_UINT(0, leaks_of(bad, "pw-hunter2", true));
+    const char *bad = "{\"volume\":\"x\",\"mqtt\":{\"password\":\"example-secret\"}}";
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(bad, "example-secret", true));
+    /* repeated secret keys and repeated mqtt / webhooks members: every copy is wiped by the tree walk alone */
+    const char *dup = "{\"mqtt\":{\"password\":\"example-secret\",\"password\":\"example-secret-2\"},"
+                      "\"mqtt\":{\"password\":\"example-secret-3\"},"
+                      "\"webhooks\":[{\"url\":\"https://n8n.lan/h\",\"secret\":\"example-secret-4\","
+                      "\"secret\":\"example-secret-5\"}]}";
+    /* every value starts with "example-secret", so one needle finds any copy left behind */
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(dup, "example-secret", true));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of(dup, "example-secret", false));
+    /* malformed JSON: cJSON frees the partial tree itself before any wipe can see it. Only the device's zeroing
+     * free covers that path, so this case runs with the hook that models it */
+    const char *torn = "{\"mqtt\":{\"password\":\"example-secret\"},\"webhooks\":[{\"secret\":\"example-secret-2\"";
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of_mode(torn, "example-secret", true, true));
+    TEST_ASSERT_EQUAL_UINT(0, leaks_of_mode(torn, "example-secret", false, true));
     /* control: a plain delete of the same body does leave the needle in the freed block */
     cJSON_Hooks h = { track_malloc, track_free };
-    s_needle = "pw-hunter2";
+    s_needle = "example-secret";
+    s_zero = false;
     s_leaks = 0;
     cJSON_InitHooks(&h);
     cJSON_Delete(cJSON_Parse(body));

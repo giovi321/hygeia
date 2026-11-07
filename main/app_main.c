@@ -509,8 +509,16 @@ static void *json_malloc(size_t size)
                                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
+/* Overwrites every block before it is freed: a tree built from a request body can hold the MQTT password or a
+ * webhook secret, also in the part cJSON frees itself after a parse error. */
 static void json_free(void *p)
 {
+    if (p) {
+        volatile unsigned char *v = (volatile unsigned char *)p;
+        for (size_t n = heap_caps_get_allocated_size(p); n; n--) {
+            *v++ = 0;
+        }
+    }
     heap_caps_free(p);
 }
 

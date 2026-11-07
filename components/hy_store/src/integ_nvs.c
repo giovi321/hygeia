@@ -38,7 +38,8 @@ static void get_str(nvs_handle_t h, const char *key, char *dst, size_t size)
     if (nvs_get_str(h, key, tmp, &n) == ESP_OK && n <= size) {
         memcpy(dst, tmp, n);
     }
-    memset(tmp, 0, sizeof tmp);   /* may hold a password or a secret */
+    volatile unsigned char *w = (volatile unsigned char *)tmp;   /* may hold a password or a secret */
+    for (size_t i = 0; i < sizeof tmp; i++) w[i] = 0;
 }
 
 static void key_of(char *out, size_t n, unsigned i, const char *suffix)

@@ -65,6 +65,11 @@ void hy_job_put(hy_job_t *j)
     }
     if (atomic_fetch_sub(&j->ref, 1) == 1) {
         vSemaphoreDelete(j->sem);
+        /* A context can hold a request body with secrets: overwrite all of it, also when the job never ran. */
+        volatile unsigned char *v = (volatile unsigned char *)j->ctx;
+        for (size_t n = j->ctx_size; n; n--) {
+            *v++ = 0;
+        }
         heap_caps_free(j);
     }
 }

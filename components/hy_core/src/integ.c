@@ -321,22 +321,25 @@ static void wipe(void *p, size_t n)
     while (n--) *v++ = 0;
 }
 
+/* Every child with the key, not only the first: a body with a repeated key keeps both copies in the tree. */
 static void wipe_strings(cJSON *obj, const char *key)
 {
-    cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, key);
-    if (cJSON_IsString(it) && it->valuestring) wipe(it->valuestring, strlen(it->valuestring));
+    for (cJSON *it = obj->child; it; it = it->next)
+        if (it->string && strcmp(it->string, key) == 0 && cJSON_IsString(it) && it->valuestring)
+            wipe(it->valuestring, strlen(it->valuestring));
 }
 
 /* Overwrites the secret strings of a parsed settings body (see hy/integ.h). */
 void hy_api_integ_wipe_tree(struct cJSON *o)
 {
     if (!o) return;
-    cJSON *m = cJSON_GetObjectItemCaseSensitive(o, "mqtt");
-    if (cJSON_IsObject(m)) wipe_strings(m, "password");
-    cJSON *w = cJSON_GetObjectItemCaseSensitive(o, "webhooks");
-    if (cJSON_IsArray(w))
-        for (cJSON *h = w->child; h; h = h->next)
-            if (cJSON_IsObject(h)) wipe_strings(h, "secret");
+    for (cJSON *m = o->child; m; m = m->next) {   /* repeated "mqtt" or "webhooks" keys are all visited */
+        if (!m->string) continue;
+        if (strcmp(m->string, "mqtt") == 0 && cJSON_IsObject(m)) wipe_strings(m, "password");
+        else if (strcmp(m->string, "webhooks") == 0 && cJSON_IsArray(m))
+            for (cJSON *h = m->child; h; h = h->next)
+                if (cJSON_IsObject(h)) wipe_strings(h, "secret");
+    }
 }
 
 /* Working copy of the merge (about 1.8 KB, in PSRAM, off every stack). Only the LVGL task calls

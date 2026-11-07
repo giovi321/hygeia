@@ -32,6 +32,7 @@ static int64_t utc_ms_now(void)
 
 typedef struct {
     const char *body;
+    size_t body_len;   /* the length of the copy, whatever bytes it holds */
     web_settings_t w;
 } sctx_t;
 
@@ -143,13 +144,16 @@ static void job_settings_put(void *arg)
     sctx_t *c = arg;
     web_settings_apply_json(c->body, &c->w);
     if (c->body) {
-        wipe((char *)c->body, strlen(c->body));
+        wipe((char *)c->body, c->body_len);
     }
 }
 
 static esp_err_t h_settings_put(web_req_t *r)
 {
     hy_job_t *j = web_job_new(r, job_settings_put, sizeof(sctx_t));
+    if (j) {
+        ((sctx_t *)hy_job_ctx(j))->body_len = r->body_len;
+    }
     if (r->body && r->body_len) {
         wipe(r->body, r->body_len);   /* the job holds its own copy; the dispatcher frees this one */
     }
