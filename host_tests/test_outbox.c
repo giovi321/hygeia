@@ -484,11 +484,13 @@ static void test_ob_unreadable_segment_skips_nothing(void)
     snprintf(b, sizeof b, "%s/away", odir);
     for (unsigned i = 0; i < 5; i++) add(ob, 0x01, i);
     TEST_ASSERT_EQUAL_INT(0, rename(a, b));
+    TEST_ASSERT_EQUAL_INT(0, mkdir(a, 0775)); /* opens, but cannot be read: a transient-looking error */
     TEST_ASSERT_EQUAL(HY_E_IO, hy_ob_peek(ob, 0, &rec));
     TEST_ASSERT_EQUAL(HY_E_IO, hy_ob_peek(ob, 0, &rec));
     hy_ob_stats(ob, &st);
     TEST_ASSERT_EQUAL_UINT32(0, st.corrupt);
     TEST_ASSERT_EQUAL_UINT32(5, st.pending[0]);
+    TEST_ASSERT_EQUAL_INT(0, rmdir(a));
     TEST_ASSERT_EQUAL_INT(0, rename(b, a));
     for (uint32_t s = 0; s < 5; s++) deliver(ob, 0, s);
     hy_ob_close(ob);
@@ -545,6 +547,47 @@ static void test_ob_failed_unlink_does_not_force_state_writes(void)
     hy_ob_close(ob);
 }
 
+static void test_ob_missing_segment_is_skipped(void)
+{
+    hy_ob_t *ob = op(true);
+    hy_ob_stats_t st;
+    char a[160];
+    snprintf(a, sizeof a, "%s/00000000.q", odir);
+    for (unsigned i = 0; i < 5; i++) add(ob, 0x01, i);
+    TEST_ASSERT_EQUAL_INT(0, unlink(a));
+    TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
+    hy_ob_stats(ob, &st);
+    TEST_ASSERT_EQUAL_UINT32(5, st.corrupt);
+    TEST_ASSERT_EQUAL_UINT32(0, st.pending[0]);
+    TEST_ASSERT_EQUAL_UINT32(5, add(ob, 0x01, 5));
+    deliver(ob, 0, 5);
+    hy_ob_close(ob);
+}
+
+static void test_ob_failed_cut_on_empty_segment_keeps_next_record(void)
+{
+    hy_ob_t *ob = op(true);
+    hy_ob_close(ob);
+    char path[160];
+    snprintf(path, sizeof path, "%s/00000000.q", odir);
+    FILE *f = fopen(path, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("0\t1000\t1\t0123", f);
+    fclose(f);
+    snprintf(path, sizeof path, "%s/00000000.tmp", odir);
+    TEST_ASSERT_EQUAL_INT(0, mkdir(path, 0775));
+    ob = reopen();
+    TEST_ASSERT_EQUAL_UINT32(0, add(ob, 0x01, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, add(ob, 0x01, 1));
+    hy_ob_close(ob);
+    ob = reopen();
+    deliver(ob, 0, 0);
+    TEST_ASSERT_EQUAL_STRING("{\"i\":0}", rec.payload);
+    deliver(ob, 0, 1);
+    TEST_ASSERT_EQUAL(HY_E_NOT_FOUND, hy_ob_peek(ob, 0, &rec));
+    hy_ob_close(ob);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -566,6 +609,8 @@ int main(void)
     RUN_TEST(test_ob_state_writes_coalesced);
     RUN_TEST(test_ob_payload_rules);
     RUN_TEST(test_ob_ram_backend_no_files);
+    RUN_TEST(test_ob_missing_segment_is_skipped);
+    RUN_TEST(test_ob_failed_cut_on_empty_segment_keeps_next_record);
     RUN_TEST(test_ob_unreadable_segment_skips_nothing);
     RUN_TEST(test_ob_failed_cut_never_glues_next_record);
     RUN_TEST(test_ob_failed_unlink_does_not_force_state_writes);

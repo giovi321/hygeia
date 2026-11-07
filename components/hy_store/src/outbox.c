@@ -491,9 +491,11 @@ static hy_err_t file_append(hy_ob_t *ob, int64_t at, uint8_t mask, const char *p
     size_t total = (size_t)hl + 9 + plen;
     ob->line[total++] = '\n';
 
+    /* A new segment under the name of a file that still holds a torn line starts on a fresh line. */
+    bool lead = fresh && old > 0;
     FILE *f = fopen(path, "a");
     if (!f) return HY_E_IO;
-    bool ok = fwrite(ob->line, 1, total, f) == total && fflush(f) == 0 && fsync(fileno(f)) == 0;
+    bool ok = (!lead || fputc('\n', f) != EOF) && fwrite(ob->line, 1, total, f) == total && fflush(f) == 0 && fsync(fileno(f)) == 0;
     ok = (fclose(f) == 0) && ok;
     if (!ok) {
         if (fresh && old == 0) unlink(path);
@@ -501,9 +503,13 @@ static hy_err_t file_append(hy_ob_t *ob, int64_t at, uint8_t mask, const char *p
         return HY_E_IO;
     }
     if (fresh) {
-        ob->segs[ob->nseg].first = seq;
-        ob->segs[ob->nseg].count = 1;
-        ob->nseg++;
+        if (ob->nseg > 0 && ob->segs[ob->nseg - 1].first == seq) {
+            ob->segs[ob->nseg - 1].count = 1; /* the torn file's own entry */
+        } else {
+            ob->segs[ob->nseg].first = seq;
+            ob->segs[ob->nseg].count = 1;
+            ob->nseg++;
+        }
         ob->seal = false;
     } else {
         ob->segs[ob->nseg - 1].count++;
@@ -549,7 +555,7 @@ static int file_read(hy_ob_t *ob, uint32_t seq, hy_ob_rec_t *out)
     char path[OB_PATH_MAX];
     seg_path(ob, path, sizeof path, ob->segs[i - 1].first, "q");
     FILE *f = fopen(path, "r");
-    if (!f) return -1;
+    if (!f) return errno == ENOENT ? 0 : -1; /* a segment that is gone loses its records; other errors retry */
     size_t n;
     bool term, found = false;
     while (!found && rd_line(f, ob->line, OB_LINEBUF, &n, &term)) {
