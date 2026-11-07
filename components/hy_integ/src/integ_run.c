@@ -53,6 +53,7 @@ static const char *TAG = "integ";
 HY_EXT_BSS hy_hook_ev_t g_integ_ring[HY_INTEG_RING];
 atomic_uint g_integ_head, g_integ_tail, g_integ_lost;
 atomic_uint g_integ_wanted;
+static atomic_bool s_any_on;       /* a destination is on: network changes wake the delivery task */
 
 static TaskHandle_t s_task;
 static char s_device[12];          /* the access point name hygeia-<4 hex>, fixed per device */
@@ -222,7 +223,9 @@ static void on_net(const hy_net_status_t *st, void *ctx)
 {
     (void)st;
     (void)ctx;
-    notify(HY_IB_NET);
+    if (atomic_load(&s_any_on)) {   /* with every destination off no task wakes */
+        notify(HY_IB_NET);
+    }
 }
 
 /* ---------------------------------------------------------------- config (delivery task) */
@@ -265,6 +268,7 @@ static void publish_wanted(void)
         }
     }
     atomic_store(&g_integ_wanted, w & HY_IE_ALL);
+    atomic_store(&s_any_on, any_on(&s_cfg));
 }
 
 static void hook_reset(unsigned i)
@@ -279,7 +283,12 @@ static void hook_reset(unsigned i)
 
 static void ob_drop(uint8_t dest)
 {
-    if (s_ob) {
+    if (!s_ob) {
+        return;
+    }
+    hy_ob_stats_t st;
+    hy_ob_stats(s_ob, &st);
+    if (st.pending[dest] > 0) {   /* a drop of nothing changes nothing and owes no state write */
         hy_ob_drop_dest(s_ob, dest);
         s_ob_dirty = true;
     }
@@ -472,17 +481,22 @@ static void drain_ring(void)
     }
 }
 
+/* State write after a pass. Forced only before blocking while offline (and by hy_ob_close); otherwise at most one
+ * write per HY_OB_FLUSH_S, and at least HY_OB_FLUSH_S after the last ack (wait_ticks wakes for it). A forced or due
+ * call that writes nothing ends our dirty flag: either nothing was left to write or the write failed, and the outbox
+ * keeps its own state for the next ack, so the timer does not wake forever. */
 static void ob_flush(bool force)
 {
     if (!s_ob) {
         return;
     }
     int64_t now = mono_ms();
-    if (hy_ob_flush(s_ob, force)) {
+    bool due = s_ob_dirty && now >= s_ob_write_ms + HY_OB_FLUSH_S * 1000;
+    if (hy_ob_flush(s_ob, force || due)) {
         s_ob_dirty = false;
         s_ob_write_ms = now;
-    } else if (s_ob_dirty && now >= s_ob_write_ms + HY_OB_FLUSH_S * 1000) {
-        s_ob_write_ms = now;   /* the write was due and failed: the outbox tries again HY_OB_FLUSH_S later */
+    } else if (force || due) {
+        s_ob_dirty = false;
     }
 }
 
@@ -565,6 +579,30 @@ static void deliver_hook(unsigned i)
             hk->deadline_ms = mono_ms() + (int64_t)hy_hook_retry_s(hk->failures) * 1000;
             hk->err = status > 0 ? HY_HE_HTTP : err;
             return;
+        }
+    }
+}
+
+/* A paused hook sends nothing, but its records still age: on any wake, expired records at its head are counted as
+ * expired (no request). At most HOOK_BATCH per hook per wake; the rest follow at later wakes. */
+static void expire_paused(void)
+{
+    if (!s_ob) {
+        return;
+    }
+    bool valid = hy_clock_valid();
+    int64_t now = (int64_t)time(NULL);
+    for (unsigned i = 0; i < HY_HOOK_MAX; i++) {
+        if (!hook_on(&s_cfg, i) || !s_hk[i].paused) {
+            continue;
+        }
+        uint8_t dest = (uint8_t)(1 + i);
+        for (int k = 0; k < HOOK_BATCH; k++) {
+            if (hy_ob_peek(s_ob, dest, &s_rec) != HY_OK || !hy_ob_expired(s_rec.at, now, valid)) {
+                break;
+            }
+            hy_ob_done(s_ob, dest, s_rec.seq, HY_OBO_EXPIRED);
+            s_ob_dirty = true;
         }
     }
 }
@@ -767,11 +805,10 @@ static void integ_task(void *arg)
         if (bits & HY_IB_TEST) {
             run_test();
         }
+        expire_paused();
         deliver();
         if (s_ob) {
-            hy_ob_stats(s_ob, &s_st);
-            bool idle = atomic_load(&g_integ_head) == atomic_load(&g_integ_tail) && s_st.live == 0;
-            ob_flush(idle || !s_connected);   /* forced when drained and nothing waits, or before blocking offline */
+            ob_flush(!s_connected && s_ob_dirty);   /* forced only before blocking with no timeout while offline */
         }
         publish_status((bits & HY_IB_TEST) != 0);
         wait = wait_ticks();
@@ -862,11 +899,14 @@ esp_err_t hy_integ_test(uint8_t index)
     if (!s_task) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* Read here: with every destination off the delivery task does not follow network changes */
+    hy_net_status_t ns;
+    hy_net_status(&ns);
     esp_err_t r = ESP_OK;
     xSemaphoreTake(s_mx, portMAX_DELAY);
     if (index >= s_status.n_hooks) {
         r = ESP_ERR_INVALID_ARG;
-    } else if (!s_pub_connected) {
+    } else if (ns.state != HY_NS_CONNECTED) {
         r = ESP_ERR_INVALID_STATE;
     } else if (s_status.test_running || hy_heavy_owner()) {
         r = ESP_ERR_NOT_FINISHED;
@@ -1096,6 +1136,9 @@ void hy_integ_debug(const char *args)
     } else if (strcmp(cmd, "off") == 0) {
         atomic_store(&s_ovr_active, false);
         xSemaphoreTake(s_mx, portMAX_DELAY);
+        if (s_ovr_cmd == OVR_ON) {
+            dbg_wipe(&s_ovr_pending, sizeof s_ovr_pending);   /* a hook not yet taken: its secret goes */
+        }
         s_ovr_cmd = OVR_OFF;
         xSemaphoreGive(s_mx);
         notify(HY_IB_APPLY);
