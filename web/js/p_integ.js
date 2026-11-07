@@ -226,7 +226,7 @@
       if (mBase.input.value.trim() !== (m.base || "")) { p.base = mBase.input.value.trim(); }
       if (mPass.cleared()) { p.password = ""; } else if (mPass.typed() !== "") { p.password = mPass.typed(); }
       if (!Object.keys(p).length) { HY.toast("Nothing to save"); return; }
-      send({ mqtt: p }, { "mqtt.url": mUrl, "mqtt.user": mUser, "mqtt.password": mPass, "mqtt.base": mBase }, mSave, function () {
+      send("mqtt", { mqtt: p }, { "mqtt.url": mUrl, "mqtt.user": mUser, "mqtt.password": mPass, "mqtt.base": mBase }, mSave, function () {
         HY.toast("MQTT settings saved");
       });
     }
@@ -256,7 +256,7 @@
       if (hOn.input.checked !== !!m.ha) { p.ha = hOn.input.checked; }
       if (hPrefix.input.value.trim() !== (m.ha_prefix || "")) { p.ha_prefix = hPrefix.input.value.trim(); }
       if (!Object.keys(p).length) { HY.toast("Nothing to save"); return; }
-      send({ mqtt: p }, { "mqtt.ha_prefix": hPrefix }, hSave, function () { HY.toast("Home Assistant settings saved"); });
+      send("ha", { mqtt: p }, { "mqtt.ha_prefix": hPrefix }, hSave, function () { HY.toast("Home Assistant settings saved"); });
     }
 
     var haPanel = section("Home Assistant discovery", [
@@ -271,7 +271,7 @@
     var slots = [];
     var hooksSig = JSON.stringify(cfg.webhooks);
     var hooksBox = HY.h("div");
-    var removedNote = HY.h("p", { class: "hint", hidden: true }, "Removed webhooks are deleted when you save.");
+    var removedNote = HY.h("p", { class: "hint", hidden: true }, "Removed webhooks are deleted when you save, and only then can their slots be used again.");
     var addBtn = HY.h("button", { class: "btn", type: "button", onclick: addHook }, "Add webhook");
     var hSaveBtn = HY.h("button", { class: "btn p", type: "button", onclick: saveHooks }, "Save");
     var outbox = HY.h("p", { class: "mut sm", role: "status" });
@@ -300,7 +300,6 @@
         clearTimeout(s.testTimer);
         s.testing = false;
         s.saved0 = h && h.url ? h : null;
-        s.formerlySaved = null;
         s.live = !!s.saved0;
         s.fresh = false;
         s.el = null;   // rebuilt from the saved values
@@ -353,29 +352,31 @@
       });
       if (!live) { hooksBox.appendChild(HY.h("p", { class: "mut" }, "No webhooks.")); }
       removedNote.hidden = !removed;
-      addBtn.disabled = live >= MAX_HOOKS;
+      addBtn.disabled = !freeSlot();
       statusAll();
     }
 
-    function addHook() {
-      var s = null, i;
-      for (i = 0; i < MAX_HOOKS && !s; i++) {
+    // A slot whose webhook was removed in this edit is not used again until the removal is saved: the device would
+    // treat a new address in that slot as a corrected one and hand it the old webhook's waiting events.
+    function freeSlot() {
+      for (var i = 0; i < MAX_HOOKS; i++) {
         if (!slots[i]) { slots[i] = makeSlot(i); }
-        if (!slots[i].live) { s = slots[i]; }
+        if (!slots[i].live && !slots[i].saved()) { return slots[i]; }
       }
+      return null;
+    }
+
+    function addHook() {
+      var s = freeSlot();
       if (!s) { return; }
       s.live = true;
       s.el = null;
-      s.fresh = true;   // a new webhook starts without a secret, whatever the slot held before
-      var keep = s.saved0;
-      s.saved0 = null;
-      s.formerlySaved = keep;
+      s.fresh = true;   // a new webhook starts without a secret
       drawHooks();
       s.url.input.focus();
     }
 
     function removeHook(s) {
-      if (s.formerlySaved && !s.saved0) { s.saved0 = s.formerlySaved; }
       s.live = false;
       s.el = null;
       s.fresh = false;
@@ -409,7 +410,7 @@
         map["webhooks." + i + ".secret"] = s.secret;
         map["webhooks." + i + ".events"] = { input: null, err: s.evErr };
       });
-      send({ webhooks: arr }, map, hSaveBtn, function () { HY.toast("Webhooks saved"); });
+      send("hooks", { webhooks: arr }, map, hSaveBtn, function () { HY.toast("Webhooks saved"); });
     }
 
     function runTest(s) {
@@ -419,10 +420,15 @@
         if (!HY.alive(token)) { return; }
         s.testAfter = fetchId;
         clearTimeout(s.testTimer);
+        // The live message normally brings the result; after 15 s ask for it, in case that message never came
         s.testTimer = setTimeout(function () {
           if (!s.testing) { return; }
-          s.testing = false; s.testMsg = "No result yet. Check the status above";
-          statusAll();
+          fetchStatus();
+          s.testTimer = setTimeout(function () {
+            if (!s.testing) { return; }
+            s.testing = false; s.testMsg = "No result yet. Check the status above";
+            statusAll();
+          }, 5000);
         }, 15000);
         fetchStatus();
       }, function (e) {
@@ -441,14 +447,14 @@
     // ---------------------------------------------------------------- saving
 
     // fields maps an API field name to { input, err } so a refusal marks the field that was refused
-    function send(patch, fields, button, done) {
+    function send(panel, patch, fields, button, done) {
       var k;
       for (k in fields) { if (fields[k].err) { invalid(fields[k].input, "", fields[k].err); } }
       button.disabled = true;
       save(patch).then(function (s) {
         button.disabled = false;
         if (!HY.alive(token)) { return; }
-        take(s, true);
+        take(s, panel);
         done();
       }, function (e) {
         button.disabled = false;
@@ -460,13 +466,14 @@
       });
     }
 
-    // Take the settings the device holds; a panel with unsaved edits keeps them unless force is set
+    // Take the settings the device holds. A panel with unsaved edits keeps them, except the one named in force
+    // ("mqtt", "ha" or "hooks"), which was just saved
     function take(s, force) {
       cfg = { mqtt: s.mqtt || cfg.mqtt, webhooks: s.webhooks || cfg.webhooks };
-      if (force || !mqttDirty()) { fillMqtt(); }
-      if (force || !haDirty()) { fillHa(); }
+      if (force === "mqtt" || !mqttDirty()) { fillMqtt(); }
+      if (force === "ha" || !haDirty()) { fillHa(); }
       var sig = JSON.stringify(cfg.webhooks);
-      if (force || (!hooksDirty() && sig !== hooksSig)) { hooksSig = sig; loadSlots(); drawHooks(); }
+      if (force === "hooks" || (!hooksDirty() && sig !== hooksSig)) { hooksSig = sig; loadSlots(); drawHooks(); }
     }
 
     // panels in page order: MQTT, Home Assistant discovery, Webhooks, with the shared outbox line
@@ -478,6 +485,6 @@
     fillMqtt(); fillHa(); loadSlots(); drawHooks();
     fetchStatus();
 
-    return { sync: function (s) { take(s, false); } };
+    return { sync: function (s) { take(s, ""); } };
   };
 })();

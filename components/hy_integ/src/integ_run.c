@@ -81,6 +81,7 @@ static HY_EXT_BSS hy_integ_status_t s_status;
 static int64_t s_retry_at_ms[HY_HOOK_MAX];     /* monotonic; 0 none */
 static bool s_pub_connected;
 static bool s_pub_tls[HY_HOOK_MAX];
+static bool s_pub_free[HY_HOOK_MAX];   /* the slot holds no webhook (an empty URL) */
 static struct { void (*cb)(void *ctx); void *ctx; } s_subs[MAX_SUBS];
 static atomic_int s_test_req = -1;
 
@@ -756,6 +757,7 @@ static void publish_status(bool force_notify)
     st.n_hooks = s_cfg.n_hooks;
     int64_t retry_at[HY_HOOK_MAX] = {0};
     bool tls[HY_HOOK_MAX] = {0};
+    bool slot_free[HY_HOOK_MAX] = {0};
     for (unsigned i = 0; i < s_cfg.n_hooks && i < HY_HOOK_MAX; i++) {
         hy_hook_status_t *h = &st.hook[i];
         h->at = s_hk[i].at;
@@ -768,6 +770,7 @@ static void publish_status(bool force_notify)
             retry_at[i] = s_hk[i].deadline_ms > 0 ? s_hk[i].deadline_ms : 1;
         }
         hy_wh_target(s_cfg.hook[i].url, &tls[i], NULL);
+        slot_free[i] = s_cfg.hook[i].url[0] == '\0';
     }
     st.pending = s_st.live;
     st.dropped = s_st.dropped;
@@ -790,6 +793,7 @@ static void publish_status(bool force_notify)
     s_status = st;
     memcpy(s_retry_at_ms, retry_at, sizeof retry_at);
     memcpy(s_pub_tls, tls, sizeof tls);
+    memcpy(s_pub_free, slot_free, sizeof slot_free);
     s_pub_connected = s_connected;
 #if CONFIG_HY_DEBUG_CONSOLE
     s_dbg.n_hooks = s_cfg.n_hooks;
@@ -983,7 +987,7 @@ esp_err_t hy_integ_test(uint8_t index)
     hy_net_status(&ns);
     esp_err_t r = ESP_OK;
     xSemaphoreTake(s_mx, portMAX_DELAY);
-    if (index >= s_status.n_hooks) {
+    if (index >= s_status.n_hooks || s_pub_free[index]) {
         r = ESP_ERR_INVALID_ARG;
     } else if (ns.state != HY_NS_CONNECTED) {
         r = ESP_ERR_INVALID_STATE;

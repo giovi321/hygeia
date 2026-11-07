@@ -10,7 +10,7 @@ A webhook sends each event as an HTTP POST with a JSON body to a URL you choose,
 In the web UI, open Settings, Webhooks:
 
 - Press Add webhook, up to 4. Each row has an address (`http://` or `https://`), an On switch, nine event checkboxes (Taken, Skipped, Missed, Due, Snoozed, Undone, Battery low, Battery critical, Clock invalid; all checked by default) and an optional secret
-- A webhook keeps its number. The rows are titled Webhook 1 to Webhook 4 after their slot, and Remove leaves the slot empty, so removing Webhook 2 does not turn Webhook 3 into Webhook 2. The events waiting for a removed webhook are discarded, and so is its secret
+- A webhook keeps its number. The rows are titled Webhook 1 to Webhook 4 after their slot, and Remove leaves the slot empty, so removing Webhook 2 does not turn Webhook 3 into Webhook 2. The empty slot can be used for a new webhook only after you save the removal. The events waiting for a removed webhook are discarded, and so is its secret
 - The secret field shows "Saved" when one is set and never shows the value. Type to replace it, press Clear to remove it, or leave it alone to keep it
 - Press Save. Adding, editing and removing only take effect when you save
 - Press Test on the row (see [The test button](#the-test-button)). Test is disabled while the row has unsaved changes
@@ -114,7 +114,7 @@ return [{ json: JSON.parse(raw.toString('utf8')) }];
 
 - 2xx: delivered
 - 408, 429, 5xx, a timeout or a network error: tried again. After the 1st, 2nd and 3rd failure in a row the device waits 1, 5 and 30 minutes, then every 30 minutes
-- 401 or 403: the webhook pauses with the status "auth". Its events are kept, but nothing is sent until you change its settings and save them, the device reconnects to the network, or a Test succeeds
+- 401 or 403: the webhook pauses with the status "auth". Its events are kept, but nothing is sent until you save the webhook list again (unchanged is enough), the device reconnects to the network, or a Test succeeds
 - Any other status, including redirects (the device does not follow them): that one event is rejected for that webhook, counted as "rejected", and delivery moves on
 
 Up to 20 events go to one webhook per pass, in the order they happened. One slow or failing webhook never holds back another webhook or MQTT.

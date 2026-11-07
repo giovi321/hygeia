@@ -55,8 +55,10 @@ static esp_err_t h_webhook_test(web_req_t *r)
         return web_send_err(r, 409, "offline", NULL, "Connect the device to a Wi-Fi network first");
     case ESP_ERR_NO_MEM:
         return web_send_err(r, 409, "memory", NULL, "The device is short of memory. Try again in a minute");
-    default:
+    case ESP_ERR_NOT_FINISHED:
         return web_send_err(r, 409, "busy", NULL, "A test or an update, upload, export or import is running");
+    default:
+        return web_send_err(r, 500, "internal", NULL, "The test could not be started");
     }
 }
 
@@ -91,11 +93,11 @@ void web_integ_start(void)
 {
     const esp_timer_create_args_t a = {.callback = on_timer, .name = "web_integ"};
     if (esp_timer_create(&a, &s_timer) != ESP_OK) {
-        ESP_LOGE(TAG, "timer not created: the page falls back to polling");
+        ESP_LOGE(TAG, "timer not created: the page polls for a test result");
         return;
     }
     if (hy_integ_subscribe(on_integ, NULL) < 0) {
-        ESP_LOGE(TAG, "integ subscribe failed: the page falls back to polling");
+        ESP_LOGE(TAG, "integ subscribe failed: the page polls for a test result");
     }
 }
 

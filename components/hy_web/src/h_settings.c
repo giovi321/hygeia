@@ -90,8 +90,13 @@ void web_settings_apply_json(const char *json, web_settings_t *w)
     }
     w->save = hy_settings_update(&next);   /* the RAM copy is updated even when the save fails */
     /* A difference in struct padding only costs one extra write. */
-    if (memcmp(&w->cur, &w->next, sizeof w->cur) != 0) {
+    bool integ_changed = memcmp(&w->cur, &w->next, sizeof w->cur) != 0;
+    if (integ_changed) {
         w->integ_save = hy_integ_cfg_save(&w->next);
+    }
+    /* Saving the webhook list again ends an auth pause, also when nothing in it changed. A false hit on the text only
+     * costs an apply with the same values. */
+    if (integ_changed || strstr(body, "\"webhooks\"") != NULL) {
         hy_integ_apply(hy_integ_cfg());   /* the RAM copy is updated even when the write fails */
     }
     snapshot(w);
