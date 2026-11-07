@@ -314,6 +314,12 @@ static esp_err_t api_handler(httpd_req_t *req)
         if (br != BODY_OK) {
             ESP_LOGW(TAG, "body read failed on %s (%s)", req->uri,
                      br == BODY_NOMEM ? "no memory" : br == BODY_TIMEOUT ? "timeout" : "socket");
+            if (r.body) {   /* the part that did arrive may hold a password or a secret */
+                volatile char *v = (volatile char *)r.body;
+                for (size_t k = 0; k < consumed; k++) {
+                    v[k] = 0;
+                }
+            }
             heap_caps_free(r.body);
             if (br == BODY_NOMEM) {
                 web_send_busy(&r);
