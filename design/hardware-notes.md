@@ -237,6 +237,19 @@ Scheduler evaluation and Home refresh on the board (newlib, CLIB malloc):
 - Picolibc was slower (3 medicines: evaluation 60 to 64 ms, `home_refresh` 33 ms; 50 medicines: 306 ms and 315 ms) because it re-parses the TZ string on every `localtime_r` and `mktime`; the project builds with newlib
 - Internal heap free with 50 tiles: 44 to 49 KB (minimum 35 KB); with 3 medicines 97 to 151 KB
 
+## Sockets
+
+`CONFIG_LWIP_MAX_SOCKETS` is 14. The budget, also written in `components/hy_web/src/server.c` and `sdkconfig.defaults`:
+
+- Web server: 7 (`max_open_sockets`; the least recently used one is purged when all are busy). The live-event WebSocket clients, at most 2, are part of these 7, as are the browser's page and API connections
+- lwIP internal: 3
+- Captive DNS: 1, in access point mode only
+- MQTT client: 1
+- Webhook HTTP client: 1 for one POST at a time, shared with the GitHub update check and download
+- Spare: 1, used by the debug console `integ tcp` check
+
+Total 14.
+
 ## Owed hardware checks
 
 Verified by hand on firmware 2530f31 (2026-10-29): repeat chimes (5 plays at 2 min intervals, then silent), Play chime in Sound settings, detail scroll, due card dots, QWERTY note keyboard. Splash 1000 to 1009 ms with a 52 ms maximum frame gap over 3 boots. RTC alarm log line: hardware fire at the programmed second, software due-now fire within 1 s.

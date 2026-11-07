@@ -53,7 +53,7 @@ A command that logs, skips or snoozes a dose counts as activity, like a web requ
 
 ### Availability
 
-The device publishes `online` (retained) on every connect. Before it stops on purpose, for example when you turn MQTT off or change the broker, it publishes `offline` (retained). A lost connection triggers the last will, which is also `offline` (retained). With a keepalive of 60 s the broker notices a lost device within about 90 s.
+The device publishes `online` (retained) on every connect. Before it stops on purpose, for example when you turn MQTT off or change the broker, it publishes `offline` (retained). A lost connection triggers the last will, which is also `offline` (retained). With a keepalive of 60 s the broker notices a lost device within about 90 s. When the radio turns off on battery the device does not publish `offline` first: the broker's last will marks it offline after about 1.5 keepalives, so about 90 s later.
 
 ### Medicine state
 
