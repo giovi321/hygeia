@@ -314,7 +314,15 @@ static void ob_drop(uint8_t dest)
     hy_ob_stats(s_ob, &st);
     if (st.pending[dest] > 0) {   /* a drop of nothing changes nothing and owes no state write */
         hy_ob_drop_dest(s_ob, dest);
-        s_ob_dirty = s_ack_dirty = true;
+        /* Written at once: a new hook in the same slot must not find the old cursor after a power cut. A turn-off or
+         * removal is a user's save, so the extra write is rare. A failed write stays owed. */
+        if (hy_ob_flush(s_ob, true)) {
+            s_ob_write_ms = mono_ms();
+            s_ack_dirty = false;
+            s_ob_dirty = hy_ob_dirty(s_ob);
+        } else {
+            s_ob_dirty = s_ack_dirty = true;
+        }
     }
 }
 

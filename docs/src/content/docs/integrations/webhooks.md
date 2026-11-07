@@ -124,7 +124,7 @@ Up to 20 events go to one webhook per pass, in the order they happened, but a we
 - Events wait in the outbox on the device flash, so they survive a restart. The outbox holds 1000 events; when it is full the oldest waiting event is dropped for every destination and counted as "dropped when full"
 - An event that is still waiting 7 days after it entered the outbox is dropped as "expired". Events stored while the clock was invalid do not expire
 - Delivery is at least once: after a power cut or a crash, events delivered in the last 10 seconds can be sent again with the same `id`
-- Turning a webhook off or removing it discards its waiting events. Editing its URL keeps them, so a corrected typo still gets them
+- Turning a webhook off or removing it discards its waiting events, and the device writes that to flash at once, so a new webhook put in the same slot never receives the old one's events, even after a power cut. Editing its URL keeps them, so a corrected typo still gets them
 - With every webhook off and MQTT off, nothing about events is written to the flash
 
 ## The test button
