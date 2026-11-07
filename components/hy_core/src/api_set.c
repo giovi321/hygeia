@@ -89,6 +89,7 @@ char *hy_api_settings_full_json(const hy_settings_t *s, const hy_integ_t *c, boo
     cJSON *o = settings_obj(s);
     if (!o) return NULL;
     char *js = hy_api_integ_add(o, c, secrets) ? cJSON_PrintUnformatted(o) : NULL;
+    hy_api_integ_wipe_tree(o);   /* with secrets the tree holds the MQTT password and webhook secrets */
     cJSON_Delete(o);
     return js;
 }

@@ -67,8 +67,9 @@ bool hy_api_integ_add(struct cJSON *obj, const hy_integ_t *c, bool secrets);
  * LVGL task only. */
 hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_integ_t *out, hy_api_err_t *err);
 
-/* Same rules as hy_api_integ_from_json onto the defaults, result discarded; uses its own heap scratch, so any task
- * may call it. HY_E_IO when out of memory. */
+/* Same rules as hy_api_integ_from_json onto the defaults, result discarded; uses its own static scratch (PSRAM on
+ * the device), so it may run beside hy_api_integ_from_json but not beside another call of itself: the backup
+ * import is the only caller and runs one at a time. */
 hy_err_t hy_api_integ_check_json(const char *body, hy_api_err_t *err);
 
 /* Overwrites the "mqtt"."password" and "webhooks"[]."secret" strings of a parsed settings body. Call it on every

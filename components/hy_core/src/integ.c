@@ -401,12 +401,12 @@ hy_err_t hy_api_integ_from_json(const char *body, const hy_integ_t *cur, hy_inte
 
 hy_err_t hy_api_integ_check_json(const char *body, hy_api_err_t *err)
 {
-    hy_integ_t *v = malloc(3 * sizeof *v);   /* defaults, result, scratch: off the stack */
-    if (!v) return hy_api_fail(err, HY_E_IO, NULL);
+    /* Only the backup import calls this, and the heavy-job slot lets one import run at a time, so one copy is
+     * enough. It is wiped after every use. */
+    static HY_EXT_BSS hy_integ_t v[3];   /* defaults, result, scratch */
     hy_integ_defaults(&v[0]);
     hy_err_t r = integ_merge(body, &v[0], &v[1], &v[2], err);
-    wipe(v, 3 * sizeof *v);
-    free(v);
+    wipe(v, sizeof v);
     return r;
 }
 
