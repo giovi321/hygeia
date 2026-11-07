@@ -236,6 +236,7 @@ Scheduler evaluation and Home refresh on the board (newlib, CLIB malloc):
 - 50 active medicines: evaluation about 141 ms (target 300 ms), `home_refresh` 91 to 94 ms (target 60 ms, missed). `hy_tile_view` costs about 1.8 ms per fixed medicine, 88 to 90 ms for 50 tiles; LVGL updates are 3 to 4 ms
 - Picolibc was slower (3 medicines: evaluation 60 to 64 ms, `home_refresh` 33 ms; 50 medicines: 306 ms and 315 ms) because it re-parses the TZ string on every `localtime_r` and `mktime`; the project builds with newlib
 - Internal heap free with 50 tiles: 44 to 49 KB (minimum 35 KB); with 3 medicines 97 to 151 KB
+- TZ leak (found 2026-11-07, fixed): newlib's `setenv` never frees the string it replaces, and a longer value gets a fresh `malloc` from internal RAM. With a stored zone change record whose old and new zones differ in length (here `JST-9` and the 26-character Zurich rule), every evaluation switched the zone back and forth and lost about 40 bytes per switch: internal heap free fell about 3.3 KB every 5 minutes (about 39 KB/h) on USB with the screen on, and after about 4 h idle it was 32011 bytes free with a largest block of 24 bytes. The firmware now keeps TZ in one environment slot made once by `setenv` and writes later values into it in place (`hy_tz_put`); an unset TZ is written as `UTC0`. The leak predates the integrations; it was on v0.4.2 too
 
 ## Sockets
 

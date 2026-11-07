@@ -160,6 +160,50 @@ static void test_no_lock_registered_is_safe(void)
     TEST_ASSERT_EQUAL_INT(0, h.total);
 }
 
+/* newlib's setenv leaks the string it replaces when the new value is longer, so every TZ change must reuse one
+ * slot: switching between a short and a long zone many times keeps getenv("TZ") at the same address, and the
+ * zone in force is still right each time. */
+static void test_tz_switch_reuses_one_slot(void)
+{
+    hy_saved_tz_t outer;
+    TEST_ASSERT_TRUE(hy_tz_enter(&outer, TZ_ZURICH));
+    const char *slot = getenv("TZ");
+    TEST_ASSERT_NOT_NULL(slot);
+    for (int i = 0; i < 1000; i++) {
+        hy_saved_tz_t s;
+        TEST_ASSERT_TRUE(hy_tz_enter(&s, "JST-9"));
+        TEST_ASSERT_EQUAL_PTR(slot, getenv("TZ"));
+        TEST_ASSERT_EQUAL_STRING("JST-9", getenv("TZ"));
+        if (i == 0) {
+            time_t t = (time_t)T_2026_11_02_0700Z;
+            struct tm tm;
+            localtime_r(&t, &tm);
+            TEST_ASSERT_EQUAL_INT(16, tm.tm_hour);
+        }
+        hy_tz_leave(&s);
+        TEST_ASSERT_EQUAL_PTR(slot, getenv("TZ"));
+        TEST_ASSERT_EQUAL_STRING(TZ_ZURICH, getenv("TZ"));
+    }
+    time_t t = (time_t)T_2026_11_02_0700Z;
+    struct tm tm;
+    localtime_r(&t, &tm);
+    TEST_ASSERT_EQUAL_INT(8, tm.tm_hour);
+    hy_tz_leave(&outer);
+}
+
+/* A value that does not fit the slot is refused and leaves TZ as it was */
+static void test_tz_put_refuses_too_long(void)
+{
+    hy_tz_lock();
+    TEST_ASSERT_TRUE(hy_tz_put("UTC0"));
+    char longv[HY_SAVED_TZ_LEN + 1];
+    memset(longv, 'A', HY_SAVED_TZ_LEN);
+    longv[HY_SAVED_TZ_LEN] = '\0';
+    TEST_ASSERT_FALSE(hy_tz_put(longv));
+    TEST_ASSERT_EQUAL_STRING("UTC0", getenv("TZ"));
+    hy_tz_unlock();
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -167,5 +211,7 @@ int main(void)
     RUN_TEST(test_tz_restored_inside_lock);
     RUN_TEST(test_same_zone_leaves_env_alone);
     RUN_TEST(test_no_lock_registered_is_safe);
+    RUN_TEST(test_tz_switch_reuses_one_slot);
+    RUN_TEST(test_tz_put_refuses_too_long);
     return UNITY_END();
 }

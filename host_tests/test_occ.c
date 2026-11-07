@@ -214,7 +214,9 @@ static void test_restores_tz(void)
     tzset();
     hy_occurrences(&m, T_2026_11_02_LOCAL_MIDNIGHT, T_2026_11_02_LOCAL_MIDNIGHT + DAY,
                    TZ_ZURICH, out, 8);
-    TEST_ASSERT_NULL(getenv("TZ"));
+    /* an unset TZ comes back as "UTC0", which libc reads the same way (the slot is kept, no setenv) */
+    TEST_ASSERT_NOT_NULL(getenv("TZ"));
+    TEST_ASSERT_EQUAL_STRING("UTC0", getenv("TZ"));
 }
 
 /* ---- slot states, dose matching, travel rules ---- */

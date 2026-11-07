@@ -117,7 +117,7 @@ static void tz_apply(void)
     char tz[HY_TZ_LEN];
     hy_clock_tz_copy(tz, sizeof tz);
     hy_tz_lock();
-    setenv("TZ", tz, 1);
+    if (!hy_tz_put(tz)) setenv("TZ", tz, 1);   /* in place: setenv leaks the string it replaces */
     tzset();
     hy_tz_unlock();
 }

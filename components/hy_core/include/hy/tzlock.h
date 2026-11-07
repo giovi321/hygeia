@@ -23,6 +23,12 @@ typedef struct {
     char value[HY_SAVED_TZ_LEN];
 } hy_saved_tz_t;
 
+/* Sets TZ to value without an allocation after the first call (newlib's setenv leaks the string it replaces):
+ * writes it in place into one environment slot of HY_SAVED_TZ_LEN bytes. The caller holds the TZ lock and calls
+ * tzset afterwards. false: value does not fit (HY_SAVED_TZ_LEN - 1 characters at most) or the slot could not be
+ * made; TZ is then unchanged. Every TZ change in the firmware goes through here. */
+bool hy_tz_put(const char *value);
+
 /* Takes the TZ lock, saves the current TZ in a fixed buffer (no allocation that could fail), sets
  * TZ to posix_tz (NULL = "UTC0") and calls tzset, both skipped when that TZ is already set (tzset
  * re-parses the string, about 80 us on the device). Returns false, with TZ unchanged and the lock
